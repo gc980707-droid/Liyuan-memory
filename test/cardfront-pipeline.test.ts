@@ -1,0 +1,192 @@
+/**
+ * 端到端显示管线：卡 raw → displayRules → RichContent 真路径（splitRichContentParts）。
+ * 必须含 splitStatusParts 同序，否则会绿测坏集成（皮肤内 <status> 被状态面板撕碎）。
+ */
+import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import test from "node:test";
+import { readCardRawJson } from "../src/card.ts";
+import { buildCardFrontSnapshot, displayRules, extractRegexScripts } from "../src/cardfront.ts";
+import { applyCardSkin } from "../web/src/cardSkin.ts";
+import { isFullInterface, splitHtmlParts } from "../web/src/htmlEmbed.ts";
+import { buildSrcDoc } from "../web/src/frameDoc.ts";
+import { splitRichContentParts } from "../web/src/richContentParts.ts";
+import { splitStatusParts } from "../web/src/statusBlocks.ts";
+
+/** 淫宫美人录形态：开闭标签换皮（内含 <status>，会误触发 isPanelTagName） */
+const skinScripts = [
+	{
+		scriptName: "状态栏开",
+		findRegex: "/<StatusBlock>/gs",
+		replaceString: '<div style="background-color: rgba(0, 0, 0, 0.5); border-radius: 8px;"><status>',
+		placement: [2],
+		disabled: false,
+		markdownOnly: true,
+		promptOnly: false,
+		trimStrings: [],
+	},
+	{
+		scriptName: "状态栏闭",
+		findRegex: "/</StatusBlock>/gs",
+		replaceString: "</status></div>",
+		placement: [2],
+		disabled: false,
+		markdownOnly: true,
+		promptOnly: false,
+		trimStrings: [],
+	},
+];
+
+const sampleRaw = {
+	data: {
+		name: "美人录",
+		extensions: { regex_scripts: skinScripts },
+	},
+};
+
+const macros = { charName: "青梧", userName: "旅人" };
+
+test("pipeline: 提取→应用→混排切分→无痕 srcdoc", () => {
+	const rules = displayRules(extractRegexScripts(sampleRaw));
+	assert.equal(rules.length, 2);
+
+	const text = "雨停了。\n<StatusBlock>\nHP: 80\nMP: 20\n</StatusBlock>\n她抬头。";
+	const skinned = applyCardSkin(text, rules, macros);
+	assert.ok(!skinned.includes("<StatusBlock>"));
+	assert.ok(skinned.includes('<div style="background-color: rgba(0, 0, 0, 0.5)'));
+	assert.ok(skinned.includes("</status></div>"));
+
+	const parts = splitHtmlParts(skinned);
+	const htmlParts = parts.filter((p) => p.kind === "html");
+	assert.equal(htmlParts.length, 1);
+	if (htmlParts[0].kind === "html") {
+		assert.ok(htmlParts[0].html.startsWith("<div"));
+		assert.equal(htmlParts[0].scripts, false);
+		const doc = buildSrcDoc(htmlParts[0].html, false, true);
+		assert.ok(!doc.includes("PingFang"));
+		assert.ok(doc.includes("background:transparent"));
+		assert.ok(!doc.includes("<script>"));
+	}
+	assert.ok(parts.some((p) => p.kind === "text" && p.text.includes("雨停了")));
+	assert.ok(parts.some((p) => p.kind === "text" && p.text.includes("她抬头")));
+});
+
+test("RichContent 真路径: 皮肤后 HTML 先认领,status 不撕碎 div", () => {
+	const rules = displayRules(extractRegexScripts(sampleRaw));
+	const text = "雨停了。\n<StatusBlock>\nHP: 80\nMP: 20\n</StatusBlock>\n她抬头。";
+	const skin = { rules, ...macros };
+
+	// 反例：旧序 skin → splitStatusParts 会偷走 <status>，外层 div 残骸
+	const skinned = applyCardSkin(text, rules, macros);
+	const badOrder = splitStatusParts(skinned);
+	assert.ok(
+		badOrder.some((p) => p.kind === "status"),
+		"对照:旧序会把 <status> 当成状态面板",
+	);
+
+	// 真路径（Messages.RichContent → splitRichContentParts）
+	const parts = splitRichContentParts(text, skin);
+	const statuses = parts.filter((p) => p.kind === "status");
+	const htmls = parts.filter((p) => p.kind === "html");
+	assert.equal(statuses.length, 0, "皮肤产物内 status 不得落 StatusPanel");
+	assert.equal(htmls.length, 1, "应保留单一 html 段(外层 div)");
+	if (htmls[0].kind === "html") {
+		assert.ok(htmls[0].html.startsWith("<div"));
+		assert.ok(htmls[0].html.includes("<status>"));
+		assert.ok(htmls[0].html.includes("HP: 80"));
+		assert.ok(htmls[0].html.endsWith("</div>") || htmls[0].html.trimEnd().endsWith("</div>"));
+		// 完整皮肤块进无痕 srcdoc
+		const doc = buildSrcDoc(htmls[0].html, false, true);
+		assert.ok(doc.includes("HP: 80"));
+		assert.ok(!doc.includes("PingFang"));
+	}
+	assert.ok(parts.some((p) => p.kind === "text" && p.text.includes("雨停了")));
+	assert.ok(parts.some((p) => p.kind === "text" && p.text.includes("她抬头")));
+});
+
+test("RichContent 真路径: 无皮肤时 StatusBlock 仍落状态面板", () => {
+	const text = "前文\n<StatusBlock>\nHP: 80\n</StatusBlock>\n后文";
+	const parts = splitRichContentParts(text, null);
+	assert.ok(parts.some((p) => p.kind === "status" && p.tag === "statusblock"));
+	assert.equal(parts.filter((p) => p.kind === "html").length, 0);
+});
+
+test("pipeline: 整楼界面判定", () => {
+	const rules = displayRules(extractRegexScripts(sampleRaw));
+	const onlySkin = applyCardSkin("<StatusBlock>\nHP: 1\n</StatusBlock>", rules, {
+		charName: "x",
+		userName: "y",
+	});
+	assert.equal(isFullInterface(onlySkin), true);
+	assert.equal(isFullInterface(`旁白\n${onlySkin}`), false);
+	// 真路径整楼也是单 html、无 status 段
+	const parts = splitRichContentParts("<StatusBlock>\nHP: 1\n</StatusBlock>", {
+		rules,
+		charName: "x",
+		userName: "y",
+	});
+	assert.equal(parts.length, 1);
+	assert.equal(parts[0].kind, "html");
+});
+
+test("pipeline: 关闭皮肤=不应用规则时 StatusBlock 仍为文本段(html 层)", () => {
+	const text = "<StatusBlock>\nHP: 80\n</StatusBlock>";
+	// 无规则：不切 html（自定义标签留给 statusBlocks）
+	const parts = splitHtmlParts(text);
+	assert.equal(parts.length, 1);
+	assert.equal(parts[0].kind, "text");
+});
+
+/** 实卡回归:淫宫美人录一档皮肤绝对不能回落 StatusPanel */
+test("实卡 淫宫美人录: first_mes/备选开场白 一律 html 皮肤、零 status 段", () => {
+	const cardPath = "assets/cards/淫宫美人录.png";
+	if (!existsSync(cardPath)) {
+		// 发行包可不带样本卡;有卡则必须全绿
+		return;
+	}
+	const { raw } = readCardRawJson(cardPath);
+	const data = (raw.data && typeof raw.data === "object" ? raw.data : raw) as Record<string, unknown>;
+	const snap = buildCardFrontSnapshot(
+		{ card: cardPath, userName: "旅人" },
+		raw as Record<string, unknown>,
+		String(data.name ?? "淫宫美人录"),
+	);
+	assert.equal(snap.enabled, true);
+	assert.equal(snap.hasSkin, true);
+	assert.ok(snap.rules.length >= 2, "至少两条 StatusBlock 开闭规则");
+
+	const skin = { rules: snap.rules, charName: snap.charName, userName: snap.userName };
+	const greetings = [
+		String(data.first_mes ?? ""),
+		...((Array.isArray(data.alternate_greetings) ? data.alternate_greetings : []) as unknown[]).map((g) =>
+			String(g),
+		),
+	].filter((t) => t.includes("StatusBlock"));
+
+	assert.ok(greetings.length >= 1, "开场白应含 StatusBlock");
+	for (const text of greetings) {
+		const parts = splitRichContentParts(text, skin);
+		const statuses = parts.filter((p) => p.kind === "status");
+		const htmls = parts.filter((p) => p.kind === "html");
+		assert.equal(statuses.length, 0, "不得回落梨园 StatusPanel");
+		assert.equal(htmls.length, 1, "作者皮肤应成单一 html 段");
+		if (htmls[0].kind === "html") {
+			assert.ok(htmls[0].html.includes("rgba(0, 0, 0, 0.5)"), "须含作者黑底样式");
+			assert.ok(!htmls[0].html.includes("<StatusBlock"), "StatusBlock 开标签须被替换");
+			assert.ok(!htmls[0].html.includes("</StatusBlock"), "StatusBlock 闭标签须被替换");
+			// 原文换行必须还在 html 段里(后续靠 seamless pre-wrap 显示为多行)
+			assert.ok(
+				htmls[0].html.includes("地点:") && /地点:[^\n]*\n\s*姓名:/.test(htmls[0].html.replace(/\r\n/g, "\n")),
+				"皮肤产物须保留「地点/姓名」之间的换行,不能已压成一行",
+			);
+			const doc = buildSrcDoc(htmls[0].html, false, true);
+			assert.ok(doc.includes("rgba(0, 0, 0, 0.5)"));
+			assert.ok(!doc.includes("PingFang"), "无痕帧不得强塞宿主字体");
+			assert.ok(doc.includes("white-space:pre-wrap"), "seamless 必须 pre-wrap,对齐酒馆多行状态栏");
+		}
+	}
+
+	// 无皮肤注入时才允许 status 段(对照)
+	const bare = splitRichContentParts(greetings[0], null);
+	assert.ok(bare.some((p) => p.kind === "status"), "无皮时应走统一状态卡(对照)");
+});
