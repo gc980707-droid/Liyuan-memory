@@ -78,6 +78,7 @@ export function HtmlFrame({
 		}
 		const el = ref.current;
 		if (!el) return;
+		let observer: ResizeObserver | undefined;
 		const fit = () => {
 			try {
 				const doc = el.contentDocument;
@@ -100,11 +101,23 @@ export function HtmlFrame({
 				/* opaque origin(非 seamless 静态帧) */
 			}
 		};
-		el.addEventListener("load", fit);
+		const observe = () => {
+			try {
+				observer?.disconnect();
+				const body = el.contentDocument?.body;
+				if (!body || typeof ResizeObserver === "undefined") return;
+				observer = new ResizeObserver(fit);
+				observer.observe(body);
+				for (const child of Array.from(body.children)) observer.observe(child);
+			} catch { /* opaque origin */ }
+		};
+		const onLoad = () => { fit(); observe(); };
+		el.addEventListener("load", onLoad);
 		const t = window.setTimeout(fit, 50);
 		const t2 = window.setTimeout(fit, 200);
 		return () => {
-			el.removeEventListener("load", fit);
+			el.removeEventListener("load", onLoad);
+			observer?.disconnect();
 			window.clearTimeout(t);
 			window.clearTimeout(t2);
 		};
