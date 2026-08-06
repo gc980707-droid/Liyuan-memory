@@ -63,6 +63,7 @@ import {
 } from "./components/icons.tsx";
 import { StatusSidebarPanel, type SidebarStatus } from "./components/StatusSidebarPanel.tsx";
 import { splitRichContentParts } from "./richContentParts.ts";
+import { parseFallbackStatus } from "./statusFallback.ts";
 import { LorebookPanel } from "./components/LorebookPanel.tsx";
 import {
 	BackstageGroup,
@@ -533,6 +534,8 @@ export default function App() {
 				if (part.kind === "html") return { kind: "html", html: part.html, scripts: part.scripts };
 				if (part.kind === "status") return { kind: "status", body: part.body };
 			}
+			const fallback = parseFallbackStatus(message.text);
+			if (fallback) return { kind: "fallback", data: fallback };
 		}
 		return null;
 	}, [messages, cardSkin]);
