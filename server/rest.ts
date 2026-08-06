@@ -82,7 +82,7 @@ import { resolveConfigPath } from "../src/paths.ts";
 import type { WorldlineView } from "../src/worldline.ts";
 import {
 	appendLorebookFileEntry,
-	applyDisabledLore,
+	applyLoreOverrides,
 	deleteLorebookFileEntry,
 	exportStLorebook,
 	loadLorebookFile,
@@ -375,6 +375,7 @@ const CONFIG_EDITABLE = new Set([
 	"lorebooks",
 	"preset",
 	"disabledLore",
+	"enabledLore",
 	"backendControl",
 	"creationMode",
 	"assistantModel",
@@ -456,7 +457,7 @@ function loadMergedLoreWithSource(
 	const overlayPath = overlayPathFor(cwd, card.name);
 	const overlayEntries = existsSync(overlayPath) ? loadLorebookFile(overlayPath) : [];
 	const fileSet = new Set(fileEntries.map((e) => e.content.trim()));
-	const entries = applyDisabledLore(mergeEntries(fileEntries, overlayEntries), config.disabledLore);
+	const entries = applyLoreOverrides(mergeEntries(fileEntries, overlayEntries), config.disabledLore, config.enabledLore);
 	const sourceOf = (e: LorebookEntry): LoreSource => (fileSet.has(e.content.trim()) ? "file" : "agent");
 	return { entries, sourceOf, cardName: card.name, paths };
 }
@@ -472,7 +473,7 @@ export function loadMergedLore(cwd: string, config: RpConfig): LorebookEntry[] {
 function collectActiveLoreForExport(cwd: string, config: RpConfig): LorebookEntry[] {
 	const card = loadCardFile(resolvePath(cwd, config.card));
 	const { entries: active } = loadMergedLoreWithSource(cwd, config);
-	return applyDisabledLore(mergeEntries(active, card.book), config.disabledLore);
+	return applyLoreOverrides(mergeEntries(active, card.book), config.disabledLore, config.enabledLore);
 }
 
 const previewText = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
@@ -2949,7 +2950,7 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 					const card = loadCardFile(resolvePath(host.cwd, config.card));
 					const overlayPath = overlayPathFor(host.cwd, card.name);
 					const raw = existsSync(overlayPath) ? loadLorebookFile(overlayPath) : [];
-					const entries = applyDisabledLore(raw, config.disabledLore);
+					const entries = applyLoreOverrides(raw, config.disabledLore, config.enabledLore);
 					sendJson(res, 200, {
 						lorebookPath: null,
 						lorebookPaths: mounted,
@@ -2967,7 +2968,7 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 					if (!existsSync(abs)) throw new Error("世界书文件不存在");
 					const raw = loadLorebookFile(abs);
 					if (raw.length === 0) throw new Error("不是有效的世界书文件");
-					const entries = applyDisabledLore(raw, config.disabledLore);
+					const entries = applyLoreOverrides(raw, config.disabledLore, config.enabledLore);
 					const name =
 						(() => {
 							try {
@@ -3015,7 +3016,7 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 				let source: LoreSource = "file";
 				for (const c of candidates) {
 					if (!existsSync(c.abs)) continue;
-					const hit = applyDisabledLore(loadLorebookFile(c.abs), config.disabledLore).find(
+					const hit = applyLoreOverrides(loadLorebookFile(c.abs), config.disabledLore, config.enabledLore).find(
 						(e) => loreFingerprint(e.content) === fp,
 					);
 					if (hit) {
@@ -3223,6 +3224,13 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 					else delete next.disabledLore;
 					writeJsonWithBackup(configPath(host.cwd), next);
 				}
+				if (config.enabledLore?.includes(fp)) {
+					const enabled = config.enabledLore.filter((entry) => entry !== fp);
+					const next = { ...loadConfig(host.cwd) } as Record<string, unknown>;
+					if (enabled.length > 0) next.enabledLore = enabled;
+					else delete next.enabledLore;
+					writeJsonWithBackup(configPath(host.cwd), next);
+				}
 				await host.softRefreshConfig();
 				host.notify("info", `已删除条目「${removed.comment || removed.keys[0] || fp}」`);
 				sendJson(res, 200, {
@@ -3261,12 +3269,19 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 				if (fps.length === 0) throw new Error("缺少 fingerprint(s)");
 				const config = loadConfig(host.cwd);
 				const disabled = new Set(config.disabledLore ?? []);
+				const enabled = new Set(config.enabledLore ?? []);
 				for (const fp of fps) {
-					if (body.enabled) disabled.delete(fp);
-					else disabled.add(fp);
+					if (body.enabled) {
+						disabled.delete(fp);
+						enabled.add(fp);
+					} else {
+						enabled.delete(fp);
+						disabled.add(fp);
+					}
 				}
-				const next = { ...config, disabledLore: [...disabled] } as Record<string, unknown>;
+				const next = { ...config, disabledLore: [...disabled], enabledLore: [...enabled] } as Record<string, unknown>;
 				if ((next.disabledLore as string[]).length === 0) delete next.disabledLore;
+				if ((next.enabledLore as string[]).length === 0) delete next.enabledLore;
 				writeJsonWithBackup(configPath(host.cwd), next);
 				await host.softRefreshConfig(); // constant 条目影响 system prompt，必须重装
 				sendJson(res, 200, { ok: true, count: fps.length });

@@ -35,7 +35,7 @@ import { createMacroEnv, evalPresetMacros } from "../../src/preset-macro.ts";
 import {
 	constantEntries,
 	appendOverlayEntry,
-	applyDisabledLore,
+	applyLoreOverrides,
 	loadLorebookFile,
 	mergeEntries,
 	mountedLorebookPaths,
@@ -1352,7 +1352,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			const fileEntries = mergeEntries(...fileGroups);
 			overlayFile = overlayPathFor(ctx.cwd, card.name);
 			const overlayEntries = existsSync(overlayFile) ? loadLorebookFile(overlayFile) : [];
-			entries = applyDisabledLore(mergeEntries(fileEntries, overlayEntries), config.disabledLore);
+			entries = applyLoreOverrides(mergeEntries(fileEntries, overlayEntries), config.disabledLore, config.enabledLore);
 
 			// 转换后的预设（可选）：system 块进 system prompt，postHistory 块进末端注入
 			// 工作草稿（preset-override.json）优先，与 hotReload 一致
@@ -2413,7 +2413,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		const fileEntries = mergeEntries(...fileGroups);
 		overlayFile = overlayPathFor(cwd, card.name);
 		const overlayEntries = existsSync(overlayFile) ? loadLorebookFile(overlayFile) : [];
-		entries = applyDisabledLore(mergeEntries(fileEntries, overlayEntries), config.disabledLore);
+		entries = applyLoreOverrides(mergeEntries(fileEntries, overlayEntries), config.disabledLore, config.enabledLore);
 		preset = null;
 		if (config.preset) {
 			// 工作草稿优先（面板改开关/正文立即生效但不写盘）；无草稿才读预设文件

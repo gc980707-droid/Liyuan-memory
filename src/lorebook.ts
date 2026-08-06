@@ -21,9 +21,24 @@ export function loreFingerprint(content: string): string {
 
 /** 应用用户停用清单：命中指纹的条目 enabled 置 false（不修改原数组） */
 export function applyDisabledLore(entries: LorebookEntry[], disabled: string[] | undefined): LorebookEntry[] {
-	if (!disabled || disabled.length === 0) return entries;
+	return applyLoreOverrides(entries, disabled, undefined);
+}
+
+/** 用户覆盖优先级：disabled 强制关闭 > enabled 强制开启 > 源文件状态。 */
+export function applyLoreOverrides(
+	entries: LorebookEntry[],
+	disabled: string[] | undefined,
+	enabled: string[] | undefined,
+): LorebookEntry[] {
 	const off = new Set(disabled);
-	return entries.map((e) => (off.has(loreFingerprint(e.content)) ? { ...e, enabled: false } : e));
+	const on = new Set(enabled);
+	if (!off.size && !on.size) return entries;
+	return entries.map((entry) => {
+		const fingerprint = loreFingerprint(entry.content);
+		if (off.has(fingerprint)) return { ...entry, enabled: false };
+		if (on.has(fingerprint)) return { ...entry, enabled: true };
+		return entry;
+	});
 }
 
 function asStringArray(v: unknown): string[] {

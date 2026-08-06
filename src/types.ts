@@ -92,6 +92,8 @@ export interface RpConfig {
 	greetingIndex?: number;
 	/** 被用户停用的世界书条目（内容指纹列表，见 lorebook.ts loreFingerprint；跨 uid 冲突稳定） */
 	disabledLore?: string[];
+	/** 用户强制启用的条目指纹（可覆盖卡/世界书源文件中的 enabled:false） */
+	enabledLore?: string[];
 	/** /import 清洗时额外剥离的标签（叠加在默认思维链/状态栏列表之上，按预设约定配置） */
 	importStripTags?: string[];
 	/** 转换后的预设文件路径（liyuan-preset.json，可选；由 scripts/convert-preset.mjs 生成） */
