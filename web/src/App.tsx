@@ -528,13 +528,16 @@ export default function App() {
 		for (let i = messages.length - 1; i >= 0; i--) {
 			const message = messages[i];
 			if (message.channel !== "narrative" && message.channel !== "greeting") continue;
+			const fallback = parseFallbackStatus(message.text);
 			const parts = splitRichContentParts(message.text, cardSkin);
 			for (let j = parts.length - 1; j >= 0; j--) {
 				const part = parts[j];
-				if (part.kind === "html") return { kind: "html", html: part.html, scripts: part.scripts };
+				if (part.kind === "html") {
+					const complete = /<style[\s>][\s\S]*<\/style>/i.test(part.html) && /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>\s*$/i.test(part.html.trim());
+					if (complete) return { kind: "html", html: part.html, scripts: part.scripts };
+				}
 				if (part.kind === "status") return { kind: "status", body: part.body };
 			}
-			const fallback = parseFallbackStatus(message.text);
 			if (fallback) return { kind: "fallback", data: fallback };
 		}
 		return null;

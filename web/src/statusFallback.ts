@@ -35,5 +35,9 @@ export function stripFallbackStatus(text: string): string {
 	if (!status) return text;
 	const index = text.lastIndexOf(status.raw);
 	if (index < 0) return text;
-	return text.slice(0, index).replace(/(?:\s*[📅⏰📍][^\n]*\n?){1,8}\s*$/u, "").trim();
+	return text
+		.slice(0, index)
+		.replace(/```html\s*[\s\S]*$/i, "")
+		.replace(/(?:\s*[📅⏰📍][^\n]*\n?){1,8}\s*$/u, "")
+		.trim();
 }

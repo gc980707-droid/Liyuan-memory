@@ -12,3 +12,8 @@ test("识别 Markdown 角色状态栏", () => {
 test("普通正文不误判为状态栏", () => {
 	assert.equal(parseFallbackStatus("她的状态很差。\n地点：车站\n时间：下午"), null);
 });
+
+test("残缺 HTML 围栏会随 fallback 状态从正文清理", () => {
+	const text = `正文\n\n\`\`\`html\n<div class="flj-status"><span>\n📅 7月15日\n- 苏小棉的状态\n- 姓名：苏小棉\n- 行动：装睡\n- 内心：观察\n- 穿搭：JK`;
+	assert.equal(stripFallbackStatus(text), "正文");
+});
