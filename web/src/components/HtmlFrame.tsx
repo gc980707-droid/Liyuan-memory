@@ -181,16 +181,16 @@ export function HtmlFrame({
 					</button>
 				</div>
 			)}
-			<iframe
-				ref={ref}
-				name={frameId}
-				className="msg-html-frame"
-				title={title || (seamless ? "界面" : "HTML")}
-				sandbox={sandbox}
-				srcDoc={srcDoc}
-				style={{ height }}
-				scrolling={expandToContent ? "no" : undefined}
-			/>
+		<iframe
+			ref={ref}
+			name={frameId}
+			className="msg-html-frame"
+			title={title || (seamless ? "界面" : "HTML")}
+			sandbox={sandbox}
+			srcDoc={srcDoc}
+			style={{ height }}
+			referrerPolicy="no-referrer"
+		/>
 			{showSource && <pre className="msg-html-source">{html}</pre>}
 			{!seamless && title?.trim() && !showSource && <figcaption className="msg-html-cap">{title}</figcaption>}
 		</figure>
