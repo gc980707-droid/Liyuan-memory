@@ -15,7 +15,8 @@ import {
 } from "../src/postprocess.ts";
 import { isBackstageText } from "../src/stance.ts";
 import type { RpPanel } from "../src/panels.ts";
-import type { WorldState } from "../src/types.ts";
+import type { WorldState } from "../src/types.ts";
+import type { MvuData } from "../src/mvu.ts";
 
 export type { DisplaySkin };
 
@@ -205,7 +206,9 @@ export type ServerFrame =
 			charName: string;
 			userName: string;
 			messages: WireMsg[];
-			state: WorldState | null;
+			state: WorldState | null;
+
+			mvu: MvuData;
 			stats: WireStats | null;
 			/** agent 自建面板（柱 2）：当前活跃面板全量（页签序） */
 			panels: RpPanel[];
@@ -227,7 +230,9 @@ export type ServerFrame =
 	| { type: "stream"; state: "clear" }
 	| { type: "agent"; state: "start" | "end" }
 	| { type: "activity"; activity: WireActivity }
-	| { type: "state"; state: WorldState }
+	| { type: "state"; state: WorldState }
+
+	| { type: "mvu"; mvu: MvuData }
 	/** agent 自建面板变化（panel_write/close 落盘、rewind 回退）：活跃面板全量推送（同 state 的 fs.watch 机制） */
 	| { type: "panels"; panels: RpPanel[] }
 	| { type: "stats"; stats: WireStats }

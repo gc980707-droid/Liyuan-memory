@@ -59,7 +59,9 @@ import {
 	IconStop,
 	IconUploads,
 	IconWorldline,
+	IconVariables,
 } from "./components/icons.tsx";
+import { MvuPanel } from "./components/MvuPanel.tsx";
 import { LorebookPanel } from "./components/LorebookPanel.tsx";
 import {
 	BackstageGroup,
@@ -135,7 +137,8 @@ type PanelId =
 	| "codex"
 	| "persona"
 	| "uploads"
-	| "assistant";
+	| "assistant"
+	| "mvu";
 
 /** agent 自建面板的右栏选择 id（柱 2）：`agent:` + 面板名，页签随 panels 帧动态长出 */
 type AgentPanelId = `agent:${string}`;
@@ -148,7 +151,7 @@ const agentId = (name: string): AgentPanelId => `agent:${name}`;
  * - 右 4：角色卡 / 世界书 / 知识库 / 用户角色
  * 会话在底栏。
  */
-const LEFT_PANELS: PanelId[] = ["connect", "preset", "powers", "uploads"];
+const LEFT_PANELS: PanelId[] = ["mvu", "connect", "preset", "powers", "uploads"];
 const RIGHT_PANELS: PanelId[] = ["card", "lorebook", "codex", "persona"];
 /** 右栏可开面板全集：顶栏 4 入口 + 助手（入口在输入框发送钮右侧，不占顶栏） */
 const RIGHT_OPENABLE: PanelId[] = [...RIGHT_PANELS, "assistant"];
@@ -169,6 +172,7 @@ const PANEL_LABEL: Record<PanelId, string> = {
 	persona: "用户角色",
 	uploads: "上传区",
 	assistant: "助手",
+	mvu: "变量",
 };
 
 /** 顶栏图标(收纳入口的关键:图标承载识别,文字进 tooltip/aria-label) */
@@ -185,6 +189,7 @@ const PANEL_ICON: Record<PanelId, (p: { size?: number }) => React.JSX.Element> =
 	persona: IconPersona,
 	uploads: IconUploads,
 	assistant: IconAssistant,
+	mvu: IconVariables,
 };
 
 type CenterMenu = "settings" | "panels" | null;
@@ -239,6 +244,7 @@ export default function App() {
 	const [sessions, setSessions] = useState<WireSessionInfo[] | null>(null);
 	// 右栏数据
 	const [worldState, setWorldState] = useState<WorldState | null>(null);
+	const [mvu, setMvu] = useState<Record<string, unknown>>({});
 	const [stats, setStats] = useState<WireStats | null>(null);
 	const [warnings, setWarnings] = useState<WarnEntry[]>([]);
 	const [bellOpen, setBellOpen] = useState(false);
@@ -569,6 +575,7 @@ export default function App() {
 					setMessages(frame.messages);
 					setMsgEdit(null); // 会话对齐后关闭内联编辑
 					setWorldState(frame.state);
+					setMvu(frame.mvu ?? {});
 					setStats(frame.stats);
 					// 一档皮肤:优先用 hello 同帧载荷(与消息同步),杜绝 REST 缓存/时序导致的漏皮
 					if (frame.cardfront) {
@@ -711,6 +718,9 @@ export default function App() {
 					break;
 				case "state":
 					setWorldState(frame.state);
+					break;
+				case "mvu":
+					setMvu(frame.mvu);
 					break;
 				case "panels": {
 					// agent 自建面板（柱 2）：新面板自动展开到左栏（agent 持有前端，建了就给用户看）；
@@ -1356,6 +1366,8 @@ export default function App() {
 				);
 			case "connect":
 				return <ConnectPanel toast={pushToast} />;
+			case "mvu":
+				return <MvuPanel data={mvu} />;
 			case "preset":
 				return <PresetPanel toast={pushToast} />;
 			case "powers":
