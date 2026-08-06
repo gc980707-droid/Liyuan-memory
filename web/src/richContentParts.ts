@@ -64,7 +64,13 @@ export function splitRichContentParts(text: string, skin?: SkinMacros | null): R
 	const out: RichPart[] = [];
 	for (const p of htmlClaimed) {
 		if (p.kind === "html") {
-			out.push({ kind: "html", html: p.html, scripts: p.scripts });
+			const previous = out.at(-1);
+			if (previous?.kind === "html" && /^<style[\s>]/i.test(previous.html) && !/<\/style>[\s\S]*\S/i.test(previous.html)) {
+				previous.html = `${previous.html}\n${p.html}`;
+				previous.scripts ||= p.scripts;
+			} else {
+				out.push({ kind: "html", html: p.html, scripts: p.scripts });
+			}
 			continue;
 		}
 		out.push(...textToRichParts(p.text));

@@ -12,6 +12,7 @@ import { isFullInterface, splitHtmlParts } from "../web/src/htmlEmbed.ts";
 import { buildSrcDoc } from "../web/src/frameDoc.ts";
 import { splitRichContentParts } from "../web/src/richContentParts.ts";
 import { splitStatusParts } from "../web/src/statusBlocks.ts";
+import { prepareDisplayText } from "../src/postprocess.ts";
 
 /** 淫宫美人录形态：开闭标签换皮（内含 <status>，会误触发 isPanelTagName） */
 const skinScripts = [
@@ -135,6 +136,17 @@ test("pipeline: 关闭皮肤=不应用规则时 StatusBlock 仍为文本段(html
 	const parts = splitHtmlParts(text);
 	assert.equal(parts.length, 1);
 	assert.equal(parts[0].kind, "text");
+});
+
+test("pipeline: style + styled div 保持同一 HTML 帧，不泄漏裸 CSS", () => {
+	const rules = [{ name: "x", source: "<StatusBlock>([\\s\\S]*?)</StatusBlock>", flags: "g", replace: '<style>.card{color:red}</style><div class="card" style="display:block">$1</div>' }];
+	const prepared = prepareDisplayText("正文<StatusBlock>HP:80</StatusBlock>", { rules, ...macros });
+	assert.ok(prepared.includes("<style>.card"));
+	const parts = splitRichContentParts(prepared);
+	assert.equal(parts.filter((part) => part.kind === "html").length, 1);
+	const html = parts.find((part) => part.kind === "html");
+	assert.ok(html?.kind === "html" && html.html.includes("<style>") && html.html.includes("class=\"card\""));
+	assert.ok(!parts.some((part) => part.kind === "text" && part.text.includes(".card{color")));
 });
 
 /** 实卡回归:淫宫美人录一档皮肤绝对不能回落 StatusPanel */

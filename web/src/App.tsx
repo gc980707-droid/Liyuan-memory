@@ -62,6 +62,8 @@ import {
 	IconVariables,
 } from "./components/icons.tsx";
 import { MvuPanel } from "./components/MvuPanel.tsx";
+import { StatusSidebarPanel, type SidebarStatus } from "./components/StatusSidebarPanel.tsx";
+import { splitRichContentParts } from "./richContentParts.ts";
 import { LorebookPanel } from "./components/LorebookPanel.tsx";
 import {
 	BackstageGroup,
@@ -138,7 +140,8 @@ type PanelId =
 	| "persona"
 	| "uploads"
 	| "assistant"
-	| "mvu";
+	| "mvu"
+	| "statusview";
 
 /** agent 自建面板的右栏选择 id（柱 2）：`agent:` + 面板名，页签随 panels 帧动态长出 */
 type AgentPanelId = `agent:${string}`;
@@ -151,7 +154,7 @@ const agentId = (name: string): AgentPanelId => `agent:${name}`;
  * - 右 4：角色卡 / 世界书 / 知识库 / 用户角色
  * 会话在底栏。
  */
-const LEFT_PANELS: PanelId[] = ["mvu", "connect", "preset", "powers", "uploads"];
+const LEFT_PANELS: PanelId[] = ["statusview", "mvu", "connect", "preset", "powers", "uploads"];
 const RIGHT_PANELS: PanelId[] = ["card", "lorebook", "codex", "persona"];
 /** 右栏可开面板全集：顶栏 4 入口 + 助手（入口在输入框发送钮右侧，不占顶栏） */
 const RIGHT_OPENABLE: PanelId[] = [...RIGHT_PANELS, "assistant"];
@@ -173,6 +176,7 @@ const PANEL_LABEL: Record<PanelId, string> = {
 	uploads: "上传区",
 	assistant: "助手",
 	mvu: "变量",
+	statusview: "状态栏",
 };
 
 /** 顶栏图标(收纳入口的关键:图标承载识别,文字进 tooltip/aria-label) */
@@ -190,6 +194,7 @@ const PANEL_ICON: Record<PanelId, (p: { size?: number }) => React.JSX.Element> =
 	uploads: IconUploads,
 	assistant: IconAssistant,
 	mvu: IconVariables,
+	statusview: IconVariables,
 };
 
 type CenterMenu = "settings" | "panels" | null;
@@ -245,6 +250,19 @@ export default function App() {
 	// 右栏数据
 	const [worldState, setWorldState] = useState<WorldState | null>(null);
 	const [mvu, setMvu] = useState<Record<string, unknown>>({});
+	const latestStatus = useMemo<SidebarStatus | null>(() => {
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const message = messages[i];
+			if (message.channel !== "narrative" && message.channel !== "greeting") continue;
+			const parts = splitRichContentParts(message.text, cardSkin);
+			for (let j = parts.length - 1; j >= 0; j--) {
+				const part = parts[j];
+				if (part.kind === "html") return { kind: "html", html: part.html, scripts: part.scripts };
+				if (part.kind === "status") return { kind: "status", body: part.body };
+			}
+		}
+		return null;
+	}, [messages, cardSkin]);
 	const [stats, setStats] = useState<WireStats | null>(null);
 	const [warnings, setWarnings] = useState<WarnEntry[]>([]);
 	const [bellOpen, setBellOpen] = useState(false);
@@ -1368,6 +1386,8 @@ export default function App() {
 				return <ConnectPanel toast={pushToast} />;
 			case "mvu":
 				return <MvuPanel data={mvu} />;
+			case "statusview":
+				return <StatusSidebarPanel status={latestStatus} />;
 			case "preset":
 				return <PresetPanel toast={pushToast} />;
 			case "powers":

@@ -780,6 +780,9 @@ html[data-theme="dark"] [data-tip]:focus-visible::after {
 .mvu-leaf:last-child { border-bottom: 0; }
 .mvu-leaf-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
 .mvu-leaf-head strong { color: var(--accent); text-align: right; overflow-wrap: anywhere; }
+.status-sidebar-panel { display: grid; gap: 10px; align-content: start; }
+.status-sidebar-panel iframe { width: 100%; }
+.status-sidebar-text { white-space: pre-wrap; word-break: break-word; margin: 0; padding: 12px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--surface-soft); }
 
 /* 角色卡库/详情分栏：随 panel-body 一起滚，不锁死高度 */
 .card-lib-pane,

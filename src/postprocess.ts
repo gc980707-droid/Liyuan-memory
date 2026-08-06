@@ -316,7 +316,7 @@ const skinDivToken = (i: number) => `${i}`;
  */
 function protectSkinDivs(text: string): { text: string; stash: string[] } {
 	const stash: string[] = [];
-	const startRe = /<div\b[^>]*\bstyle\s*=/gi;
+	const startRe = /<div\b[^>]*(?:\bstyle\s*=|\bclass\s*=)[^>]*>/gi;
 	let out = "";
 	let i = 0;
 	for (;;) {
@@ -347,8 +347,17 @@ function protectSkinDivs(text: string): { text: string; stash: string[] } {
 			out += text.slice(m.index);
 			break;
 		}
+		const before = text.slice(i, m.index);
+		const style = /<style(?:\s[^>]*)?>[\s\S]*?<\/style>\s*$/i.exec(before);
+		if (!/\bstyle\s*=/i.test(m[0]) && !style) {
+			out += text.slice(m.index, m.index + m[0].length);
+			i = m.index + m[0].length;
+			continue;
+		}
+		if (style) out = out.slice(0, Math.max(0, out.length - style[0].length));
 		out += skinDivToken(stash.length);
-		stash.push(text.slice(m.index, end));
+		const fragment = `${style?.[0] ?? ""}${text.slice(m.index, end)}`;
+		stash.push(style ? `\n\`\`\`html\n${fragment}\n\`\`\`\n` : fragment);
 		i = end;
 	}
 	return { text: out, stash };
@@ -370,7 +379,7 @@ export function prepareDisplayText(text: string, skin?: DisplaySkin | null): str
 	if (isFullPageHtmlPayload(t)) {
 		return t;
 	}
-	if (/<div\b[^>]*\bstyle\s*=/i.test(t) && /<\/div>/i.test(t)) {
+	if (/<div\b[^>]*(?:\bstyle\s*=|\bclass\s*=)/i.test(t) && /<\/div>/i.test(t)) {
 		const { text: protectedText, stash } = protectSkinDivs(t);
 		let cleaned = displayAssistantText(protectedText);
 		for (let i = 0; i < stash.length; i++) {
