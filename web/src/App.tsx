@@ -250,19 +250,6 @@ export default function App() {
 	// 右栏数据
 	const [worldState, setWorldState] = useState<WorldState | null>(null);
 	const [mvu, setMvu] = useState<Record<string, unknown>>({});
-	const latestStatus = useMemo<SidebarStatus | null>(() => {
-		for (let i = messages.length - 1; i >= 0; i--) {
-			const message = messages[i];
-			if (message.channel !== "narrative" && message.channel !== "greeting") continue;
-			const parts = splitRichContentParts(message.text, cardSkin);
-			for (let j = parts.length - 1; j >= 0; j--) {
-				const part = parts[j];
-				if (part.kind === "html") return { kind: "html", html: part.html, scripts: part.scripts };
-				if (part.kind === "status") return { kind: "status", body: part.body };
-			}
-		}
-		return null;
-	}, [messages, cardSkin]);
 	const [stats, setStats] = useState<WireStats | null>(null);
 	const [warnings, setWarnings] = useState<WarnEntry[]>([]);
 	const [bellOpen, setBellOpen] = useState(false);
@@ -540,6 +527,19 @@ export default function App() {
 
 	/** 一档卡皮肤：显示向规则（启用且有规则时注入对话流） */
 	const [cardSkin, setCardSkin] = useState<SkinProp | null>(null);
+	const latestStatus = useMemo<SidebarStatus | null>(() => {
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const message = messages[i];
+			if (message.channel !== "narrative" && message.channel !== "greeting") continue;
+			const parts = splitRichContentParts(message.text, cardSkin);
+			for (let j = parts.length - 1; j >= 0; j--) {
+				const part = parts[j];
+				if (part.kind === "html") return { kind: "html", html: part.html, scripts: part.scripts };
+				if (part.kind === "status") return { kind: "status", body: part.body };
+			}
+		}
+		return null;
+	}, [messages, cardSkin]);
 	const refreshCardFront = useCallback(async () => {
 		try {
 			// 显式清缓存 + bypass:换卡/hello 后绝对不能吃上一张卡的 rules
