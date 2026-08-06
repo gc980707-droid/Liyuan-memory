@@ -30,6 +30,7 @@ import {
 import { buildRpSummaryPrompt, serializeForSummary } from "../../src/compaction.ts";
 import { buildGreeting, buildSystemPrompt, buildTurnInjection, detectsLanguageMismatch } from "../../src/director.ts";
 import { formatMemoryIndex, inheritMemoryScope, memoryRecallForTurn } from "../../src/memory/index.ts";
+import { applyMvuOperations, defaultMvuData, formatMvuData, loadMvuData, parseInitVar, parseMvuUpdates, saveMvuData, type MvuData } from "../../src/mvu.ts";
 import { createMacroEnv, evalPresetMacros } from "../../src/preset-macro.ts";
 import {
 	constantEntries,
@@ -120,6 +121,8 @@ const RP_TOOLS = [
 	"lorebook_search",
 	"world_state_get",
 	"world_state_update",
+	"mvu_get",
+	"mvu_patch",
 	"lorebook_write",
 	"codex_create",
 	"codex_mount",
@@ -161,6 +164,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	let statusBarFormats: string[] = [];
 	let state: WorldState = defaultState();
 	let stateFile = "";
+	let mvu: MvuData = defaultMvuData();
+	let mvuFile = "";
 	// agent 自建面板（柱 2）：与 state 同一套「磁盘缓存 + 会话树快照」机制
 	let panels: PanelMap = {};
 	let panelsFile = "";
@@ -333,6 +338,54 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			// 树读取失败按无快照处理
 		}
 		return false;
+	};
+
+	const snapshotMvu = () => {
+		try { pi.appendEntry("rp-mvu", mvu); } catch { /* session not writable yet */ }
+	};
+
+	const restoreMvuFromBranch = (sm: { getBranch: (fromId?: string) => unknown[] }): boolean => {
+		try {
+			const branch = sm.getBranch() as Array<Record<string, unknown>>;
+			for (let i = branch.length - 1; i >= 0; i--) {
+				const entry = branch[i];
+				if (entry.type === "custom" && entry.customType === "rp-mvu" && entry.data && typeof entry.data === "object") {
+					mvu = structuredClone(entry.data as MvuData);
+					return true;
+				}
+			}
+		} catch { /* no snapshot */ }
+		return false;
+	};
+
+	const initialMvuFromCard = (): MvuData => {
+		try {
+			const cardPath = resolvePath(appCwd, config.card);
+			const raw = readCardRawJson(cardPath).raw;
+			const data = (raw.data && typeof raw.data === "object" ? raw.data : raw) as Record<string, unknown>;
+			const extensions = data.extensions && typeof data.extensions === "object" ? data.extensions as Record<string, unknown> : {};
+			const helper = extensions.tavern_helper && typeof extensions.tavern_helper === "object"
+				? extensions.tavern_helper as Record<string, unknown>
+				: {};
+			if (helper.variables && typeof helper.variables === "object" && !Array.isArray(helper.variables) && Object.keys(helper.variables as object).length) {
+				return structuredClone(helper.variables as MvuData);
+			}
+			const initEntry = card.book.find((entry) => /\[?InitVar\]?/i.test(entry.comment));
+			return initEntry ? parseInitVar(initEntry.content) ?? {} : {};
+		} catch { return {}; }
+	};
+
+	const sessionMatchesCurrentCard = (sm: { getEntries: () => unknown[] }): boolean => {
+		try {
+			const entries = sm.getEntries() as Array<Record<string, unknown>>;
+			for (let i = entries.length - 1; i >= 0; i--) {
+				const entry = entries[i];
+				if (entry.type !== "custom" || entry.customType !== "rp-card") continue;
+				const bound = entry.data && typeof entry.data === "object" ? (entry.data as { card?: string }).card : undefined;
+				return !bound || bound === config.card;
+			}
+		} catch { /* no binding */ }
+		return true;
 	};
 
 	/** 面板快照写入会话树（同 snapshotState）：面板随剧情分支走，rewind 后地图同步回退 */
@@ -613,6 +666,43 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			parameters: Type.Object({}),
 			async execute() {
 				return { content: [{ type: "text", text: formatState(state) + "\n\nRAW:\n" + JSON.stringify(state) }] };
+			},
+		});
+
+		pi.registerTool({
+			name: "mvu_get",
+			label: "查看 MVU 变量",
+			description: "Read the current MVU-compatible variable tree. Use when a card's custom stats or status UI depends on exact values.",
+			parameters: Type.Object({}),
+			async execute() {
+				return { content: [{ type: "text", text: formatMvuData(mvu) }] };
+			},
+		});
+
+		pi.registerTool({
+			name: "mvu_patch",
+			label: "更新 MVU 变量",
+			description: "Apply deterministic updates to card variables. Operations: replace, insert, remove, delta, move. Prefer this when exact numeric/state changes must persist.",
+			parameters: Type.Object({
+				operations: Type.Array(Type.Object({
+					op: Type.Union([Type.Literal("replace"), Type.Literal("insert"), Type.Literal("remove"), Type.Literal("delta"), Type.Literal("move")]),
+					path: Type.Optional(Type.String()),
+					from: Type.Optional(Type.String()),
+					to: Type.Optional(Type.String()),
+					value: Type.Optional(Type.Any()),
+				}), { maxItems: 100 }),
+			}),
+			async execute(_id, params) {
+				const result = applyMvuOperations(mvu, params.operations);
+				if (result.applied.length) {
+					mvu = result.data;
+					if (mvuFile) saveMvuData(mvuFile, mvu);
+					snapshotMvu();
+				}
+				return {
+					content: [{ type: "text", text: `已更新 ${result.applied.length} 项。${result.warnings.length ? `警告：${result.warnings.join("；")}` : ""}\n${formatMvuData(mvu)}` }],
+					...(result.applied.length === 0 && result.warnings.length ? { isError: true } : {}),
+				};
 			},
 		});
 
@@ -1288,6 +1378,13 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			if (JSON.stringify(state) === JSON.stringify(defaultState()) && restoreStateFromBranch(ctx.sessionManager)) {
 				saveState(stateFile, state);
 			}
+			mvuFile = join(dir(ctx.cwd, "mvu"), `${ctx.sessionManager.getSessionId()}.json`);
+			mvu = loadMvuData(mvuFile);
+			if (Object.keys(mvu).length === 0 && !restoreMvuFromBranch(ctx.sessionManager) && sessionMatchesCurrentCard(ctx.sessionManager)) {
+				mvu = initialMvuFromCard();
+				if (Object.keys(mvu).length) snapshotMvu();
+			}
+			if (Object.keys(mvu).length) saveMvuData(mvuFile, mvu);
 			// 面板同款装载：缓存缺失（fork/新拉起）时从剧情分支快照恢复
 			panelsFile = join(dir(ctx.cwd, "artifacts"), `${ctx.sessionManager.getSessionId()}.json`);
 			panels = loadPanels(panelsFile);
@@ -1638,6 +1735,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				userText: legacyBackstage ? undefined : lastUserText,
 				memoryIndex,
 				memoryHits,
+				mvuSnapshot: Object.keys(mvu).length ? formatMvuData(mvu) : undefined,
 				statusBarFormats,
 			}),
 			display: false,
@@ -1694,6 +1792,16 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			.filter(Boolean)
 			.join("\n");
 		if (!assistantText.trim()) return;
+		const mvuOperations = parseMvuUpdates(assistantText);
+		if (mvuOperations.length) {
+			const applied = applyMvuOperations(mvu, mvuOperations);
+			if (applied.applied.length) {
+				mvu = applied.data;
+				if (mvuFile) saveMvuData(mvuFile, mvu);
+				snapshotMvu();
+			}
+			if (process.env.RP_DEBUG && applied.warnings.length) console.error(`[rp-mvu] ${applied.warnings.join("；")}`);
+		}
 
 		scribeBusy = true;
 		void (async () => {
@@ -1827,6 +1935,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		const restored = restoreStateFromBranch(ctx.sessionManager);
 		if (!restored) state = defaultState();
 		if (stateFile) saveState(stateFile, state);
+		if (!restoreMvuFromBranch(ctx.sessionManager)) mvu = initialMvuFromCard();
+		if (mvuFile) saveMvuData(mvuFile, mvu);
 		// 面板同步回退：无快照 = 该剧情点尚无面板，清空（落盘触发前端页签同步）
 		if (!restorePanelsFromBranch(ctx.sessionManager)) panels = {};
 		if (panelsFile) savePanels(panelsFile, panels);
@@ -2149,6 +2259,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			// 钉档前再刷一次账本/面板快照，保证 /back 到此点时状态对齐
 			snapshotState();
 			snapshotPanels();
+			snapshotMvu();
 			snapshotCodexMounts();
 			pi.appendEntry(RP_SAVE_TYPE, data);
 			const lineNote =

@@ -245,7 +245,8 @@ function applyPolicies(
 
 /** 历史送模：fold/panel/strip 整块扔；unwrap 拆包留内容 */
 export function cleanAssistantText(text: string): string {
-	let t = applyPolicies(text, { keepPanel: false, collectFold: false }).text;
+	let t = text.replace(/<UpdateVariable>[\s\S]*?<\/UpdateVariable>/gi, "").replace(/<StatusPlaceHolderImpl\s*\/>/gi, "");
+	t = applyPolicies(t, { keepPanel: false, collectFold: false }).text;
 	// HTML 注释（导演旁注）
 	t = t.replace(/<!--[\s\S]*?-->/g, "");
 	return tidyWhitespace(t);
@@ -262,7 +263,8 @@ export function cleanAssistantText(text: string): string {
  * （见 prepareDisplayText），否则 unwrap 会先拆掉正则要匹配的标记。
  */
 export function displayAssistantText(text: string): string {
-	let t = applyPolicies(text, { keepPanel: true, collectFold: false }).text;
+	let t = text.replace(/<UpdateVariable>[\s\S]*?<\/UpdateVariable>/gi, "").replace(/<StatusPlaceHolderImpl\s*\/>/gi, "");
+	t = applyPolicies(t, { keepPanel: true, collectFold: false }).text;
 	t = t.replace(/<!--[\s\S]*?-->/g, "");
 	t = t.replace(/^\s*#{1,6}\s*正文\s*$/gim, "");
 	t = t.replace(/^\s*#{1,6}\s*(thinking|draft|notes?|思维|草稿)\s*$/gim, "");

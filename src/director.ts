@@ -306,6 +306,8 @@ export interface TurnInjectionOptions {
 	 * 由 harness 在 before_agent_start 检索后传入。
 	 */
 	memoryHits?: Array<string | { text: string; score?: number; source?: string }>;
+	/** MVU 当前变量快照 */
+	mvuSnapshot?: string;
 	/** 卡作者状态栏格式；非空则末端钉「正文后必须出状态栏」 */
 	statusBarFormats?: string[];
 	/**
@@ -333,6 +335,7 @@ export function buildTurnInjection({
 	userText,
 	memoryIndex,
 	memoryHits,
+	mvuSnapshot,
 	statusBarFormats,
 	toolContinuation,
 	presetActive,
@@ -344,6 +347,9 @@ export function buildTurnInjection({
 	blocks.push(
 		`【世界状态】当前事实基准，正文不得与之矛盾——物品在谁手里、现在是第几天几点、人在哪里，以下面为准；剧情记忆与之冲突时在叙事内自然圆回：\n${formatState(state)}`,
 	);
+	if (mvuSnapshot) {
+		blocks.push(`【MVU 当前变量】以下是确定性变量快照。剧情与状态栏必须以此为准；若本轮发生变化，在回复末尾输出 <UpdateVariable><JSONPatch>[...]</JSONPatch></UpdateVariable>，支持 replace/delta/insert/remove/move。\n${mvuSnapshot}`);
+	}
 
 	// 活跃面板当前内容（柱 2）：用户手改后已同步进扩展内存；此处注入全文快照（或旧式一行索引）。
 	// 模型续写必须以这里为准，禁止凭记忆用过时内容整页 panel_write 盖掉。

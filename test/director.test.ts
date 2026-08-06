@@ -176,6 +176,19 @@ test("末端注入：memoryIndex 常驻展示已有记忆目录", () => {
 	assert.ok(text.includes("不是完整事实"));
 });
 
+test("末端注入：MVU 变量快照与更新协议", () => {
+	const text = buildTurnInjection({
+		state: defaultState(),
+		activatedLore: [],
+		card,
+		config: DEFAULT_CONFIG,
+		mvuSnapshot: '{"角色":{"好感度":[12,"0..100"]}}',
+	});
+	assert.ok(text.includes("【MVU 当前变量】"));
+	assert.ok(text.includes("好感度"));
+	assert.ok(text.includes("JSONPatch"));
+});
+
 test("末端注入：语言失配时出现纠正提醒", () => {
 	const base = { state: defaultState(), activatedLore: [], card, config: DEFAULT_CONFIG };
 	assert.ok(buildTurnInjection({ ...base, languageMismatch: true }).includes("错误的语言"));
