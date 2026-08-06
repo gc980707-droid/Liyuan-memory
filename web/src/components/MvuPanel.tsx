@@ -26,11 +26,11 @@ function Value({ name, value, depth = 0 }: { name: string; value: unknown; depth
 	);
 }
 
-export function MvuPanel({ data }: { data: JsonObject }) {
+export function MvuPanel({ data, compact = false }: { data: JsonObject; compact?: boolean }) {
 	const entries = Object.entries(data);
 	return (
-		<div className="panel-body mvu-panel">
-			<p className="field-hint">角色卡的确定性变量。剧情推进、回档和世界线会自动同步。</p>
+		<div className={`${compact ? "" : "panel-body "}mvu-panel`}>
+			{!compact ? <p className="field-hint">角色卡的确定性变量。剧情推进、回档和世界线会自动同步。</p> : null}
 			{entries.length ? entries.map(([key, value]) => <Value key={key} name={key} value={value} />) : <div className="empty-state">当前角色卡没有 MVU 变量。</div>}
 		</div>
 	);

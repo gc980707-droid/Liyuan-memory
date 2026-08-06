@@ -61,7 +61,6 @@ import {
 	IconWorldline,
 	IconVariables,
 } from "./components/icons.tsx";
-import { MvuPanel } from "./components/MvuPanel.tsx";
 import { StatusSidebarPanel, type SidebarStatus } from "./components/StatusSidebarPanel.tsx";
 import { splitRichContentParts } from "./richContentParts.ts";
 import { LorebookPanel } from "./components/LorebookPanel.tsx";
@@ -140,7 +139,6 @@ type PanelId =
 	| "persona"
 	| "uploads"
 	| "assistant"
-	| "mvu"
 	| "statusview";
 
 /** agent 自建面板的右栏选择 id（柱 2）：`agent:` + 面板名，页签随 panels 帧动态长出 */
@@ -154,7 +152,7 @@ const agentId = (name: string): AgentPanelId => `agent:${name}`;
  * - 右 4：角色卡 / 世界书 / 知识库 / 用户角色
  * 会话在底栏。
  */
-const LEFT_PANELS: PanelId[] = ["statusview", "mvu", "connect", "preset", "powers", "uploads"];
+const LEFT_PANELS: PanelId[] = ["statusview", "connect", "preset", "powers", "uploads"];
 const RIGHT_PANELS: PanelId[] = ["card", "lorebook", "codex", "persona"];
 /** 右栏可开面板全集：顶栏 4 入口 + 助手（入口在输入框发送钮右侧，不占顶栏） */
 const RIGHT_OPENABLE: PanelId[] = [...RIGHT_PANELS, "assistant"];
@@ -175,7 +173,6 @@ const PANEL_LABEL: Record<PanelId, string> = {
 	persona: "用户角色",
 	uploads: "上传区",
 	assistant: "助手",
-	mvu: "变量",
 	statusview: "状态栏",
 };
 
@@ -193,7 +190,6 @@ const PANEL_ICON: Record<PanelId, (p: { size?: number }) => React.JSX.Element> =
 	persona: IconPersona,
 	uploads: IconUploads,
 	assistant: IconAssistant,
-	mvu: IconVariables,
 	statusview: IconVariables,
 };
 
@@ -1384,10 +1380,8 @@ export default function App() {
 				);
 			case "connect":
 				return <ConnectPanel toast={pushToast} />;
-			case "mvu":
-				return <MvuPanel data={mvu} />;
 			case "statusview":
-				return <StatusSidebarPanel status={latestStatus} />;
+				return <StatusSidebarPanel status={latestStatus} mvu={mvu} />;
 			case "preset":
 				return <PresetPanel toast={pushToast} />;
 			case "powers":
