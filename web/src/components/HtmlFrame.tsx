@@ -23,6 +23,7 @@ export function HtmlFrame({
 	seamless = false,
 	minHeight = 120,
 	maxHeight = 560,
+	expandToContent = false,
 }: {
 	html: string;
 	title?: string;
@@ -31,6 +32,8 @@ export function HtmlFrame({
 	seamless?: boolean;
 	minHeight?: number;
 	maxHeight?: number;
+	/** 侧栏状态栏：完整撑高 iframe，由外层面板统一滚动 */
+	expandToContent?: boolean;
 }) {
 	const frameId = useId();
 	const ref = useRef<HTMLIFrameElement>(null);
@@ -116,7 +119,7 @@ export function HtmlFrame({
 				return;
 			}
 			const raw = Math.ceil(d.liyuanFrameHeight);
-			const hardCap = Math.min(2400, typeof window !== "undefined" ? Math.floor(window.innerHeight * 0.92) : 2400);
+			const hardCap = expandToContent ? 20_000 : Math.min(2400, typeof window !== "undefined" ? Math.floor(window.innerHeight * 0.92) : 2400);
 			// 程序卡：fixed 铺满时内容盒会跟着框高涨，须锁视口底线。
 			// 但若内容明显远小于视口（状态栏误判/小部件），按内容收拢，避免大块黑空。
 			if (programApp) {
@@ -141,7 +144,7 @@ export function HtmlFrame({
 		};
 		window.addEventListener("message", onMsg);
 		return () => window.removeEventListener("message", onMsg);
-	}, [scripts, seamless, frameId, minHeight, programApp, height]);
+	}, [scripts, seamless, frameId, minHeight, programApp, height, expandToContent]);
 
 	return (
 		<figure
@@ -173,6 +176,7 @@ export function HtmlFrame({
 				sandbox={sandbox}
 				srcDoc={srcDoc}
 				style={{ height }}
+				scrolling={expandToContent ? "no" : undefined}
 			/>
 			{showSource && <pre className="msg-html-source">{html}</pre>}
 			{!seamless && title?.trim() && !showSource && <figcaption className="msg-html-cap">{title}</figcaption>}

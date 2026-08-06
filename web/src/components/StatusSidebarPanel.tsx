@@ -11,7 +11,7 @@ export function StatusSidebarPanel({ status, mvu }: { status: SidebarStatus | nu
 			<p className="field-hint">取自当前世界线最新一条角色回复，回档后自动恢复。</p>
 			{!status ? <div className="empty-state">当前对话还没有可识别的状态栏。</div> : null}
 			{status?.kind === "html" ? (
-				<HtmlFrame html={status.html} scripts={status.scripts} seamless minHeight={180} maxHeight={1200} title="角色状态栏" />
+				<HtmlFrame html={status.html} scripts={status.scripts} seamless minHeight={180} maxHeight={20_000} expandToContent title="角色状态栏" />
 			) : null}
 			{status?.kind === "status" ? <pre className="status-sidebar-text">{status.body}</pre> : null}
 			{Object.keys(mvu).length ? (
