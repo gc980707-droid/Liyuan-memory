@@ -116,7 +116,7 @@ ${
 ${
 	statusBarFormats && statusBarFormats.length > 0
 		? `   - **本卡定义了状态栏**，格式线索：${statusBarFormats.join("；")}。
-   - **每个剧情回合在正文之后必须输出状态栏**（字段随剧情更新：地点/时间/关系/数值等）；无预设时同样必须有。
+   - 每个剧情回合写完正文后，必须调用 status_submit 提交完整原始状态栏；状态栏不要写进可见正文。校验失败时只修状态栏并重提，正文禁止重写。
    - 状态栏用上述标签包住整块写出——这是卡作者设计的一部分，不是「可选装饰」，也不是预设提醒项。`
 		: `   - 本卡未检测到 StatusBlock/state 等状态栏格式；**不要硬造**状态栏。
    - 若卡作者另有约定（写在卡说明里），仍按卡作者格式执行。`
@@ -448,7 +448,7 @@ export function buildTurnInjection({
 	}
 	if (applyStoryPreset && statusBarFormats && statusBarFormats.length > 0) {
 		notes.push(
-			`⚠ 状态栏是本卡扮演的一部分（非预设可选项）：正文之后必须输出状态栏，格式 ${statusBarFormats.join(" 或 ")}，字段随本轮剧情更新；漏写状态栏即未完成回合。`,
+			`⚠ 状态栏是本卡扮演的一部分：正文写完后必须调用 status_submit，按 ${statusBarFormats.join(" 或 ")} 提交完整状态栏。不要把状态栏写进正文；失败时按工具错误只修状态栏，最多 3 次。`,
 		);
 	}
 	if (!toolContinuation) {

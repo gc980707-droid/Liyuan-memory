@@ -59,6 +59,7 @@ import {
 } from "../src/paths.ts";
 import { applyPatch, loadState, saveState } from "../src/state.ts";
 import { loadMvuData } from "../src/mvu.ts";
+import { loadValidatedStatus } from "../src/status-submit.ts";
 import { DEFAULT_CONFIG, type RpConfig } from "../src/types.ts";
 import {
 	loadTtsConfig,
@@ -337,12 +338,25 @@ const mvuDir = dir(cwd, "mvu");
 mkdirSync(mvuDir, { recursive: true });
 const currentMvu = () => loadMvuData(join(mvuDir, `${session.sessionId}.json`));
 
+const statusDir = dir(cwd, "status");
+mkdirSync(statusDir, { recursive: true });
+const currentValidatedStatus = () => loadValidatedStatus(join(statusDir, `${session.sessionId}.json`));
+
 let mvuDebounce: ReturnType<typeof setTimeout> | undefined;
 watch(mvuDir, (_evt, filename) => {
 	if (filename !== `${session.sessionId}.json`) return;
 	clearTimeout(mvuDebounce);
 	mvuDebounce = setTimeout(() => {
 		try { broadcast({ type: "mvu", mvu: currentMvu() }); } catch { /* next event retries */ }
+	}, 200);
+});
+
+let statusDebounce: ReturnType<typeof setTimeout> | undefined;
+watch(statusDir, (_evt, filename) => {
+	if (filename !== `${session.sessionId}.json`) return;
+	clearTimeout(statusDebounce);
+	statusDebounce = setTimeout(() => {
+		try { broadcast({ type: "validatedStatus", status: currentValidatedStatus() }); } catch { /* next event retries */ }
 	}, 200);
 });
 
@@ -497,6 +511,7 @@ const helloFrame = (): ServerFrame => {
 		messages: annotateSwipes(toWireHistory(session.messages, names, { skin })),
 		state: currentState(),
 		mvu: currentMvu(),
+		validatedStatus: currentValidatedStatus(),
 		stats: safeStats(),
 		panels: currentPanels(),
 		// 一档皮肤与消息同帧:首屏不得依赖二次 REST(缓存/竞态会让 StatusBlock 回落统一面板)

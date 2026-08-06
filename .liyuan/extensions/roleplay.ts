@@ -32,6 +32,8 @@ import { buildGreeting, buildSystemPrompt, buildTurnInjection, detectsLanguageMi
 import { formatMemoryIndex, inheritMemoryScope, memoryRecallForTurn } from "../../src/memory/index.ts";
 import { applyMvuOperations, defaultMvuData, formatMvuData, loadMvuData, parseInitVar, parseMvuUpdates, saveMvuData, type MvuData } from "../../src/mvu.ts";
 import { createMacroEnv, evalPresetMacros } from "../../src/preset-macro.ts";
+import { loadValidatedStatus, saveValidatedStatus, validateStatusSubmission, type ValidatedStatus } from "../../src/status-submit.ts";
+import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
 import {
 	constantEntries,
 	appendOverlayEntry,
@@ -123,6 +125,7 @@ const RP_TOOLS = [
 	"world_state_update",
 	"mvu_get",
 	"mvu_patch",
+	"status_submit",
 	"lorebook_write",
 	"codex_create",
 	"codex_mount",
@@ -166,6 +169,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	let stateFile = "";
 	let mvu: MvuData = defaultMvuData();
 	let mvuFile = "";
+	let validatedStatus: ValidatedStatus | null = null;
+	let statusFile = "";
+	let statusSubmitAttempts = 0;
 	// agent 自建面板（柱 2）：与 state 同一套「磁盘缓存 + 会话树快照」机制
 	let panels: PanelMap = {};
 	let panelsFile = "";
@@ -352,6 +358,28 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				if (entry.type === "custom" && entry.customType === "rp-mvu" && entry.data && typeof entry.data === "object") {
 					mvu = structuredClone(entry.data as MvuData);
 					return true;
+				}
+			}
+		} catch { /* no snapshot */ }
+		return false;
+	};
+
+	const snapshotValidatedStatus = () => {
+		if (!validatedStatus) return;
+		try { pi.appendEntry("rp-status", validatedStatus); } catch { /* session not writable yet */ }
+	};
+
+	const restoreValidatedStatusFromBranch = (sm: { getBranch: (fromId?: string) => unknown[] }): boolean => {
+		try {
+			const branch = sm.getBranch() as Array<Record<string, unknown>>;
+			for (let i = branch.length - 1; i >= 0; i--) {
+				const entry = branch[i];
+				if (entry.type === "custom" && entry.customType === "rp-status" && entry.data && typeof entry.data === "object") {
+					const data = entry.data as Partial<ValidatedStatus>;
+					if (typeof data.raw === "string" && typeof data.rendered === "string") {
+						validatedStatus = { raw: data.raw, rendered: data.rendered, validatedAt: Number(data.validatedAt) || 0 };
+						return true;
+					}
 				}
 			}
 		} catch { /* no snapshot */ }
@@ -703,6 +731,29 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					content: [{ type: "text", text: `已更新 ${result.applied.length} 项。${result.warnings.length ? `警告：${result.warnings.join("；")}` : ""}\n${formatMvuData(mvu)}` }],
 					...(result.applied.length === 0 && result.warnings.length ? { isError: true } : {}),
 				};
+			},
+		});
+
+		pi.registerTool({
+			name: "status_submit",
+			label: "提交状态栏",
+			description: "Submit ONLY the complete raw status block after writing the narrative. The harness validates it against this character card's display regex. If rejected, fix exactly the reported format errors and submit again; do not rewrite the narrative. Maximum 3 attempts per turn.",
+			parameters: Type.Object({ status: Type.String({ description: "Complete raw status markup only, including required opening/closing tags" }) }),
+			async execute(_id, params) {
+				statusSubmitAttempts++;
+				if (statusSubmitAttempts > 3) return { content: [{ type: "text", text: "本轮状态栏已达到 3 次校验上限。保留上一份有效状态栏；不要继续提交，也不要重写正文。" }], isError: true };
+				let raw: Record<string, unknown> | null = null;
+				try { raw = readCardRawJson(resolvePath(appCwd, config.card)).raw; } catch { /* handled by no rules */ }
+				const rules = raw ? displayRules(extractRegexScripts(raw)) : [];
+				const result = validateStatusSubmission(params.status, { rules, charName: card?.name ?? "", userName: config.userName });
+				if (!result.ok) return {
+					content: [{ type: "text", text: `状态栏校验失败（第 ${statusSubmitAttempts}/3 次）：\n- ${result.errors.join("\n- ")}\n只修复状态栏后再次调用 status_submit；正文不要重写。` }],
+					isError: true,
+				};
+				validatedStatus = result.status;
+				if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
+				snapshotValidatedStatus();
+				return { content: [{ type: "text", text: "状态栏校验通过并已送往左侧面板。不要再输出或重复提交状态栏，直接结束本回合。" }] };
 			},
 		});
 
@@ -1385,6 +1436,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				if (Object.keys(mvu).length) snapshotMvu();
 			}
 			if (Object.keys(mvu).length) saveMvuData(mvuFile, mvu);
+			statusFile = join(dir(ctx.cwd, "status"), `${ctx.sessionManager.getSessionId()}.json`);
+			validatedStatus = loadValidatedStatus(statusFile);
+			if (!validatedStatus && restoreValidatedStatusFromBranch(ctx.sessionManager) && validatedStatus) saveValidatedStatus(statusFile, validatedStatus);
 			// 面板同款装载：缓存缺失（fork/新拉起）时从剧情分支快照恢复
 			panelsFile = join(dir(ctx.cwd, "artifacts"), `${ctx.sessionManager.getSessionId()}.json`);
 			panels = loadPanels(panelsFile);
@@ -1575,6 +1629,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			syncStateFromDisk();
 		}
 		if (!rpMode) return undefined;
+		statusSubmitAttempts = 0;
 		// 预设只服务剧情生成：按本轮用户原文判定，整段 agent 循环（含 tool 轮）沿用
 		const prompt = typeof event?.prompt === "string" ? event.prompt : "";
 		applyStoryPresetThisTurn = shouldApplyStoryPreset(prompt);
@@ -1937,6 +1992,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		if (stateFile) saveState(stateFile, state);
 		if (!restoreMvuFromBranch(ctx.sessionManager)) mvu = initialMvuFromCard();
 		if (mvuFile) saveMvuData(mvuFile, mvu);
+		if (!restoreValidatedStatusFromBranch(ctx.sessionManager)) validatedStatus = null;
+		if (validatedStatus && statusFile) saveValidatedStatus(statusFile, validatedStatus);
 		// 面板同步回退：无快照 = 该剧情点尚无面板，清空（落盘触发前端页签同步）
 		if (!restorePanelsFromBranch(ctx.sessionManager)) panels = {};
 		if (panelsFile) savePanels(panelsFile, panels);

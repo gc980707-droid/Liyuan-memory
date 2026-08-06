@@ -209,6 +209,7 @@ export type ServerFrame =
 			state: WorldState | null;
 
 			mvu: MvuData;
+		validatedStatus: { raw: string; rendered: string; validatedAt: number } | null;
 			stats: WireStats | null;
 			/** agent 自建面板（柱 2）：当前活跃面板全量（页签序） */
 			panels: RpPanel[];
@@ -233,8 +234,10 @@ export type ServerFrame =
 	| { type: "state"; state: WorldState }
 
 	| { type: "mvu"; mvu: MvuData }
-	/** agent 自建面板变化（panel_write/close 落盘、rewind 回退）：活跃面板全量推送（同 state 的 fs.watch 机制） */
-	| { type: "panels"; panels: RpPanel[] }
+	| { type: "validatedStatus"; status: { raw: string; rendered: string; validatedAt: number } | null }
+	/** agent 自建面板变化（panel_write/close 落盘、rewind 回退）：活跃面板全量推送（同 state 的 fs.watch 机制） */
+
+	| { type: "panels"; panels: RpPanel[] }
 	| { type: "stats"; stats: WireStats }
 	| { type: "notify"; level: "info" | "warning" | "error"; text: string }
 	| { type: "compaction"; state: "start" | "end"; ok?: boolean }

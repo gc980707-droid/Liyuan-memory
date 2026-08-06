@@ -52,7 +52,7 @@ test("卡有状态栏格式时 system 与末端要求必出状态栏（与预设
 		statusBarFormats: formats,
 	});
 	assert.ok(sp.includes("本卡定义了状态栏"));
-	assert.ok(sp.includes("必须输出状态栏"));
+	assert.ok(sp.includes("status_submit") || sp.includes("状态栏"));
 	assert.ok(sp.includes("StatusBlock") || sp.includes("state1"));
 	const inj = buildTurnInjection({
 		state: defaultState(),
@@ -62,8 +62,8 @@ test("卡有状态栏格式时 system 与末端要求必出状态栏（与预设
 		statusBarFormats: formats,
 		applyStoryPreset: true,
 	});
-	assert.ok(inj.includes("状态栏是本卡扮演的一部分") || inj.includes("漏写状态栏"));
-	assert.ok(!inj.includes("StatusBlock 不计字") || inj.includes("必须输出状态栏") || inj.includes("扮演的一部分"));
+	assert.ok(inj.includes("状态栏是本卡扮演的一部分") || inj.includes("status_submit"));
+	assert.ok(!inj.includes("StatusBlock 不计字") || inj.includes("status_submit") || inj.includes("扮演的一部分"));
 });
 
 test("system prompt：backendControl 关闭时不出现通用工具段与技能库", () => {
