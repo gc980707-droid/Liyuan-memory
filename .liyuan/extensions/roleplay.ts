@@ -1923,7 +1923,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					const output = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1400);
 					const operations = output ? parseCharacterStateAgent(output) : null;
 					if (!operations?.length) {
-						if (process.env.RP_DEBUG) console.error("[rp-character-state] empty output");
+						if (process.env.RP_DEBUG) console.error(`[rp-character-state] empty/unparseable output raw=${(output ?? "<empty>").slice(0, 500).replace(/\s+/g, " ")}`);
 						return;
 					}
 					// 卡片没有 MVU 初始树时，角色状态 Agent 的 replace 也应能创建对象字段；

@@ -8,11 +8,14 @@ export function buildCharacterStatePrompt(input: { userText: string; narrative: 
 }
 
 export function parseCharacterStateAgent(text: string): MvuOperation[] | null {
-	const start = text.indexOf("{");
-	const end = text.lastIndexOf("}");
+	let source = text.trim();
+	const fenced = source.match(/```(?:json)?\s*([\s\S]*?)```/i);
+	if (fenced) source = fenced[1].trim();
+	const start = source.indexOf("{");
+	const end = source.lastIndexOf("}");
 	if (start < 0 || end <= start) return null;
 	try {
-		const raw = JSON.parse(text.slice(start, end + 1)) as { operations?: unknown };
+		const raw = JSON.parse(source.slice(start, end + 1)) as { operations?: unknown };
 		if (!Array.isArray(raw.operations)) return null;
 		return raw.operations.filter((operation): operation is MvuOperation => !!operation && typeof operation === "object").slice(0, 100);
 	} catch {
