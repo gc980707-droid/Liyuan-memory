@@ -7,7 +7,7 @@
  * 剧情向压缩接管 → 每轮后场记记账 + 一致性审计（旁侧模型，D10：产出是数据与告警，绝不碰正文）。
  */
 
-import { existsSync, mkdirSync, writeFileSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, copyFileSync, unlinkSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { extname, isAbsolute, join } from "node:path";
@@ -181,6 +181,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	let statusFile = "";
 	let statusSubmitAttempts = 0;
 	let statusSubmittedThisTurn = false;
+	/** 每次树导航递增；所有旁路 Agent 写入前必须验证，防止旧回合污染新分支。 */
+	let branchGeneration = 0;
 	let preflightKey = "";
 	let preflightAdvice: string | null = null;
 	let cardManifest: import("../../src/card-manifest.ts").CardManifest | null = null;
@@ -397,6 +399,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		} catch { /* no snapshot */ }
 		return false;
 	};
+
+	const isCurrentGeneration = (generation: number): boolean => generation === branchGeneration;
 
 	const initialMvuFromCard = (): MvuData => {
 		try {
@@ -1417,6 +1421,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	// ---------- 会话生命周期 ----------
 
 	pi.on("session_start", async (event, ctx) => {
+		branchGeneration += 1;
 		if (process.env.RP_DEBUG) console.error(`[rp-debug] session_start fired（v-f1）`);
 		try {
 			const configPath = resolveConfigPath(ctx.cwd);
@@ -1467,7 +1472,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			}
 
 			stateFile = join(dir(ctx.cwd, "state"), `${ctx.sessionManager.getSessionId()}.json`);
-			state = loadState(stateFile);
+			const restoredState = restoreStateFromBranch(ctx.sessionManager);
+			state = restoredState ? state : loadState(stateFile);
 			if (!state.time) {
 				const cardText = `${card?.firstMes ?? ""}\n${card?.scenario ?? ""}`;
 				const initialClock = extractClockTime(cardText);
@@ -1478,12 +1484,13 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				}
 			}
 			// fork 出的新会话文件没有状态缓存：从复制过来的剧情分支快照恢复
-			if (JSON.stringify(state) === JSON.stringify(defaultState()) && restoreStateFromBranch(ctx.sessionManager)) {
+			if (!restoredState && JSON.stringify(state) === JSON.stringify(defaultState())) {
 				saveState(stateFile, state);
 			}
 			mvuFile = join(dir(ctx.cwd, "mvu"), `${ctx.sessionManager.getSessionId()}.json`);
-			mvu = loadMvuData(mvuFile);
-			if (Object.keys(mvu).length === 0 && !restoreMvuFromBranch(ctx.sessionManager) && sessionMatchesCurrentCard(ctx.sessionManager)) {
+			const restoredMvu = restoreMvuFromBranch(ctx.sessionManager);
+			mvu = restoredMvu ? mvu : loadMvuData(mvuFile);
+			if (!restoredMvu && Object.keys(mvu).length === 0 && sessionMatchesCurrentCard(ctx.sessionManager)) {
 				mvu = initialMvuFromCard();
 				if (Object.keys(mvu).length) snapshotMvu();
 			}
@@ -1500,8 +1507,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				if (process.env.RP_DEBUG) console.error(`[rp-manifest] skipped: ${error instanceof Error ? error.message : String(error)}`);
 			}
 			statusFile = join(dir(ctx.cwd, "status"), `${ctx.sessionManager.getSessionId()}.json`);
-			validatedStatus = loadValidatedStatus(statusFile);
-			if (!validatedStatus && restoreValidatedStatusFromBranch(ctx.sessionManager) && validatedStatus) saveValidatedStatus(statusFile, validatedStatus);
+			const restoredStatus = restoreValidatedStatusFromBranch(ctx.sessionManager);
+			validatedStatus = restoredStatus ? validatedStatus : loadValidatedStatus(statusFile);
+			if (restoredStatus && validatedStatus) saveValidatedStatus(statusFile, validatedStatus);
 			// 面板同款装载：缓存缺失（fork/新拉起）时从剧情分支快照恢复
 			panelsFile = join(dir(ctx.cwd, "artifacts"), `${ctx.sessionManager.getSessionId()}.json`);
 			panels = loadPanels(panelsFile);
@@ -1909,7 +1917,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	// 场记记账（每用户轮结束后一次旁侧调用；只写状态补丁，不做连续性/先斩后奏审查）
 	// 注意：不 await 长调用——agent_end 监听器会卡住 waitForIdle / 停止按钮收尾。
 	pi.on("agent_end", (event, ctx) => {
-		if (!rpMode || !card || scribeBusy) return;
+		if (!rpMode || !card) return;
+		const generation = branchGeneration;
 		const msgs = event.messages as Array<{
 			role?: string;
 			content?: unknown;
@@ -1945,6 +1954,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					const rules = displayRules(extractRegexScripts(raw));
 					let error = "";
 					for (let attempt = 1; attempt <= 3; attempt++) {
+						if (!isCurrentGeneration(generation)) return;
 						const recovery = buildStatusRecoveryPrompt({
 							rules,
 							charName: card?.name ?? "",
@@ -1959,7 +1969,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						const recovered = await sideComplete(ctx, recovery.systemPrompt, recovery.userText, 1800);
 						if (!recovered) { error = "状态栏为空"; continue; }
 						const result = validateStatusSubmission(recovered, { rules, charName: card?.name ?? "", userName: config.userName });
-						if (result.ok) {
+						if (result.ok && isCurrentGeneration(generation)) {
 							validatedStatus = result.status;
 							if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
 							snapshotValidatedStatus();
@@ -1979,6 +1989,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		if (config.multiAgentPreflight === true && card) {
 			void (async () => {
 				try {
+					if (!isCurrentGeneration(generation)) return;
 					const roster = cardManifest ? manifestAgentCharacters(cardManifest, assistantText) : coreCharacterNames(card, allEntries(), { userName: config.userName, sceneText: assistantText });
 					const characterProfiles = characterLoreProfiles(allEntries(), roster);
 					if (process.env.RP_DEBUG) console.error(`[rp-character-state] start characters=${roster.join(",") || "none"}`);
@@ -1994,7 +2005,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						);
 						operations = output ? parseCharacterStateAgent(output) : null;
 					}
-					if (operations?.length) {
+					if (operations?.length && isCurrentGeneration(generation)) {
 						// 卡片没有 MVU 初始树时，角色状态 Agent 的 replace 也应能创建对象字段。
 						const stateOperations = operations.map((operation) =>
 							operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
@@ -2014,7 +2025,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					const continuityPrompt = buildCharacterContinuityPrompt({ userText, narrative: assistantText, currentMvu: formatMvuData(mvu), characterNames: roster, characterProfiles });
 					const continuityOutput = await sideComplete(ctx, continuityPrompt.systemPrompt, continuityPrompt.userText, 1100);
 					const continuityOperations = continuityOutput ? parseCharacterContinuityAgent(continuityOutput) : null;
-					if (continuityOperations?.length) {
+					if (continuityOperations?.length && isCurrentGeneration(generation)) {
 						const continuityApplied = applyMvuOperations(mvu, continuityOperations.map((operation) =>
 							operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
 						));
@@ -2041,9 +2052,11 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			if (process.env.RP_DEBUG && applied.warnings.length) console.error(`[rp-mvu] ${applied.warnings.join("；")}`);
 		}
 
+		if (scribeBusy) return;
 		scribeBusy = true;
 		void (async () => {
 			try {
+				if (!isCurrentGeneration(generation)) return;
 				const prompt = buildScribeTurnPrompt({
 					state,
 					userText,
@@ -2059,7 +2072,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					if (process.env.RP_DEBUG) console.error(`[rp-scribe] 输出不可解析，本轮跳过`);
 					return;
 				}
-				if (Object.keys(result.patch).length > 0) {
+				if (Object.keys(result.patch).length > 0 && isCurrentGeneration(generation)) {
 					const knownNames = [card.name, config.userName, ...Object.keys(state.characters)];
 					const scribePatch = canonicalizeCharacterKeys(result.patch, knownNames);
 					const timeGate = gateTimePatch(userText, state.time, scribePatch.time);
@@ -2180,12 +2193,18 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	// 树导航后：账本与面板随剧情位置回退（快照存在树里，导航到哪就恢复到哪）
 	pi.on("session_tree", async (_event, ctx) => {
 		if (!rpMode) return;
+		branchGeneration += 1;
 		const restored = restoreStateFromBranch(ctx.sessionManager);
 		if (!restored) state = defaultState();
 		if (stateFile) saveState(stateFile, state);
 		if (!restoreMvuFromBranch(ctx.sessionManager)) mvu = initialMvuFromCard();
 		if (mvuFile) saveMvuData(mvuFile, mvu);
-		if (!restoreValidatedStatusFromBranch(ctx.sessionManager)) validatedStatus = null;
+		if (!restoreValidatedStatusFromBranch(ctx.sessionManager)) {
+			validatedStatus = null;
+			if (statusFile && existsSync(statusFile)) {
+				try { unlinkSync(statusFile); } catch { /* ignore cache cleanup failure */ }
+			}
+		}
 		if (validatedStatus && statusFile) saveValidatedStatus(statusFile, validatedStatus);
 		// 面板同步回退：无快照 = 该剧情点尚无面板，清空（落盘触发前端页签同步）
 		if (!restorePanelsFromBranch(ctx.sessionManager)) panels = {};
