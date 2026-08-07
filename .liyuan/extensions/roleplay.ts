@@ -1672,7 +1672,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				})));
 				const proposalText = proposals.map((item) => `角色 ${item.name}：${item.proposal ?? "无"}`).join("\n");
 				const director = await sideComplete(ctx, "你是剧情导演。只输出 JSON：{\"focus\":\"\",\"characterIntents\":[],\"constraints\":[],\"avoid\":[]}。整合多个角色提案为隐藏创作指导，不写正文。", `${current}\n\n角色提案：\n${proposalText}`, 1400);
-				const parsed = parsePreflightAdvice(director || proposal);
+				const fallbackProposal = proposals.map((item) => `${item.name}：${item.proposal ?? ""}`).filter(Boolean).join("\n");
+				const parsed = parsePreflightAdvice(director || fallbackProposal);
 				preflightAdvice = parsed ? formatPreflightAdvice(hardenPreflightAdvice(parsed, formatState(state))) : null;
 				if (process.env.RP_DEBUG) console.error(`[rp-preflight] ${preflightAdvice ? `ready (${preflightAdvice.length} chars)` : "empty; normal story path"}`);
 			} catch (error) {
