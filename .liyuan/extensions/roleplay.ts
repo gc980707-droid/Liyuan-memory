@@ -32,7 +32,7 @@ import { buildGreeting, buildSystemPrompt, buildTurnInjection, detectsLanguageMi
 import { formatMemoryIndex, inheritMemoryScope, memoryRecallForTurn } from "../../src/memory/index.ts";
 import { applyMvuOperations, defaultMvuData, formatMvuData, loadMvuData, parseInitVar, parseMvuUpdates, saveMvuData, type MvuData } from "../../src/mvu.ts";
 import { createMacroEnv, evalPresetMacros } from "../../src/preset-macro.ts";
-import { loadValidatedStatus, saveValidatedStatus, validateStatusSubmission, type ValidatedStatus } from "../../src/status-submit.ts";
+import { buildStatusRecoveryPrompt, loadValidatedStatus, saveValidatedStatus, validateStatusSubmission, type ValidatedStatus } from "../../src/status-submit.ts";
 import { formatPreflightAdvice, hardenPreflightAdvice, parsePreflightAdvice } from "../../src/preflight.ts";
 import { coreCharacterNames } from "../../src/character-roster.ts";
 import { buildTurnPlan, formatTurnPlan } from "../../src/turn-orchestrator.ts";
@@ -180,6 +180,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	let validatedStatus: ValidatedStatus | null = null;
 	let statusFile = "";
 	let statusSubmitAttempts = 0;
+	let statusSubmittedThisTurn = false;
 	let preflightKey = "";
 	let preflightAdvice: string | null = null;
 	let cardManifest: import("../../src/card-manifest.ts").CardManifest | null = null;
@@ -770,6 +771,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					isError: true,
 				};
 				validatedStatus = result.status;
+				statusSubmittedThisTurn = true;
 				if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
 				snapshotValidatedStatus();
 				return {
@@ -1691,6 +1693,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		}
 		if (!rpMode) return undefined;
 		statusSubmitAttempts = 0;
+		statusSubmittedThisTurn = false;
 		// 预设只服务剧情生成：按本轮用户原文判定，整段 agent 循环（含 tool 轮）沿用
 		const prompt = typeof event?.prompt === "string" ? event.prompt : "";
 		const preflightId = `${ctx.sessionManager.getSessionId()}::${ctx.sessionManager.getLeafId() ?? "root"}::${prompt}`;
@@ -1935,6 +1938,37 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			.filter(Boolean)
 			.join("\n");
 		if (!assistantText.trim()) return;
+		if (!statusSubmittedThisTurn && statusBarFormats.length > 0) {
+			void (async () => {
+				try {
+					const raw = readCardRawJson(resolvePath(appCwd, config.card)).raw;
+					const rules = displayRules(extractRegexScripts(raw));
+					const recovery = buildStatusRecoveryPrompt({
+						rules,
+						charName: card?.name ?? "",
+						userName: config.userName,
+						state: formatState(state),
+						mvu: formatMvuData(mvu),
+						userText,
+						narrative: assistantText,
+						previous: validatedStatus?.raw,
+					});
+					const recovered = await sideComplete(ctx, recovery.systemPrompt, recovery.userText, 1800);
+					if (!recovered) return;
+					const result = validateStatusSubmission(recovered, { rules, charName: card?.name ?? "", userName: config.userName });
+					if (!result.ok) {
+						if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] rejected ${result.errors.join(" | ")}`);
+						return;
+					}
+					validatedStatus = result.status;
+					if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
+					snapshotValidatedStatus();
+					if (process.env.RP_DEBUG) console.error("[rp-status-recovery] restored");
+				} catch (error) {
+					if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] skipped: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			})();
+		}
 		if (config.multiAgentPreflight === true && card) {
 			void (async () => {
 				try {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateStatusSubmission } from "../src/status-submit.ts";
+import { buildStatusRecoveryPrompt, validateStatusSubmission } from "../src/status-submit.ts";
 
 const skin = {
 	charName: "甲",
@@ -12,6 +12,12 @@ test("status_submit 正则命中并生成完整 UI", () => {
 	const result = validateStatusSubmission("<Status_block>HP: 10</Status_block>", skin);
 	assert.equal(result.ok, true);
 	if (result.ok) assert.ok(result.status.rendered.includes("<style>"));
+});
+
+test("状态栏恢复提示要求复用上一份结构并只输出状态栏", () => {
+	const prompt = buildStatusRecoveryPrompt({ rules: [{ name: "status", source: "x", flags: "g", replace: "y" }], charName: "Alice", userName: "旅人", state: "{}", mvu: "{}", userText: "继续", narrative: "Alice 点头", previous: "<StatusBlock>old</StatusBlock>" });
+	assert.match(prompt.systemPrompt, /只输出完整的状态栏原文/);
+	assert.match(prompt.userText, /StatusBlock/);
 });
 
 test("status_submit 格式错误返回可修复提示", () => {
