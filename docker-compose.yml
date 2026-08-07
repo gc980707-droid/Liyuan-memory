@@ -17,6 +17,8 @@ services:
     environment:
       HOST: "0.0.0.0"
       PORT: "7620"
+      # 调试扩展、预演、场记和工具流程；关闭时不输出详细调试信息
+      RP_DEBUG: "1"
       # 可选：把 TTS 等密钥用环境变量注入（见 src/tts.ts）
       # OPENAI_API_KEY: ""
       # DEEPSEEK_API_KEY: ""
