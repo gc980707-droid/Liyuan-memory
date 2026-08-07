@@ -34,6 +34,7 @@ import { applyMvuOperations, defaultMvuData, formatMvuData, loadMvuData, parseIn
 import { createMacroEnv, evalPresetMacros } from "../../src/preset-macro.ts";
 import { loadValidatedStatus, saveValidatedStatus, validateStatusSubmission, type ValidatedStatus } from "../../src/status-submit.ts";
 import { formatPreflightAdvice, hardenPreflightAdvice, parsePreflightAdvice } from "../../src/preflight.ts";
+import { coreCharacterNames } from "../../src/character-roster.ts";
 import { gateTimePatch } from "../../src/time-gate.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
 import {
@@ -1656,8 +1657,13 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			try {
 				if (process.env.RP_DEBUG) console.error(`[rp-preflight] start session=${ctx.sessionManager.getSessionId().slice(0, 12)} prompt=${prompt.slice(0, 80)}`);
 				const current = `用户输入：${prompt}\n\n世界状态：${formatState(state)}\n\nMVU：${formatMvuData(mvu).slice(0, 12000)}`;
-				const proposal = await sideComplete(ctx, "你是角色动机顾问。只输出简短的角色目标、情绪、约束和可能行动，不写正文，不调用工具，不改变正典。", current, 1200);
-				const director = await sideComplete(ctx, "你是剧情导演。只输出 JSON：{\"focus\":\"\",\"characterIntents\":[],\"constraints\":[],\"avoid\":[]}。整合角色提案为隐藏创作指导，不写正文。", `${current}\n\n角色提案：${proposal ?? "无"}`, 1200);
+				const roster = coreCharacterNames(card ?? ({ name: "" } as CharacterCard), allEntries());
+				const proposals = await Promise.all(roster.map(async (name) => ({
+					name,
+					proposal: await sideComplete(ctx, `你是角色「${name}」的独立动机 Agent。只输出该角色本轮的目标、情绪、约束和可能行动；不要写正文，不替用户做决定，不调用工具，不改变正典。`, current, 900),
+				})));
+				const proposalText = proposals.map((item) => `角色 ${item.name}：${item.proposal ?? "无"}`).join("\n");
+				const director = await sideComplete(ctx, "你是剧情导演。只输出 JSON：{\"focus\":\"\",\"characterIntents\":[],\"constraints\":[],\"avoid\":[]}。整合多个角色提案为隐藏创作指导，不写正文。", `${current}\n\n角色提案：\n${proposalText}`, 1400);
 				const parsed = parsePreflightAdvice(director || proposal);
 				preflightAdvice = parsed ? formatPreflightAdvice(hardenPreflightAdvice(parsed, formatState(state))) : null;
 				if (process.env.RP_DEBUG) console.error(`[rp-preflight] ${preflightAdvice ? `ready (${preflightAdvice.length} chars)` : "empty; normal story path"}`);
