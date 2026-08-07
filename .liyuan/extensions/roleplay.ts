@@ -38,6 +38,7 @@ import { coreCharacterNames } from "../../src/character-roster.ts";
 import { buildTurnPlan, formatTurnPlan } from "../../src/turn-orchestrator.ts";
 import { buildCharacterStatePrompt, parseCharacterStateAgent } from "../../src/character-state-agent.ts";
 import { buildCharacterIntentPrompt } from "../../src/character-intent-agent.ts";
+import { buildCharacterContinuityPrompt, parseCharacterContinuityAgent } from "../../src/character-continuity-agent.ts";
 import { buildCardManifest, cardManifestFile, characterLoreProfiles, loadCardManifest, manifestAgentCharacters, saveCardManifest, syncCardManifestCharacters } from "../../src/card-manifest.ts";
 import { extractClockTime, gateStatusTime, gateTimePatch } from "../../src/time-gate.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
@@ -1952,24 +1953,37 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						);
 						operations = output ? parseCharacterStateAgent(output) : null;
 					}
-					if (!operations?.length) {
+					if (operations?.length) {
+						// 卡片没有 MVU 初始树时，角色状态 Agent 的 replace 也应能创建对象字段。
+						const stateOperations = operations.map((operation) =>
+							operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
+						);
+						const applied = applyMvuOperations(mvu, stateOperations);
+						if (applied.applied.length) {
+							mvu = applied.data;
+							if (mvuFile) saveMvuData(mvuFile, mvu);
+							snapshotMvu();
+						}
+						if (process.env.RP_DEBUG) console.error(`[rp-character-state] applied=${applied.applied.length} warnings=${applied.warnings.length}${applied.warnings.length ? ` details=${applied.warnings.join(" | ")}` : ""}`);
+					} else {
 						if (output?.trim() === '{"operations":[]}' || output?.trim() === "{\"operations\":[]}") {
 							if (process.env.RP_DEBUG) console.error("[rp-character-state] no changes");
 						} else if (process.env.RP_DEBUG) console.error(`[rp-character-state] empty/unparseable output raw=${(output ?? "<empty>").slice(0, 500).replace(/\s+/g, " ")}`);
-						return;
 					}
-					// 卡片没有 MVU 初始树时，角色状态 Agent 的 replace 也应能创建对象字段；
-					// 通用 MVU replace 仍保持严格语义，避免掩盖普通卡片的路径错误。
-					const stateOperations = operations.map((operation) =>
-						operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
-					);
-					const applied = applyMvuOperations(mvu, stateOperations);
-					if (applied.applied.length) {
-						mvu = applied.data;
-						if (mvuFile) saveMvuData(mvuFile, mvu);
-						snapshotMvu();
+					const continuityPrompt = buildCharacterContinuityPrompt({ userText, narrative: assistantText, currentMvu: formatMvuData(mvu), characterNames: roster, characterProfiles });
+					const continuityOutput = await sideComplete(ctx, continuityPrompt.systemPrompt, continuityPrompt.userText, 1100);
+					const continuityOperations = continuityOutput ? parseCharacterContinuityAgent(continuityOutput) : null;
+					if (continuityOperations?.length) {
+						const continuityApplied = applyMvuOperations(mvu, continuityOperations.map((operation) =>
+							operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
+						));
+						if (continuityApplied.applied.length) {
+							mvu = continuityApplied.data;
+							if (mvuFile) saveMvuData(mvuFile, mvu);
+							snapshotMvu();
+						}
+						if (process.env.RP_DEBUG) console.error(`[rp-character-continuity] applied=${continuityApplied.applied.length} warnings=${continuityApplied.warnings.length}`);
 					}
-					if (process.env.RP_DEBUG) console.error(`[rp-character-state] applied=${applied.applied.length} warnings=${applied.warnings.length}${applied.warnings.length ? ` details=${applied.warnings.join(" | ")}` : ""}`);
 				} catch (error) {
 					if (process.env.RP_DEBUG) console.error(`[rp-character-state] skipped: ${error instanceof Error ? error.message : String(error)}`);
 				}
