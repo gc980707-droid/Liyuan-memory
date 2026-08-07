@@ -36,6 +36,7 @@ import { loadValidatedStatus, saveValidatedStatus, validateStatusSubmission, typ
 import { formatPreflightAdvice, hardenPreflightAdvice, parsePreflightAdvice } from "../../src/preflight.ts";
 import { coreCharacterNames } from "../../src/character-roster.ts";
 import { buildTurnPlan, formatTurnPlan } from "../../src/turn-orchestrator.ts";
+import { buildCharacterStatePrompt, parseCharacterStateAgent } from "../../src/character-state-agent.ts";
 import { extractClockTime, gateStatusTime, gateTimePatch } from "../../src/time-gate.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
 import {
@@ -1913,6 +1914,26 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			.filter(Boolean)
 			.join("\n");
 		if (!assistantText.trim()) return;
+		if (config.multiAgentPreflight === true && card) {
+			void (async () => {
+				try {
+					const roster = coreCharacterNames(card, allEntries());
+					const prompt = buildCharacterStatePrompt({ userText, narrative: assistantText, currentMvu: formatMvuData(mvu), characterNames: roster });
+					const output = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1400);
+					const operations = output ? parseCharacterStateAgent(output) : null;
+					if (!operations?.length) return;
+					const applied = applyMvuOperations(mvu, operations);
+					if (applied.applied.length) {
+						mvu = applied.data;
+						if (mvuFile) saveMvuData(mvuFile, mvu);
+						snapshotMvu();
+					}
+					if (process.env.RP_DEBUG) console.error(`[rp-character-state] applied=${applied.applied.length} warnings=${applied.warnings.length}`);
+				} catch (error) {
+					if (process.env.RP_DEBUG) console.error(`[rp-character-state] skipped: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			})();
+		}
 		const mvuOperations = parseMvuUpdates(assistantText);
 		if (mvuOperations.length) {
 			const applied = applyMvuOperations(mvu, mvuOperations);
