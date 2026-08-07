@@ -965,6 +965,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			description:
 				"Record persistent changes to the world state. Call IMMEDIATELY when: time/location changes, items gained/lost, injuries/recovery, affinity or relationship shifts, promises made, new plot threads opened or resolved. Semantics: time/location = replace; characters/flags = per-key merge (null deletes); inventory/plot_threads = pass the COMPLETE new array (full replace).",
 			parameters: Type.Object({
+				action: Type.Optional(Type.String({ description: "本轮动作及耗时理由，例如‘往返车厢尽头使用卫生间’" })),
+				durationMin: Type.Optional(Type.Number({ description: "预计最短耗时（分钟）" })),
+				durationMax: Type.Optional(Type.Number({ description: "预计最长耗时（分钟）" })),
 				time: Type.Optional(Type.String({ description: "In-story time, e.g. '第二天清晨'" })),
 				location: Type.Optional(Type.String()),
 				characters: Type.Optional(
@@ -1002,7 +1005,10 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				}
 				return "";
 			})();
-			const timeGate = gateTimePatch(gateUserText, state.time, patch.time);
+			const timeGate = gateTimePatch(gateUserText, state.time, patch.time, params as { action?: unknown; durationMin?: unknown; durationMax?: unknown });
+			delete patch.action;
+			delete patch.durationMin;
+			delete patch.durationMax;
 			if (!timeGate.allowed) {
 				delete patch.time;
 				return { content: [{ type: "text", text: `⚠ ${timeGate.reason}\n时间保持不变；如果确实要推进时间，请在用户输入或正文中明确说明经过了多久。` }], details: { state, timeRejected: true } };

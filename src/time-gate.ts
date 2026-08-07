@@ -4,23 +4,15 @@ export function hasExplicitTimeAdvance(text: string): boolean {
 }
 
 export type ActionDuration = { name: string; min: number; max: number };
-const ACTION_DURATIONS: ActionDuration[] = [
-	{ name: "使用卫生间", min: 5, max: 15 },
-	{ name: "接水", min: 3, max: 8 },
-	{ name: "短暂交谈", min: 1, max: 5 },
-	{ name: "吃饭", min: 15, max: 40 },
-	{ name: "洗澡", min: 15, max: 45 },
-	{ name: "睡觉", min: 60, max: 600 },
-];
 
-export function inferActionDuration(text: string): ActionDuration | null {
-	if (/(?:上厕所|去厕所|如厕|卫生间|洗手间)/u.test(text)) return ACTION_DURATIONS[0]!;
-	if (/(?:接水|打水|倒水)/u.test(text)) return ACTION_DURATIONS[1]!;
-	if (/(?:聊几句|说了几句|简单聊|短暂交谈)/u.test(text)) return ACTION_DURATIONS[2]!;
-	if (/(?:吃饭|用餐|吃东西)/u.test(text)) return ACTION_DURATIONS[3]!;
-	if (/(?:洗澡|沐浴)/u.test(text)) return ACTION_DURATIONS[4]!;
-	if (/(?:睡觉|睡了一觉|入睡|醒来)/u.test(text)) return ACTION_DURATIONS[5]!;
-	return null;
+export function inferActionDuration(text: string, declared?: { action?: unknown; durationMin?: unknown; durationMax?: unknown }): ActionDuration | null {
+	const min = Number(declared?.durationMin);
+	const max = Number(declared?.durationMax);
+	if (typeof declared?.action === "string" && Number.isFinite(min) && Number.isFinite(max)) {
+		if (min >= 0 && max >= min && max <= 1440) return { name: declared.action, min, max };
+	}
+	if (/(?:上厕所|去厕所|如厕|卫生间|洗手间)/u.test(text)) return { name: "使用卫生间", min: 5, max: 15 };
+	return text.trim() ? { name: "本轮动作", min: 0, max: 30 } : null;
 }
 
 function clockMinutes(value: string): number | null {
@@ -38,11 +30,11 @@ function withClock(value: string, minutes: number): string | null {
 	return value.replace(/\d{1,2}\s*(?:[:：点时])\s*\d{2}?/u, `${String(Math.floor(next / 60)).padStart(2, "0")}:${String(next % 60).padStart(2, "0")}`);
 }
 
-export function gateTimePatch(userText: string, currentTime: string, requestedTime: unknown): { allowed: boolean; value?: string; reason?: string } {
+export function gateTimePatch(userText: string, currentTime: string, requestedTime: unknown, declared?: { action?: unknown; durationMin?: unknown; durationMax?: unknown }): { allowed: boolean; value?: string; reason?: string } {
 	if (typeof requestedTime !== "string" || !requestedTime.trim()) return { allowed: true };
 	if (requestedTime.trim() === currentTime.trim()) return { allowed: true, value: requestedTime };
 	if (hasExplicitTimeAdvance(userText)) return { allowed: true, value: requestedTime.trim() };
-	const action = inferActionDuration(userText);
+	const action = inferActionDuration(userText, declared);
 	const current = clockMinutes(currentTime);
 	const requested = clockMinutes(requestedTime);
 	if (action && current !== null && requested !== null) {
@@ -51,7 +43,7 @@ export function gateTimePatch(userText: string, currentTime: string, requestedTi
 		const suggestion = withClock(currentTime, action.min);
 		return { allowed: false, reason: `动作「${action.name}」预计耗时 ${action.min}～${action.max} 分钟，目标时间「${requestedTime}」超出范围。建议使用「${suggestion ?? currentTime}」。` };
 	}
-	return { allowed: false, reason: `本轮用户输入没有明确时间推进意图，拒绝将时间从「${currentTime || "（未记录）"}」改为「${requestedTime}」。` };
+	return { allowed: false, reason: `动作「${action?.name ?? "本轮动作"}」声明耗时范围不足以支持目标时间「${requestedTime}」。请声明 action、durationMin、durationMax，或使用明确时间推进语句。` };
 }
 
 /** 状态栏也不能显示一个没有被世界状态确认的新时间。 */
@@ -63,7 +55,7 @@ export function gateStatusTime(userText: string, currentTime: string, statusText
 	const requestedValue = Number(requested[1]) * 60 + Number(requested[2] || 0);
 	if (currentValue === requestedValue || hasExplicitTimeAdvance(userText)) return { allowed: true };
 	const action = inferActionDuration(userText);
-	if (action) {
+	if (action && action.name !== "本轮动作") {
 		const delta = (requestedValue - currentValue + 1440) % 1440;
 		if (delta >= action.min && delta <= action.max) return { allowed: true };
 	}

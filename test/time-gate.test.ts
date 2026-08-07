@@ -23,6 +23,11 @@ test("自然动作允许小范围耗时", () => {
 	assert.equal(gateTimePatch("起来上厕所", "7月15日14:30", "7月15日23:00").allowed, false);
 });
 
+test("通用动作通过模型声明耗时，不依赖关键词表", () => {
+	assert.equal(gateTimePatch("去花市买花", "7月15日14:30", "7月15日15:10", { action: "往返花市", durationMin: 30, durationMax: 60 }).allowed, true);
+	assert.equal(gateTimePatch("去花市买花", "7月15日14:30", "7月15日23:00", { action: "往返花市", durationMin: 30, durationMax: 60 }).allowed, false);
+});
+
 test("状态栏时间不能绕过世界状态门禁", () => {
 	assert.equal(gateStatusTime("起来上厕所", "7月15日14:30", "📅 7月15日 | ⏰ 14:42").allowed, true);
 	assert.equal(gateStatusTime("起来上厕所", "7月15日14:30", "📅 7月15日 | ⏰ 15:00").allowed, false);
