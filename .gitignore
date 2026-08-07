@@ -17,6 +17,7 @@ packages/**/node_modules/
 .liyuan-memory/
 .liyuan-mvu/
 .liyuan-status/
+.liyuan-card-data/
 .liyuan-skills/
 .liyuan-state/
 .liyuan-uploads/

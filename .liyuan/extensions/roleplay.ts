@@ -37,6 +37,7 @@ import { formatPreflightAdvice, hardenPreflightAdvice, parsePreflightAdvice } fr
 import { coreCharacterNames } from "../../src/character-roster.ts";
 import { buildTurnPlan, formatTurnPlan } from "../../src/turn-orchestrator.ts";
 import { buildCharacterStatePrompt, parseCharacterStateAgent } from "../../src/character-state-agent.ts";
+import { buildCardManifest, saveCardManifest } from "../../src/card-manifest.ts";
 import { extractClockTime, gateStatusTime, gateTimePatch } from "../../src/time-gate.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
 import {
@@ -1482,6 +1483,13 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				if (Object.keys(mvu).length) snapshotMvu();
 			}
 			if (Object.keys(mvu).length) saveMvuData(mvuFile, mvu);
+			try {
+				const rawCard = readCardRawJson(cardAbs).raw;
+				const manifestFile = join(dir(ctx.cwd, "manifests"), `${cardAbs.replace(/[^A-Za-z0-9._-]/g, "_")}.json`);
+				saveCardManifest(manifestFile, buildCardManifest({ raw: rawCard, card, cardPath: config.card, lore: card.book, initialMvu: mvu }));
+			} catch (error) {
+				if (process.env.RP_DEBUG) console.error(`[rp-manifest] skipped: ${error instanceof Error ? error.message : String(error)}`);
+			}
 			statusFile = join(dir(ctx.cwd, "status"), `${ctx.sessionManager.getSessionId()}.json`);
 			validatedStatus = loadValidatedStatus(statusFile);
 			if (!validatedStatus && restoreValidatedStatusFromBranch(ctx.sessionManager) && validatedStatus) saveValidatedStatus(statusFile, validatedStatus);
