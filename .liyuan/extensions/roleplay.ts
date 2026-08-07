@@ -768,7 +768,10 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				validatedStatus = result.status;
 				if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
 				snapshotValidatedStatus();
-				return { content: [{ type: "text", text: "状态栏校验通过并已送往左侧面板。不要再输出或重复提交状态栏，直接结束本回合。" }] };
+				return {
+					content: [{ type: "text", text: "状态栏校验通过并已送往左侧面板。本轮正文、状态和账本处理完成，直接结束本回合，不要继续生成。" }],
+					terminate: true,
+				};
 			},
 		});
 
