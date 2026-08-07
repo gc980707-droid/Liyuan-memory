@@ -87,7 +87,7 @@ export function promoteManifestCharacter(manifest: CardManifest, name: string, k
 
 export function manifestAgentCharacters(manifest: CardManifest, sceneText: string): string[] {
 	return manifest.characters
-		.filter((character) => character.agentEnabled && (character.kind === "core" ? sceneText.includes(character.name) : sceneText.includes(character.name)))
+		.filter((character) => character.agentEnabled && sceneText.includes(character.name))
 		.map((character) => character.name);
 }
 

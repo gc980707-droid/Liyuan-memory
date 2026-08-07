@@ -21,7 +21,7 @@ test("角色调度排除卡标题、用户和不在场角色", () => {
 test("Manifest 角色名单只来自有效世界书角色条目", () => {
 	assert.deepEqual(loreCharacterNames([
 		{ comment: "苏小棉", keys: ["棉宝"], content: "人物资料" },
-		{ comment: "世界观设定", keys: ["世界"], content: "规则" },
+		{ comment: "Setting Rules", keys: ["rules"], content: "Any card language is valid." },
 		{ comment: "{{user}}", keys: ["旅人"], content: "用户" },
-	] as never, "旅人"), ["苏小棉"]);
+	] as never, "旅人"), ["苏小棉", "Setting Rules"]);
 });

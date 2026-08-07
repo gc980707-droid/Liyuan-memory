@@ -21,9 +21,13 @@ export function loreCharacterNames(lore: LorebookEntry[], userName?: string): st
 	const user = userName?.trim();
 	for (const entry of lore) {
 		const name = entry.comment.trim();
-		if (!name || name === user || name === "{{user}}" || name.length > 40) continue;
-		if (/状态|规则|文风|世界|设定|资料|profile|rule/i.test(name)) continue;
-		if (entry.keys.length > 0 || entry.content.length > 100) names.add(name);
+		// 世界书没有统一的角色字段：保留短标题作为候选，交给场景命中和
+		// Manifest 的运行配置决定是否启用 Agent。不要按某种语言的词汇猜测
+		// 「规则」「设定」等类别，否则会误伤其它卡的角色名。
+		if (!name || name === user || /^\{\{(?:user|char|人格|用户)\}\}$/iu.test(name)) continue;
+		if (name.length > 80 || /[\r\n]/.test(name)) continue;
+		if (!entry.content.trim() && entry.keys.length === 0) continue;
+		names.add(name);
 	}
 	return [...names].slice(0, 64);
 }

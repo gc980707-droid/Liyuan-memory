@@ -52,3 +52,20 @@ test("Manifest 随世界书增删角色但保留既有运行配置", () => {
 	const removed = syncCardManifestCharacters(next, { card: { name: "卡A" } as never, lore: [{ comment: "林夏", keys: ["夏夏"], content: "人物资料" }] as never, userName: "旅人" });
 	assert.deepEqual(removed.characters.map((character) => character.name), ["林夏"]);
 });
+
+test("世界书同步不改变角色卡格式适配信息", () => {
+	const base = buildCardManifest({
+		raw: { data: { name: "卡A", extensions: { regex_scripts: [{ find_regex: "x" }], tavern_helper: { variables: {} } } } },
+		card: { name: "卡A" } as never,
+		cardPath: "cards/a.png",
+		lore: [],
+		initialMvu: { status: { mood: "calm" } },
+	});
+	const next = syncCardManifestCharacters(base, {
+		card: { name: "卡A" } as never,
+		lore: [{ comment: "规则条目", keys: ["rule"], content: "A valid worldbook entry in any language." }] as never,
+	});
+	assert.deepEqual(next.status, base.status);
+	assert.deepEqual(next.capabilities, base.capabilities);
+	assert.deepEqual(next.mvu, base.mvu);
+});
