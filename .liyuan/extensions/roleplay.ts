@@ -35,7 +35,7 @@ import { createMacroEnv, evalPresetMacros } from "../../src/preset-macro.ts";
 import { loadValidatedStatus, saveValidatedStatus, validateStatusSubmission, type ValidatedStatus } from "../../src/status-submit.ts";
 import { formatPreflightAdvice, hardenPreflightAdvice, parsePreflightAdvice } from "../../src/preflight.ts";
 import { coreCharacterNames } from "../../src/character-roster.ts";
-import { gateTimePatch } from "../../src/time-gate.ts";
+import { gateStatusTime, gateTimePatch } from "../../src/time-gate.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
 import {
 	constantEntries,
@@ -753,6 +753,14 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				const result = validateStatusSubmission(params.status, { rules, charName: card?.name ?? "", userName: config.userName });
 				if (!result.ok) return {
 					content: [{ type: "text", text: `状态栏校验失败（第 ${statusSubmitAttempts}/3 次）：\n- ${result.errors.join("\n- ")}\n只修复状态栏后再次调用 status_submit；正文不要重写。` }],
+					isError: true,
+				};
+				const branch = ctx.sessionManager.getBranch() as Array<Record<string, unknown>>;
+				const latestUser = [...branch].reverse().find((entry) => (entry.message as { role?: string } | undefined)?.role === "user");
+				const userText = latestUser ? extractText((latestUser.message as { content?: unknown }) ?? {}) : "";
+				const statusTime = gateStatusTime(userText, state.time, params.status);
+				if (!statusTime.allowed) return {
+					content: [{ type: "text", text: `状态栏校验失败（时间门禁）：${statusTime.reason}\n只修正状态栏时间，不要重写正文。` }],
 					isError: true,
 				};
 				validatedStatus = result.status;

@@ -9,3 +9,14 @@ export function gateTimePatch(userText: string, currentTime: string, requestedTi
 	if (hasExplicitTimeAdvance(userText)) return { allowed: true, value: requestedTime.trim() };
 	return { allowed: false, reason: `本轮用户输入没有明确时间推进意图，拒绝将时间从「${currentTime || "（未记录）"}」改为「${requestedTime}」。` };
 }
+
+/** 状态栏也不能显示一个没有被世界状态确认的新时间。 */
+export function gateStatusTime(userText: string, currentTime: string, statusText: string): { allowed: boolean; reason?: string } {
+	const current = currentTime.match(/(?:上午|下午|晚上|夜里|深夜|凌晨)?\s*(\d{1,2})\s*[:：点时]\s*(\d{2})?/u);
+	const requested = statusText.match(/(?:上午|下午|晚上|夜里|深夜|凌晨)?\s*(\d{1,2})\s*[:：点时]\s*(\d{2})?/u);
+	if (!current || !requested) return { allowed: true };
+	const currentValue = Number(current[1]) * 60 + Number(current[2] || 0);
+	const requestedValue = Number(requested[1]) * 60 + Number(requested[2] || 0);
+	if (currentValue === requestedValue || hasExplicitTimeAdvance(userText)) return { allowed: true };
+	return { allowed: false, reason: `状态栏时间「${requested[0]}」与当前世界状态「${current[0]}」不一致；本轮没有明确时间推进，必须按世界状态填写。` };
+}
