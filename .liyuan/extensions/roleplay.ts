@@ -1923,10 +1923,21 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					const roster = coreCharacterNames(card, allEntries(), { userName: config.userName, sceneText: assistantText });
 					if (process.env.RP_DEBUG) console.error(`[rp-character-state] start characters=${roster.join(",") || "none"}`);
 					const prompt = buildCharacterStatePrompt({ userText, narrative: assistantText, currentMvu: formatMvuData(mvu), characterNames: roster });
-					const output = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1400);
-					const operations = output ? parseCharacterStateAgent(output) : null;
+					let output = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1400);
+					let operations = output ? parseCharacterStateAgent(output) : null;
+					if (!operations) {
+						output = await sideComplete(
+							ctx,
+							`${prompt.systemPrompt}\n必须输出完整且有效的一行 JSON；没有变化时输出 {"operations":[]}。不要输出任何解释。`,
+							prompt.userText,
+							700,
+						);
+						operations = output ? parseCharacterStateAgent(output) : null;
+					}
 					if (!operations?.length) {
-						if (process.env.RP_DEBUG) console.error(`[rp-character-state] empty/unparseable output raw=${(output ?? "<empty>").slice(0, 500).replace(/\s+/g, " ")}`);
+						if (output?.trim() === '{"operations":[]}' || output?.trim() === "{\"operations\":[]}") {
+							if (process.env.RP_DEBUG) console.error("[rp-character-state] no changes");
+						} else if (process.env.RP_DEBUG) console.error(`[rp-character-state] empty/unparseable output raw=${(output ?? "<empty>").slice(0, 500).replace(/\s+/g, " ")}`);
 						return;
 					}
 					// 卡片没有 MVU 初始树时，角色状态 Agent 的 replace 也应能创建对象字段；
