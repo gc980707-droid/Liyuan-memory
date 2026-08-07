@@ -466,8 +466,10 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	};
 
 	/** 同 syncPanelsFromDisk：世界状态经助手/面板编辑后，剧情侧须从盘对齐 */
-	const syncStateFromDisk = () => {
+	const syncStateFromDisk = (force = false) => {
 		if (!stateFile) return;
+		// 普通 context 只信当前分支快照；只有 REST/助手明确写盘后才收编磁盘状态。
+		if (!force) return;
 		try {
 			const disk = { ...defaultState(), ...loadState(stateFile) };
 			if (JSON.stringify(disk) !== JSON.stringify(state)) {
@@ -481,7 +483,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 
 	// 供 server importPanels / applyStatePatch 直调（不经 slash 命令桥）
 	registerStoryPanelSync(syncPanelsFromDisk);
-	registerStoryStateSync(syncStateFromDisk);
+	registerStoryStateSync(() => syncStateFromDisk(true));
 
 	/** 从当前剧情分支上最近的面板快照恢复；无快照返回 false */
 	const restorePanelsFromBranch = (sm: { getBranch: (fromId?: string) => unknown[] }): boolean => {

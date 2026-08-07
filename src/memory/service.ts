@@ -362,7 +362,7 @@ export async function onNarrativeTurnEnd(
 	error?: string;
 	noop?: boolean;
 }> {
-	return enqueueMemoryWrite(`${cwd}:${memoryScopeId(normalizeScope(scope))}`, async () => {
+	return enqueueMemoryWrite(cwd, async () => {
 	const cfg = loadMemoryConfig(cwd);
 	if (!cfg.enabled) return { stored: false, counter: 0 };
 	const store = cfg.stores.find((s) => s.id === "narrative" && s.enabled);
