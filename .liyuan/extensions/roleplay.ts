@@ -1922,13 +1922,18 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					const output = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1400);
 					const operations = output ? parseCharacterStateAgent(output) : null;
 					if (!operations?.length) return;
-					const applied = applyMvuOperations(mvu, operations);
+					// 卡片没有 MVU 初始树时，角色状态 Agent 的 replace 也应能创建对象字段；
+					// 通用 MVU replace 仍保持严格语义，避免掩盖普通卡片的路径错误。
+					const stateOperations = operations.map((operation) =>
+						operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
+					);
+					const applied = applyMvuOperations(mvu, stateOperations);
 					if (applied.applied.length) {
 						mvu = applied.data;
 						if (mvuFile) saveMvuData(mvuFile, mvu);
 						snapshotMvu();
 					}
-					if (process.env.RP_DEBUG) console.error(`[rp-character-state] applied=${applied.applied.length} warnings=${applied.warnings.length}`);
+					if (process.env.RP_DEBUG) console.error(`[rp-character-state] applied=${applied.applied.length} warnings=${applied.warnings.length}${applied.warnings.length ? ` details=${applied.warnings.join(" | ")}` : ""}`);
 				} catch (error) {
 					if (process.env.RP_DEBUG) console.error(`[rp-character-state] skipped: ${error instanceof Error ? error.message : String(error)}`);
 				}
