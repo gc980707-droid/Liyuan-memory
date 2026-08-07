@@ -28,3 +28,9 @@ export function formatPreflightAdvice(advice: PreflightAdvice): string {
 	const lines = [advice.focus && `重点：${advice.focus}`, ...advice.characterIntents.map((x) => `角色意图：${x}`), ...advice.constraints.map((x) => `约束：${x}`), ...advice.avoid.map((x) => `避免：${x}`)].filter(Boolean);
 	return lines.join("\n").slice(0, 2400);
 }
+
+export function hardenPreflightAdvice(advice: PreflightAdvice, stateText: string): PreflightAdvice {
+	const constraints = [...advice.constraints];
+	if (stateText.trim()) constraints.unshift(`硬约束：当前世界状态优先，不得擅自修改时间、地点、角色、物品或已确认事实；只有正文明确经过时间/地点推进后才可更新。当前状态：${stateText.slice(0, 900)}`);
+	return { ...advice, constraints: [...new Set(constraints)].slice(0, 12) };
+}
