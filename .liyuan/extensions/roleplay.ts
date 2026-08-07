@@ -1918,7 +1918,13 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				}
 				if (Object.keys(result.patch).length > 0) {
 					const knownNames = [card.name, config.userName, ...Object.keys(state.characters)];
-					const applied = applyPatch(state, canonicalizeCharacterKeys(result.patch, knownNames));
+					const scribePatch = canonicalizeCharacterKeys(result.patch, knownNames);
+					const timeGate = gateTimePatch(userText, state.time, scribePatch.time);
+					if (!timeGate.allowed) {
+						delete scribePatch.time;
+						if (process.env.RP_DEBUG) console.error(`[rp-scribe] ${timeGate.reason}`);
+					}
+					const applied = applyPatch(state, scribePatch);
 					state = applied.state;
 					if (stateFile) saveState(stateFile, state);
 					snapshotState();
