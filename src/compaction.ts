@@ -46,7 +46,7 @@ export function buildRpSummaryPrompt(input: RpSummaryPromptInput): RpSummaryProm
 ## 当前场景
 剧内此刻：第几天、什么时段、什么地点、谁在场、正在进行什么动作。必须以对话记录中**最新**的场景为准——这是续演点，写成更早的场景会导致剧情倒退。
 
-规则：只记录对话中实际发生的事；不虚构、不评论、不续写剧情；人名地名保持剧中写法。`;
+规则：只记录对话中实际发生的事；不虚构、不评论、不续写剧情；人名地名保持剧中写法。当前世界状态快照只是辅助参考，与对话冲突时以最新对话为准。摘要是上下文接力资料，不是新的世界状态，不得覆盖后续更晚的账本、MVU、正文或用户明确修正。`;
 
 	const parts: string[] = [`<conversation>\n${conversationText}\n</conversation>`];
 	if (previousSummary) {

@@ -43,6 +43,7 @@ test("RP 摘要提示词：结构完整、以当前场景收尾、语言与用�
 	assert.ok(userText.includes("<conversation>"));
 	assert.ok(userText.includes("黄铜怀表"));
 	assert.ok(userText.includes("以对话记录为准"), "账本快照须声明从属地位");
+	assert.ok(systemPrompt.includes("不是新的世界状态"), "摘要不得伪装成当前状态");
 	assert.ok(!userText.includes("<previous-summary>"), "无既有摘要时不应出现该块");
 });
 

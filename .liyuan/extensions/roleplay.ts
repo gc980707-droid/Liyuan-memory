@@ -2106,6 +2106,10 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			});
 			const summary = await sideComplete(ctx, systemPrompt, userText, 4096, event.signal);
 			if (!summary) return undefined;
+			const previous = prep.previousSummary?.trim();
+			if (previous && summary.trim() === previous) {
+				if (process.env.RP_DEBUG) console.error("[rp-compaction] summary unchanged; retaining generated summary");
+			}
 			return {
 				compaction: {
 					summary,

@@ -176,6 +176,18 @@ test("末端注入：memoryIndex 常驻展示已有记忆目录", () => {
 	assert.ok(text.includes("不是完整事实"));
 });
 
+test("末端注入：旧记忆不得覆盖当前状态", () => {
+	const text = buildTurnInjection({
+		state: { ...defaultState(), time: "第二天", location: "车站" },
+		activatedLore: [],
+		card: { name: "Alice" } as never,
+		config: { userName: "旅人", language: "中文" } as never,
+		memoryHits: [{ text: "旧记忆：第一天仍在森林。", source: "剧情数据库" }],
+	});
+	assert.match(text, /不能推翻最新摘要/);
+	assert.match(text, /不能推翻最新摘要/);
+});
+
 test("末端注入：MVU 变量快照与更新协议", () => {
 	const text = buildTurnInjection({
 		state: defaultState(),
