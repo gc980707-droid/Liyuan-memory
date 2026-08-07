@@ -34,6 +34,7 @@ import { applyMvuOperations, defaultMvuData, formatMvuData, loadMvuData, parseIn
 import { createMacroEnv, evalPresetMacros } from "../../src/preset-macro.ts";
 import { loadValidatedStatus, saveValidatedStatus, validateStatusSubmission, type ValidatedStatus } from "../../src/status-submit.ts";
 import { formatPreflightAdvice, hardenPreflightAdvice, parsePreflightAdvice } from "../../src/preflight.ts";
+import { gateTimePatch } from "../../src/time-gate.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
 import {
 	constantEntries,
@@ -982,8 +983,21 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					config.userName,
 					...Object.keys(state.characters),
 				];
-				const patch = canonicalizeCharacterKeys(params as Record<string, unknown>, knownNames);
-				const result = applyPatch(state, patch);
+			const patch = canonicalizeCharacterKeys(params as Record<string, unknown>, knownNames);
+			const gateUserText = (() => {
+				const branch = ctx.sessionManager.getBranch() as Array<Record<string, unknown>>;
+				for (let i = branch.length - 1; i >= 0; i--) {
+					const message = branch[i]?.message as { role?: string; content?: unknown } | undefined;
+					if (message?.role === "user") return extractText(message);
+				}
+				return "";
+			})();
+			const timeGate = gateTimePatch(gateUserText, state.time, patch.time);
+			if (!timeGate.allowed) {
+				delete patch.time;
+				return { content: [{ type: "text", text: `⚠ ${timeGate.reason}\n时间保持不变；如果确实要推进时间，请在用户输入或正文中明确说明经过了多久。` }], details: { state, timeRejected: true } };
+			}
+			const result = applyPatch(state, patch);
 				state = result.state;
 				if (stateFile) saveState(stateFile, state);
 				snapshotState();
