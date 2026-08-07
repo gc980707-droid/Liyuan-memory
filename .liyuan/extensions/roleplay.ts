@@ -1624,7 +1624,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		});
 	};
 
-	pi.on("before_agent_start", async (event) => {
+	pi.on("before_agent_start", async (event, ctx) => {
 		// 助手/REST 可能已改磁盘；进剧情回合前先对齐，避免回档
 		if (rpMode) {
 			syncPanelsFromDisk();
