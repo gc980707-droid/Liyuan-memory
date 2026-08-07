@@ -1682,7 +1682,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			try {
 				if (process.env.RP_DEBUG) console.error(`[rp-preflight] start session=${ctx.sessionManager.getSessionId().slice(0, 12)} prompt=${prompt.slice(0, 80)}`);
 				const current = `用户输入：${prompt}\n\n世界状态：${formatState(state)}\n\nMVU：${formatMvuData(mvu).slice(0, 12000)}`;
-				const roster = coreCharacterNames(card ?? ({ name: "" } as CharacterCard), allEntries());
+				const roster = coreCharacterNames(card ?? ({ name: "" } as CharacterCard), allEntries(), { userName: config.userName, sceneText: assistantText });
 				const turnPlan = buildTurnPlan(prompt, roster, false);
 				const proposals = await Promise.all(roster.map(async (name) => ({
 					name,
@@ -1917,8 +1917,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		if (config.multiAgentPreflight === true && card) {
 			void (async () => {
 				try {
-					if (process.env.RP_DEBUG) console.error(`[rp-character-state] start characters=${coreCharacterNames(card, allEntries()).join(",") || "none"}`);
-					const roster = coreCharacterNames(card, allEntries());
+					const roster = coreCharacterNames(card, allEntries(), { userName: config.userName, sceneText: assistantText });
+					if (process.env.RP_DEBUG) console.error(`[rp-character-state] start characters=${roster.join(",") || "none"}`);
 					const prompt = buildCharacterStatePrompt({ userText, narrative: assistantText, currentMvu: formatMvuData(mvu), characterNames: roster });
 					const output = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1400);
 					const operations = output ? parseCharacterStateAgent(output) : null;
