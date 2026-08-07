@@ -33,6 +33,7 @@ import { formatMemoryIndex, inheritMemoryScope, memoryRecallForTurn } from "../.
 import { applyMvuOperations, defaultMvuData, formatMvuData, loadMvuData, parseInitVar, parseMvuUpdates, saveMvuData, type MvuData } from "../../src/mvu.ts";
 import { createMacroEnv, evalPresetMacros } from "../../src/preset-macro.ts";
 import { loadValidatedStatus, saveValidatedStatus, validateStatusSubmission, type ValidatedStatus } from "../../src/status-submit.ts";
+import { formatPreflightAdvice, parsePreflightAdvice } from "../../src/preflight.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
 import {
 	constantEntries,
@@ -1641,7 +1642,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			try {
 				const current = `用户输入：${prompt}\n\n世界状态：${formatState(state)}\n\nMVU：${formatMvuData(mvu).slice(0, 12000)}`;
 				const proposal = await sideComplete(ctx, "你是角色动机顾问。只输出简短的角色目标、情绪、约束和可能行动，不写正文，不调用工具，不改变正典。", current, 1200);
-				preflightAdvice = await sideComplete(ctx, "你是剧情导演。把角色提案整理为隐藏创作指导：本轮重点、角色意图、连续性约束、应避免事项。不要写正文。", `${current}\n\n角色提案：${proposal ?? "无"}`, 1200) || proposal;
+				const director = await sideComplete(ctx, "你是剧情导演。只输出 JSON：{\"focus\":\"\",\"characterIntents\":[],\"constraints\":[],\"avoid\":[]}。整合角色提案为隐藏创作指导，不写正文。", `${current}\n\n角色提案：${proposal ?? "无"}`, 1200);
+				const parsed = parsePreflightAdvice(director || proposal);
+				preflightAdvice = parsed ? formatPreflightAdvice(parsed) : null;
 			} catch (error) {
 				if (process.env.RP_DEBUG) console.error(`[rp-preflight] 跳过：${error instanceof Error ? error.message : String(error)}`);
 			}
