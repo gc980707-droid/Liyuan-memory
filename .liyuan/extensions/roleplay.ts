@@ -1484,8 +1484,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			}
 			if (Object.keys(mvu).length) saveMvuData(mvuFile, mvu);
 			try {
-				const rawCard = readCardRawJson(cardAbs).raw;
-				const manifestFile = join(dir(ctx.cwd, "manifests"), `${cardAbs.replace(/[^A-Za-z0-9._-]/g, "_")}.json`);
+				const manifestCardPath = resolvePath(ctx.cwd, config.card);
+				const rawCard = readCardRawJson(manifestCardPath).raw;
+				const manifestFile = join(dir(ctx.cwd, "manifests"), `${manifestCardPath.replace(/[^A-Za-z0-9._-]/g, "_")}.json`);
 				const manifest = buildCardManifest({ raw: rawCard, card, cardPath: config.card, lore: card.book, initialMvu: mvu });
 				saveCardManifest(manifestFile, manifest);
 				if (process.env.RP_DEBUG) console.error(`[rp-manifest] saved ${manifestFile} characters=${manifest.characters.length} mvu=${manifest.capabilities.mvu} regex=${manifest.capabilities.displayRegex}`);
