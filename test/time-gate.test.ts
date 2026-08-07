@@ -24,6 +24,7 @@ test("自然动作允许小范围耗时", () => {
 });
 
 test("状态栏时间不能绕过世界状态门禁", () => {
-	assert.equal(gateStatusTime("起来上厕所", "7月15日14:30", "📅 7月15日 | ⏰ 14:45").allowed, false);
+	assert.equal(gateStatusTime("起来上厕所", "7月15日14:30", "📅 7月15日 | ⏰ 14:42").allowed, true);
+	assert.equal(gateStatusTime("起来上厕所", "7月15日14:30", "📅 7月15日 | ⏰ 15:00").allowed, false);
 	assert.equal(gateStatusTime("过了十五分钟", "7月15日14:30", "⏰ 14:45").allowed, true);
 });

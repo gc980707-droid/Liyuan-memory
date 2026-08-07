@@ -5,7 +5,7 @@ export function hasExplicitTimeAdvance(text: string): boolean {
 
 export type ActionDuration = { name: string; min: number; max: number };
 const ACTION_DURATIONS: ActionDuration[] = [
-	{ name: "使用卫生间", min: 5, max: 10 },
+	{ name: "使用卫生间", min: 5, max: 15 },
 	{ name: "接水", min: 3, max: 8 },
 	{ name: "短暂交谈", min: 1, max: 5 },
 	{ name: "吃饭", min: 15, max: 40 },
@@ -62,5 +62,10 @@ export function gateStatusTime(userText: string, currentTime: string, statusText
 	const currentValue = Number(current[1]) * 60 + Number(current[2] || 0);
 	const requestedValue = Number(requested[1]) * 60 + Number(requested[2] || 0);
 	if (currentValue === requestedValue || hasExplicitTimeAdvance(userText)) return { allowed: true };
+	const action = inferActionDuration(userText);
+	if (action) {
+		const delta = (requestedValue - currentValue + 1440) % 1440;
+		if (delta >= action.min && delta <= action.max) return { allowed: true };
+	}
 	return { allowed: false, reason: `状态栏时间「${requested[0]}」与当前世界状态「${current[0]}」不一致；本轮没有明确时间推进，必须按世界状态填写。` };
 }
