@@ -1917,11 +1917,15 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		if (config.multiAgentPreflight === true && card) {
 			void (async () => {
 				try {
+					if (process.env.RP_DEBUG) console.error(`[rp-character-state] start characters=${coreCharacterNames(card, allEntries()).join(",") || "none"}`);
 					const roster = coreCharacterNames(card, allEntries());
 					const prompt = buildCharacterStatePrompt({ userText, narrative: assistantText, currentMvu: formatMvuData(mvu), characterNames: roster });
 					const output = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1400);
 					const operations = output ? parseCharacterStateAgent(output) : null;
-					if (!operations?.length) return;
+					if (!operations?.length) {
+						if (process.env.RP_DEBUG) console.error("[rp-character-state] empty output");
+						return;
+					}
 					// 卡片没有 MVU 初始树时，角色状态 Agent 的 replace 也应能创建对象字段；
 					// 通用 MVU replace 仍保持严格语义，避免掩盖普通卡片的路径错误。
 					const stateOperations = operations.map((operation) =>
