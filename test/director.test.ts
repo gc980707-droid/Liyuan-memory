@@ -189,6 +189,11 @@ test("末端注入：MVU 变量快照与更新协议", () => {
 	assert.ok(text.includes("JSONPatch"));
 });
 
+test("末端注入：多智能体预演仅作为隐藏参考", () => {
+	const text = buildTurnInjection({ state: defaultState(), activatedLore: [], card, config: DEFAULT_CONFIG, preflightAdvice: "角色保持警惕。" });
+	assert.ok(text.includes("【多智能体预演，仅供本轮参考】"));
+});
+
 test("末端注入：语言失配时出现纠正提醒", () => {
 	const base = { state: defaultState(), activatedLore: [], card, config: DEFAULT_CONFIG };
 	assert.ok(buildTurnInjection({ ...base, languageMismatch: true }).includes("错误的语言"));

@@ -298,6 +298,7 @@ export interface RpConfigView {
 	disabledLore?: string[];
 	backendControl?: boolean;
 	creationMode?: "ask" | "silent";
+	multiAgentPreflight?: boolean;
 }
 
 export interface CardResponse {

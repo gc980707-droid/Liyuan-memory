@@ -659,6 +659,7 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 	const [maxLore, setMaxLore] = useState(3);
 	const [backendControl, setBackendControl] = useState(true);
 	const [askMode, setAskMode] = useState(false);
+	const [multiAgentPreflight, setMultiAgentPreflight] = useState(false);
 	const [dirty, setDirty] = useState(false);
 	const [dark, setDark] = useState(() => getTheme() === "dark");
 
@@ -668,6 +669,7 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 			setMaxLore(data.config.maxLoreInjections);
 			setBackendControl(data.config.backendControl !== false);
 			setAskMode(data.config.creationMode === "ask");
+			setMultiAgentPreflight(data.config.multiAgentPreflight === true);
 			setDirty(false);
 		}
 	}, [data]);
@@ -689,7 +691,8 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 				scanDepth,
 				maxLoreInjections: maxLore,
 				backendControl,
-				creationMode: askMode ? "ask" : "silent",
+					creationMode: askMode ? "ask" : "silent",
+					multiAgentPreflight,
 			});
 			reload();
 		}, "已保存并重载会话");
@@ -763,6 +766,11 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 						<div className="field-hint">
 							开=询问档：剧情相关（含「我该怎么办」）一律戏内，用选择卡共创；关=静默档自行推进。戏外只办系统事，不处理剧情。
 						</div>
+						<div className="toggle-row">
+							<span>多智能体剧情预演</span>
+							<Toggle checked={multiAgentPreflight} onChange={(v) => { setMultiAgentPreflight(v); touch(); }} />
+						</div>
+						<div className="field-hint">开启后，每轮先由旁路角色顾问和导演 Agent 提供隐藏建议，再交给主 Agent 写正文。不会重写正文或直接修改正典。</div>
 					</section>
 
 					<div className="sticky-save">

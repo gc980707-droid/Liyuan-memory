@@ -172,6 +172,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	let validatedStatus: ValidatedStatus | null = null;
 	let statusFile = "";
 	let statusSubmitAttempts = 0;
+	let preflightKey = "";
+	let preflightAdvice: string | null = null;
 	// agent 自建面板（柱 2）：与 state 同一套「磁盘缓存 + 会话树快照」机制
 	let panels: PanelMap = {};
 	let panelsFile = "";
@@ -1632,6 +1634,18 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		statusSubmitAttempts = 0;
 		// 预设只服务剧情生成：按本轮用户原文判定，整段 agent 循环（含 tool 轮）沿用
 		const prompt = typeof event?.prompt === "string" ? event.prompt : "";
+		const preflightId = `${ctx.sessionManager.getSessionId()}::${ctx.sessionManager.getLeafId() ?? "root"}::${prompt}`;
+		if (config.multiAgentPreflight === true && prompt.trim() && !isBackstageText(prompt) && preflightId !== preflightKey) {
+			preflightKey = preflightId;
+			preflightAdvice = null;
+			try {
+				const current = `用户输入：${prompt}\n\n世界状态：${formatState(state)}\n\nMVU：${formatMvuData(mvu).slice(0, 12000)}`;
+				const proposal = await sideComplete(ctx, "你是角色动机顾问。只输出简短的角色目标、情绪、约束和可能行动，不写正文，不调用工具，不改变正典。", current, 1200);
+				preflightAdvice = await sideComplete(ctx, "你是剧情导演。把角色提案整理为隐藏创作指导：本轮重点、角色意图、连续性约束、应避免事项。不要写正文。", `${current}\n\n角色提案：${proposal ?? "无"}`, 1200) || proposal;
+			} catch (error) {
+				if (process.env.RP_DEBUG) console.error(`[rp-preflight] 跳过：${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
 		applyStoryPresetThisTurn = shouldApplyStoryPreset(prompt);
 		const sp = applyStoryPresetThisTurn ? systemPromptStory : systemPromptOps;
 		if (!sp) return undefined;
@@ -1791,6 +1805,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				memoryIndex,
 				memoryHits,
 				mvuSnapshot: Object.keys(mvu).length ? formatMvuData(mvu) : undefined,
+				preflightAdvice: preflightAdvice ?? undefined,
 				statusBarFormats,
 			}),
 			display: false,

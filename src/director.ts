@@ -308,6 +308,7 @@ export interface TurnInjectionOptions {
 	memoryHits?: Array<string | { text: string; score?: number; source?: string }>;
 	/** MVU 当前变量快照 */
 	mvuSnapshot?: string;
+	preflightAdvice?: string;
 	/** 卡作者状态栏格式；非空则末端钉「正文后必须出状态栏」 */
 	statusBarFormats?: string[];
 	/**
@@ -336,6 +337,7 @@ export function buildTurnInjection({
 	memoryIndex,
 	memoryHits,
 	mvuSnapshot,
+	preflightAdvice,
 	statusBarFormats,
 	toolContinuation,
 	presetActive,
@@ -350,6 +352,7 @@ export function buildTurnInjection({
 	if (mvuSnapshot) {
 		blocks.push(`【MVU 当前变量】以下是确定性变量快照。剧情与状态栏必须以此为准；若本轮发生变化，在回复末尾输出 <UpdateVariable><JSONPatch>[...]</JSONPatch></UpdateVariable>，支持 replace/delta/insert/remove/move。\n${mvuSnapshot}`);
 	}
+	if (preflightAdvice) blocks.push(`【多智能体预演，仅供本轮参考】${preflightAdvice}\n不要提及预演；与用户输入、世界状态或正典冲突时以后者为准。`);
 
 	// 活跃面板当前内容（柱 2）：用户手改后已同步进扩展内存；此处注入全文快照（或旧式一行索引）。
 	// 模型续写必须以这里为准，禁止凭记忆用过时内容整页 panel_write 盖掉。
