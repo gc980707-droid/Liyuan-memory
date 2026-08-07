@@ -22,14 +22,17 @@ export function cardManifestId(raw: unknown): string {
 	return createHash("sha256").update(JSON.stringify(raw)).digest("hex").slice(0, 16);
 }
 
-export function buildCardManifest(input: { raw: Record<string, unknown>; card: CharacterCard; cardPath: string; lore: LorebookEntry[]; initialMvu?: MvuData }): CardManifest {
+export function buildCardManifest(input: { raw: Record<string, unknown>; card: CharacterCard; cardPath: string; lore: LorebookEntry[]; initialMvu?: MvuData; userName?: string }): CardManifest {
 	const data = input.raw.data && typeof input.raw.data === "object" ? input.raw.data as Record<string, unknown> : input.raw;
 	const ext = data.extensions && typeof data.extensions === "object" ? data.extensions as Record<string, unknown> : {};
 	const helper = ext.tavern_helper && typeof ext.tavern_helper === "object";
 	const now = new Date().toISOString();
-	const names = new Set<string>([input.card.name]);
+	const names = new Set<string>();
+	const userName = input.userName?.trim();
+	const cardName = input.card.name.trim();
+	if (cardName && cardName !== userName && !/{{user}}/i.test(cardName) && !/福利姬|角色卡|剧本|故事|录$/u.test(cardName)) names.add(cardName);
 	for (const entry of input.lore) {
-		if (entry.comment && !/状态|规则|文风|世界|设定|资料|profile|rule/i.test(entry.comment)) names.add(entry.comment);
+		if (entry.comment && entry.comment !== userName && entry.comment !== "{{user}}" && !/状态|规则|文风|世界|设定|资料|profile|rule/i.test(entry.comment)) names.add(entry.comment);
 	}
 	return {
 		version: 1,
