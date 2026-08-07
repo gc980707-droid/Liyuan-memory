@@ -125,6 +125,15 @@ import { listSkills, saveSkill } from "../src/skills.ts";
 import { DEFAULT_CONFIG, type LorebookEntry, type RpConfig } from "../src/types.ts";
 import { readJsonFile } from "../src/jsonio.ts";
 import { formatBytes, listMedia, listUploads, saveUpload } from "../src/uploads.ts";
+import {
+	addManifestCharacterToLore,
+	buildCardManifest,
+	cardManifestFile,
+	loadCardManifest,
+	promoteManifestCharacter,
+	saveCardManifest,
+	type CardManifest,
+} from "../src/card-manifest.ts";
 
 // ---------- 宿主接口（由 main.ts 实现；纯平面类型，pi 止步于 main） ----------
 
@@ -2835,6 +2844,58 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 						text,
 					})),
 				});
+				return true;
+			}
+			case "GET /api/card/manifest": {
+				const config = loadConfig(host.cwd);
+				const cardPath = config.card;
+				const card = loadCardFile(resolvePath(host.cwd, cardPath));
+				const manifestPath = cardManifestFile(host.cwd, cardPath);
+				const manifest = loadCardManifest(manifestPath) ?? buildCardManifest({
+					raw: readCardRawJson(resolvePath(host.cwd, cardPath)).raw,
+					card,
+					cardPath,
+					lore: card.book,
+				});
+				saveCardManifest(manifestPath, manifest);
+				sendJson(res, 200, { manifest });
+				return true;
+			}
+			case "POST /api/card/characters/promote": {
+				if (refuseWhileStreaming()) return true;
+				const body = JSON.parse(await readBody(req)) as {
+					name?: string;
+					description?: string;
+					aliases?: string[];
+					kind?: "background" | "recurring" | "core";
+				};
+				const name = (body.name ?? "").trim();
+				const description = (body.description ?? "").trim();
+				if (!name || name === "{{user}}") throw new Error("无效的角色名");
+				if (!description) throw new Error("角色档案不能为空");
+				if (body.kind !== "background" && body.kind !== "recurring" && body.kind !== "core") throw new Error("角色类型无效");
+				const config = loadConfig(host.cwd);
+				const cardPath = config.card;
+				const card = loadCardFile(resolvePath(host.cwd, cardPath));
+				if (name === card.name.trim()) throw new Error("不能把角色卡标题作为角色");
+				const manifestPath = cardManifestFile(host.cwd, cardPath);
+				const manifest = loadCardManifest(manifestPath) ?? buildCardManifest({ raw: readCardRawJson(resolvePath(host.cwd, cardPath)).raw, card, cardPath, lore: card.book });
+				const current = manifest.characters.find((character) => character.name === name);
+				let next: CardManifest;
+				if (current?.loreFingerprint) {
+					next = promoteManifestCharacter(manifest, name, body.kind);
+					saveCardManifest(manifestPath, next);
+				} else {
+					next = addManifestCharacterToLore(manifest, manifestPath, overlayPathFor(host.cwd, card.name), {
+						name,
+						description,
+						aliases: body.aliases,
+						kind: body.kind,
+					});
+				}
+				await host.softRefreshConfig();
+				host.notify("info", `已收编角色「${name}」为${body.kind === "core" ? "核心" : body.kind === "recurring" ? "常驻" : "背景"}角色`);
+				sendJson(res, 200, { ok: true, manifest: next, duplicate: !!current?.loreFingerprint });
 				return true;
 			}
 			case "POST /api/greeting": {

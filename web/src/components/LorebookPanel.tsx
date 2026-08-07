@@ -19,6 +19,7 @@ import {
 	type LoreEntryPatchBody,
 	type LoreEntryView,
 	type LoreSearchHit,
+	type CardManifestResponse,
 } from "../api.ts";
 import { bumpWatchPanels, ConfirmButton, Field, PanelStatus, SearchInput, Toggle, useAction, usePanelData } from "./kit.tsx";
 
@@ -544,6 +545,14 @@ export function LorebookPanel({ toast }: { toast: (level: "info" | "warning" | "
 	const [newContent, setNewContent] = useState("");
 	const [newConstant, setNewConstant] = useState(false);
 	const [newOrder, setNewOrder] = useState("100");
+	const [manifest, setManifest] = useState<CardManifestResponse["manifest"] | null>(null);
+	const [promoteName, setPromoteName] = useState("");
+	const [promoteDescription, setPromoteDescription] = useState("");
+	const [promoteKind, setPromoteKind] = useState<"background" | "recurring" | "core">("recurring");
+
+	useEffect(() => {
+		void apiGet<CardManifestResponse>("/api/card/manifest").then((r) => setManifest(r.manifest)).catch(() => setManifest(null));
+	}, [viewKey]);
 
 	const doSearch = async () => {
 		const q = query.trim();
@@ -609,6 +618,33 @@ export function LorebookPanel({ toast }: { toast: (level: "info" | "warning" | "
 			if (r.duplicate) toast("warning", "正文与本书已有条目重复，未重复写入");
 		}, "条目已添加");
 
+	const promoteCharacter = () =>
+		run(async () => {
+			const r = await apiPost<CardManifestResponse & { duplicate?: boolean }>("/api/card/characters/promote", {
+				name: promoteName.trim(),
+				description: promoteDescription.trim(),
+				kind: promoteKind,
+			});
+			setManifest(r.manifest);
+			setPromoteName("");
+			setPromoteDescription("");
+			bumpWatchPanels();
+			reload();
+		}, "角色已收编");
+
+	const promoteExisting = (name: string, kind: "background" | "recurring" | "core") =>
+		run(async () => {
+			const character = manifest?.characters.find((item) => item.name === name);
+			if (!character?.loreFingerprint) {
+				setPromoteName(name);
+				setPromoteKind(kind);
+				toast("warning", "请补充角色档案后再收编该角色");
+				return;
+			}
+			const r = await apiPost<CardManifestResponse>("/api/card/characters/promote", { name, description: "已存在的角色档案", kind });
+			setManifest(r.manifest);
+		}, "角色类型已更新");
+
 	const filtered = useMemo(() => {
 		const list = data?.entries ?? [];
 		const q = query.trim().toLowerCase();
@@ -630,6 +666,33 @@ export function LorebookPanel({ toast }: { toast: (level: "info" | "warning" | "
 
 	return (
 		<div className="panel-body">
+			<section className="sp-section">
+				<h4>角色编排</h4>
+				<div className="field-hint">确认后写入本卡补充世界书，并加入长期角色 Agent。不会修改原始角色卡。</div>
+				{manifest && manifest.characters.length > 0 && (
+					<div className="lore-hits">
+						{manifest.characters.map((character) => (
+							<div className="lore-hit" key={character.name}>
+								<strong>{character.name}</strong>{" "}
+								<span className="lore-meta">{character.kind === "core" ? "核心" : character.kind === "recurring" ? "常驻" : "背景"}</span>
+								{character.loreFingerprint ? (
+									<select className="panel-search" value={character.kind} disabled={busy} onChange={(ev) => void promoteExisting(character.name, ev.target.value as "background" | "recurring" | "core")}>
+										<option value="background">背景</option><option value="recurring">常驻</option><option value="core">核心</option>
+									</select>
+								) : <span className="lore-meta">尚未收编</span>}
+							</div>
+						))}
+					</div>
+				)}
+				<div className="lore-edit lore-add-form">
+					<Field label="角色名"><input className="panel-search" value={promoteName} onChange={(ev) => setPromoteName(ev.target.value)} placeholder="如：列车员" /></Field>
+					<div className="panel-row lore-edit-row">
+						<Field label="收编类型"><select className="panel-search" value={promoteKind} onChange={(ev) => setPromoteKind(ev.target.value as typeof promoteKind)}><option value="background">背景</option><option value="recurring">常驻</option><option value="core">核心</option></select></Field>
+					</div>
+					<Field label="角色档案" hint="写入补充世界书；已有角色升级类型时可留空"><textarea className="panel-search lore-content-edit" rows={4} value={promoteDescription} onChange={(ev) => setPromoteDescription(ev.target.value)} placeholder="身份、性格、目标、与当前剧情的关系…" /></Field>
+					<button type="button" className="drawer-btn save-btn" disabled={busy || !promoteName.trim() || !promoteDescription.trim()} onClick={promoteCharacter}>确认收编角色</button>
+				</div>
+			</section>
 			<BooksSection toast={toast} view={view} onView={setView} onMountChanged={reload} />
 			<PanelStatus loading={loading} error={error} hasData={!!data && !!view} />
 			{!view && <div className="sp-empty">点上方书名查看该本条目</div>}

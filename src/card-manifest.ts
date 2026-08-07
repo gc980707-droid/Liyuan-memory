@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { CharacterCard, LorebookEntry } from "./types.ts";
 import { cardStatusBarFormats, extractRegexScripts } from "./cardfront.ts";
 import type { MvuData } from "./mvu.ts";
@@ -12,7 +12,14 @@ export interface CardManifest {
 	cardId: string;
 	cardPath: string;
 	cardName: string;
-	characters: Array<{ name: string; kind: "core" | "recurring" | "background"; agentEnabled: boolean }>;
+	characters: Array<{
+		name: string;
+		kind: "core" | "recurring" | "background";
+		agentEnabled: boolean;
+		loreFingerprint?: string;
+		aliases?: string[];
+		promotedAt?: string;
+	}>;
 	mvu: { initial: MvuData; detected: boolean };
 	status: { required: boolean; formats: string[]; regexRuleCount: number };
 	capabilities: { mvu: boolean; displayRegex: boolean; tavernHelper: boolean };
@@ -55,6 +62,12 @@ export function saveCardManifest(file: string, manifest: CardManifest): void {
 	writeFileSync(file, JSON.stringify(manifest, null, 2), "utf8");
 }
 
+/** Manifest 是运行配置，按角色卡路径隔离并持久化到项目目录。 */
+export function cardManifestFile(cwd: string, cardPath: string): string {
+	const id = resolve(cwd, cardPath).replace(/[^A-Za-z0-9._-]/g, "_");
+	return join(cwd, "manifests", `${id}.json`);
+}
+
 export function promoteManifestCharacter(manifest: CardManifest, name: string, kind: "core" | "recurring" | "background"): CardManifest {
 	const target = name.trim();
 	if (!target || target === "{{user}}") throw new Error("无效的常驻角色名");
@@ -63,8 +76,9 @@ export function promoteManifestCharacter(manifest: CardManifest, name: string, k
 	if (existing) {
 		existing.kind = kind;
 		existing.agentEnabled = kind !== "background";
+		existing.promotedAt = new Date().toISOString();
 	} else {
-		characters.push({ name: target, kind, agentEnabled: kind !== "background" });
+		characters.push({ name: target, kind, agentEnabled: kind !== "background", promotedAt: new Date().toISOString() });
 	}
 	return { ...manifest, characters, updatedAt: new Date().toISOString() };
 }
@@ -96,7 +110,11 @@ export function addManifestCharacterToLore(
 	const next = promoteManifestCharacter(manifest, input.name, input.kind ?? "recurring");
 	const withLink = {
 		...next,
-		characters: next.characters.map((character) => character.name === input.name.trim() ? { ...character, loreFingerprint: loreFingerprint(entry.content) } : character),
+		characters: next.characters.map((character) => character.name === input.name.trim() ? {
+			...character,
+			loreFingerprint: loreFingerprint(entry.content),
+			aliases: input.aliases?.map((alias) => alias.trim()).filter(Boolean),
+		} : character),
 	};
 	saveCardManifest(manifestFile, withLink);
 	return withLink;

@@ -357,6 +357,22 @@ export interface LorebookResponse {
 	entries: LoreEntryView[];
 }
 
+export interface CardManifestCharacter {
+	name: string;
+	kind: "core" | "recurring" | "background";
+	agentEnabled: boolean;
+	loreFingerprint?: string;
+	aliases?: string[];
+	promotedAt?: string;
+}
+
+export interface CardManifestResponse {
+	manifest: {
+		cardName: string;
+		characters: CardManifestCharacter[];
+	};
+}
+
 export interface LoreSearchHit {
 	comment: string;
 	keys: string[];

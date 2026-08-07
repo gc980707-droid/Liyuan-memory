@@ -37,7 +37,7 @@ import { formatPreflightAdvice, hardenPreflightAdvice, parsePreflightAdvice } fr
 import { coreCharacterNames } from "../../src/character-roster.ts";
 import { buildTurnPlan, formatTurnPlan } from "../../src/turn-orchestrator.ts";
 import { buildCharacterStatePrompt, parseCharacterStateAgent } from "../../src/character-state-agent.ts";
-import { buildCardManifest, loadCardManifest, manifestAgentCharacters, saveCardManifest } from "../../src/card-manifest.ts";
+import { buildCardManifest, cardManifestFile, loadCardManifest, manifestAgentCharacters, saveCardManifest } from "../../src/card-manifest.ts";
 import { extractClockTime, gateStatusTime, gateTimePatch } from "../../src/time-gate.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
 import {
@@ -1487,7 +1487,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			try {
 				const manifestCardPath = resolvePath(ctx.cwd, config.card);
 				const rawCard = readCardRawJson(manifestCardPath).raw;
-				const manifestFile = join(dir(ctx.cwd, "manifests"), `${manifestCardPath.replace(/[^A-Za-z0-9._-]/g, "_")}.json`);
+				const manifestFile = cardManifestFile(ctx.cwd, config.card);
 				cardManifest = loadCardManifest(manifestFile) ?? buildCardManifest({ raw: rawCard, card, cardPath: config.card, lore: card.book, initialMvu: initialMvuFromCard(), userName: config.userName });
 				saveCardManifest(manifestFile, cardManifest);
 				if (process.env.RP_DEBUG) console.error(`[rp-manifest] saved ${manifestFile} characters=${cardManifest.characters.length} mvu=${cardManifest.capabilities.mvu} regex=${cardManifest.capabilities.displayRegex}`);
