@@ -681,7 +681,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			parameters: Type.Object({
 				query: Type.String({ description: "Keywords in the lorebook's own language" }),
 			}),
-			async execute(_id, params) {
+			async execute(_id, params, _signal, toolCtx) {
 				const hits = searchEntries(allEntries(), params.query, 3);
 				if (hits.length === 0) {
 					return { content: [{ type: "text", text: "No matching lore entries. The detail is unwritten — invent it consistently with established facts, then record important inventions via world_state_update (plot_threads or flags)." }] };
@@ -990,7 +990,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				flags: Type.Optional(Type.Record(Type.String(), Type.Union([Type.String(), Type.Null()]))),
 				plot_threads: Type.Optional(Type.Array(Type.String(), { description: "COMPLETE list of open plot threads" })),
 			}),
-			async execute(_id, params) {
+			async execute(_id, params, _signal, toolCtx) {
 				const knownNames = [
 					...(card ? [card.name] : []),
 					config.userName,
