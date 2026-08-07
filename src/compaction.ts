@@ -11,6 +11,10 @@ export interface RpSummaryPromptInput {
 	conversationText: string;
 	/** 当前世界状态快照（formatState 输出，辅助参考） */
 	stateSnapshot: string;
+	/** 压缩边界的结构化 MVU 快照，不是未来状态。 */
+	mvuSnapshot?: string;
+	/** 压缩边界的已验证状态栏快照。 */
+	statusSnapshot?: string;
 	/** 上一次压缩的摘要（增量压缩时合并） */
 	previousSummary?: string;
 	/** 摘要输出语言 */
@@ -25,7 +29,7 @@ export interface RpSummaryPrompt {
 }
 
 export function buildRpSummaryPrompt(input: RpSummaryPromptInput): RpSummaryPrompt {
-	const { conversationText, stateSnapshot, previousSummary, language, userName } = input;
+	const { conversationText, stateSnapshot, mvuSnapshot, statusSnapshot, previousSummary, language, userName } = input;
 
 	const systemPrompt = `你是一场长篇角色扮演的场记。你的任务是为即将从上下文中裁掉的早期剧情写一份接力摘要——它将成为主演模型唯一能看到的「前情」，后续剧情将基于「本摘要 + 保留的最近对话」继续演出。
 
@@ -46,7 +50,7 @@ export function buildRpSummaryPrompt(input: RpSummaryPromptInput): RpSummaryProm
 ## 当前场景
 剧内此刻：第几天、什么时段、什么地点、谁在场、正在进行什么动作。必须以对话记录中**最新**的场景为准——这是续演点，写成更早的场景会导致剧情倒退。
 
-规则：只记录对话中实际发生的事；不虚构、不评论、不续写剧情；人名地名保持剧中写法。当前世界状态快照只是辅助参考，与对话冲突时以最新对话为准。摘要是上下文接力资料，不是新的世界状态，不得覆盖后续更晚的账本、MVU、正文或用户明确修正。`;
+规则：只记录对话中实际发生的事；不虚构、不评论、不续写剧情；人名地名保持剧中写法。当前世界状态快照只是辅助参考，与对话冲突时以最新对话为准。摘要是上下文接力资料，不是新的世界状态，不得覆盖后续更晚的账本、MVU、正文或用户明确修正。MVU 和状态栏快照仅代表压缩边界，不能当作未来状态。`;
 
 	const parts: string[] = [`<conversation>\n${conversationText}\n</conversation>`];
 	if (previousSummary) {
@@ -55,6 +59,8 @@ export function buildRpSummaryPrompt(input: RpSummaryPromptInput): RpSummaryProm
 		);
 	}
 	parts.push(`【工具账本快照】（辅助参考；记账可能滞后于正文，与对话记录冲突时以对话记录为准）\n${stateSnapshot}`);
+	if (mvuSnapshot) parts.push(`【压缩边界 MVU】（仅作边界快照）\n${mvuSnapshot}`);
+	if (statusSnapshot) parts.push(`【压缩边界状态栏】（仅作边界快照）\n${statusSnapshot}`);
 	parts.push("请按系统指令输出接力摘要。");
 
 	return { systemPrompt, userText: parts.join("\n\n") };

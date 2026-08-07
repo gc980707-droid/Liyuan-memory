@@ -94,7 +94,7 @@ function removeAt(root: MvuData, path: string): unknown {
 	return value;
 }
 
-export function applyMvuOperations(data: MvuData, operations: MvuOperation[]): { data: MvuData; applied: string[]; warnings: string[] } {
+export function applyMvuOperations(data: MvuData, operations: MvuOperation[], options?: { atomic?: boolean }): { data: MvuData; applied: string[]; warnings: string[] } {
 	const next = structuredClone(data);
 	const applied: string[] = [];
 	const warnings: string[] = [];
@@ -132,6 +132,7 @@ export function applyMvuOperations(data: MvuData, operations: MvuOperation[]): {
 			warnings.push(error instanceof Error ? error.message : String(error));
 		}
 	}
+	if (options?.atomic && warnings.length) return { data, applied: [], warnings };
 	const encoded = JSON.stringify(next);
 	if (encoded.length > 200_000) return { data, applied: [], warnings: ["变量数据超过 200KB，整批更新已拒绝"] };
 	return { data: next, applied, warnings };

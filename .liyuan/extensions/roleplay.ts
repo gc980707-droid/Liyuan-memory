@@ -2010,7 +2010,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						const stateOperations = operations.map((operation) =>
 							operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
 						);
-						const applied = applyMvuOperations(mvu, stateOperations);
+						const applied = applyMvuOperations(mvu, stateOperations, { atomic: true });
 						if (applied.applied.length) {
 							mvu = applied.data;
 							if (mvuFile) saveMvuData(mvuFile, mvu);
@@ -2028,7 +2028,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					if (continuityOperations?.length && isCurrentGeneration(generation)) {
 						const continuityApplied = applyMvuOperations(mvu, continuityOperations.map((operation) =>
 							operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
-						));
+						), { atomic: true });
 						if (continuityApplied.applied.length) {
 							mvu = continuityApplied.data;
 							if (mvuFile) saveMvuData(mvuFile, mvu);
@@ -2113,6 +2113,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			const { systemPrompt, userText } = buildRpSummaryPrompt({
 				conversationText: serializeForSummary(msgs, config.userName, card.name),
 				stateSnapshot: formatState(state),
+				mvuSnapshot: formatMvuData(mvu),
+				statusSnapshot: validatedStatus?.raw,
 				previousSummary: prep.previousSummary,
 				language: config.language,
 				userName: config.userName,

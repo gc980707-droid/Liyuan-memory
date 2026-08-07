@@ -12,6 +12,17 @@ test("MVU JSONPatch: replace/delta/insert/remove/move", () => {
 	assert.deepEqual(result.data, { hp: 8, bag: ["a", "b"], new: "x" });
 });
 
+test("MVU atomic batch: any invalid operation rolls back the whole batch", () => {
+	const before = { Alice: { mood: "calm" } };
+	const result = applyMvuOperations(before, [
+		{ op: "insert", path: "/Alice/mood2", value: "alert" },
+		{ op: "delta", path: "/Alice/mood", value: 1 },
+	], { atomic: true });
+	assert.deepEqual(result.data, before);
+	assert.deepEqual(result.applied, []);
+	assert.ok(result.warnings.length > 0);
+});
+
 test("MVU 解析 JSONPatch 与旧 _.set", () => {
 	const text = `<UpdateVariable><JSONPatch>[{"op":"delta","path":"/hp","value":2}]</JSONPatch>\n_.set('name', 'old', 'new');</UpdateVariable>`;
 	const ops = parseMvuUpdates(text);
