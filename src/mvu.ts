@@ -107,8 +107,11 @@ export function applyMvuOperations(data: MvuData, operations: MvuOperation[], op
 				if (!from || !to) throw new Error("move 缺少 from/to");
 				const value = structuredClone(getAt(next, from));
 				if (value === undefined) throw new Error(`变量路径不存在：${from}`);
-				setAt(next, to, value, true);
-				removeAt(next, from);
+				const moved = structuredClone(next);
+				setAt(moved, to, value, true);
+				removeAt(moved, from);
+				Object.keys(next).forEach((key) => delete next[key]);
+				Object.assign(next, moved);
 				applied.push(`move ${from} -> ${to}`);
 				continue;
 			}

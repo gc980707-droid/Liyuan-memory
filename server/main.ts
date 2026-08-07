@@ -872,6 +872,7 @@ const bindSession = async () => {
 						.getBranch()
 						.map((entry) => entry.id);
 					const memorySessionId = session.sessionId;
+					const memoryBranchKey = `${memorySessionId}:${memoryLeafId ?? "root"}:${memoryBranchEntryIds.join(",")}`;
 					const memoryCardPath = cardPath || undefined;
 					const memoryMessages = event.messages as Array<{
 						role?: string;
@@ -907,6 +908,7 @@ const bindSession = async () => {
 					// 内置向量记忆：按策略把本轮助手正文入库（异步，失败不影响叙事）
 					void (async () => {
 						try {
+							if (memoryBranchKey !== `${session.sessionId}:${session.sessionManager.getLeafId() ?? "root"}:${(session.sessionManager.getBranch() as Array<{ id?: string }>).map((entry) => entry.id).filter((id): id is string => !!id).join(",")}`) return;
 							if (!memoryText.trim()) return;
 							const mem = await onNarrativeTurnEnd(
 								cwd,
