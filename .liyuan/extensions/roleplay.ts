@@ -1682,7 +1682,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			try {
 				if (process.env.RP_DEBUG) console.error(`[rp-preflight] start session=${ctx.sessionManager.getSessionId().slice(0, 12)} prompt=${prompt.slice(0, 80)}`);
 				const current = `用户输入：${prompt}\n\n世界状态：${formatState(state)}\n\nMVU：${formatMvuData(mvu).slice(0, 12000)}`;
-				const roster = coreCharacterNames(card ?? ({ name: "" } as CharacterCard), allEntries(), { userName: config.userName, sceneText: assistantText });
+				const roster = coreCharacterNames(card ?? ({ name: "" } as CharacterCard), allEntries(), { userName: config.userName, sceneText: prompt });
 				const turnPlan = buildTurnPlan(prompt, roster, false);
 				const proposals = await Promise.all(roster.map(async (name) => ({
 					name,
