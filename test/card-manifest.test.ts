@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addManifestCharacterToLore, buildCardManifest, manifestAgentCharacters, promoteManifestCharacter, syncCardManifestCharacters } from "../src/card-manifest.ts";
+import { addManifestCharacterToLore, buildCardManifest, characterLoreProfiles, manifestAgentCharacters, promoteManifestCharacter, syncCardManifestCharacters } from "../src/card-manifest.ts";
 
 test("生成跨卡通用 Card Manifest", () => {
 	const manifest = buildCardManifest({ raw: { data: { name: "卡A", extensions: { regex_scripts: [], tavern_helper: { variables: {} } } } }, card: { name: "卡A", book: [] } as never, cardPath: "cards/a.png", lore: [], initialMvu: { stat_data: {} }, userName: "旅人" });
@@ -68,4 +68,14 @@ test("世界书同步不改变角色卡格式适配信息", () => {
 	assert.deepEqual(next.status, base.status);
 	assert.deepEqual(next.capabilities, base.capabilities);
 	assert.deepEqual(next.mvu, base.mvu);
+});
+
+test("同名角色的多条世界书档案会合并且去重", () => {
+	const profiles = characterLoreProfiles([
+		{ comment: "Alice", keys: ["A"], content: "职业：医生" },
+		{ comment: "Alice", keys: ["Alice"], content: "职业：医生" },
+		{ comment: "Alice", keys: ["A"], content: "目标：回家" },
+		{ comment: "Bob", keys: ["B"], content: "无关" },
+	] as never, ["Alice"]);
+	assert.equal(profiles.Alice, "职业：医生\n\n目标：回家");
 });

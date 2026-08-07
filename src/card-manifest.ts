@@ -18,6 +18,7 @@ export interface CardManifest {
 		kind: "core" | "recurring" | "background";
 		agentEnabled: boolean;
 		loreFingerprint?: string;
+		loreFingerprints?: string[];
 		aliases?: string[];
 		promotedAt?: string;
 	}>;
@@ -55,8 +56,37 @@ export function buildCardManifest(input: { raw: Record<string, unknown>; card: C
 export function syncCardManifestCharacters(manifest: CardManifest, input: { card: CharacterCard; lore: LorebookEntry[]; userName?: string }): CardManifest {
 	const names = loreCharacterNames(input.lore, input.userName);
 	const previous = new Map(manifest.characters.map((character) => [character.name, character]));
-	const characters = names.map((name) => previous.get(name) ?? { name, kind: "background" as const, agentEnabled: false });
+	const fingerprints = new Map<string, string[]>();
+	for (const entry of input.lore) {
+		const name = entry.comment.trim();
+		if (!names.includes(name) || !entry.content.trim()) continue;
+		const list = fingerprints.get(name) ?? [];
+		const fp = loreFingerprint(entry.content);
+		if (!list.includes(fp)) list.push(fp);
+		fingerprints.set(name, list);
+	}
+	const characters = names.map((name) => {
+		const old = previous.get(name);
+		const loreFingerprints = fingerprints.get(name) ?? [];
+		return old
+			? { ...old, loreFingerprints, ...(loreFingerprints[0] ? { loreFingerprint: loreFingerprints[0] } : {}) }
+			: { name, kind: "background" as const, agentEnabled: false, loreFingerprints };
+	});
 	return { ...manifest, characters, updatedAt: new Date().toISOString() };
+}
+
+/** 合并同名角色的多条世界书档案，避免只取第一条导致设定丢失。 */
+export function characterLoreProfiles(lore: LorebookEntry[], names: string[]): Record<string, string> {
+	const wanted = new Set(names);
+	const grouped = new Map<string, string[]>();
+	for (const entry of lore) {
+		const name = entry.comment.trim();
+		if (!wanted.has(name) || !entry.content.trim()) continue;
+		const list = grouped.get(name) ?? [];
+		if (!list.includes(entry.content.trim())) list.push(entry.content.trim());
+		grouped.set(name, list);
+	}
+	return Object.fromEntries([...grouped].map(([name, parts]) => [name, parts.join("\n\n").slice(0, 9000)]));
 }
 
 export function saveCardManifest(file: string, manifest: CardManifest): void {

@@ -37,7 +37,8 @@ import { formatPreflightAdvice, hardenPreflightAdvice, parsePreflightAdvice } fr
 import { coreCharacterNames } from "../../src/character-roster.ts";
 import { buildTurnPlan, formatTurnPlan } from "../../src/turn-orchestrator.ts";
 import { buildCharacterStatePrompt, parseCharacterStateAgent } from "../../src/character-state-agent.ts";
-import { buildCardManifest, cardManifestFile, loadCardManifest, manifestAgentCharacters, saveCardManifest, syncCardManifestCharacters } from "../../src/card-manifest.ts";
+import { buildCharacterIntentPrompt } from "../../src/character-intent-agent.ts";
+import { buildCardManifest, cardManifestFile, characterLoreProfiles, loadCardManifest, manifestAgentCharacters, saveCardManifest, syncCardManifestCharacters } from "../../src/card-manifest.ts";
 import { extractClockTime, gateStatusTime, gateTimePatch } from "../../src/time-gate.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
 import {
@@ -1701,10 +1702,10 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				const roster = cardManifest ? manifestAgentCharacters(cardManifest, prompt) : coreCharacterNames(card ?? ({ name: "" } as CharacterCard), allEntries(), { userName: config.userName, sceneText: prompt });
 				const turnPlan = buildTurnPlan(prompt, roster, false);
 				const proposals = await Promise.all(roster.map(async (name) => {
-					const profile = allEntries().find((entry) => entry.comment.trim() === name)?.content.trim().slice(0, 3000) ?? "";
+					const intent = buildCharacterIntentPrompt({ name, profile: characterLoreProfiles(allEntries(), [name])[name], turnPlan: formatTurnPlan(turnPlan) });
 					return {
 						name,
-						proposal: await sideComplete(ctx, `你是角色「${name}」的独立动机 Agent。只输出该角色本轮的目标、情绪、约束和可能行动；不要写正文，不替用户做决定，不调用工具，不改变正典。${profile ? `\n\n世界书角色档案（仅作背景参考，不代表本轮已发生事实）：\n${profile}` : ""}\n\n编排计划：${formatTurnPlan(turnPlan)}`, current, 900),
+						proposal: await sideComplete(ctx, intent.systemPrompt, `${current}\n\n${intent.userText}`, 900),
 					};
 				}));
 				const proposalText = proposals.map((item) => `角色 ${item.name}：${item.proposal ?? "无"}`).join("\n");
@@ -1937,7 +1938,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			void (async () => {
 				try {
 					const roster = cardManifest ? manifestAgentCharacters(cardManifest, assistantText) : coreCharacterNames(card, allEntries(), { userName: config.userName, sceneText: assistantText });
-					const characterProfiles = Object.fromEntries(allEntries().filter((entry) => roster.includes(entry.comment.trim())).map((entry) => [entry.comment.trim(), entry.content]));
+					const characterProfiles = characterLoreProfiles(allEntries(), roster);
 					if (process.env.RP_DEBUG) console.error(`[rp-character-state] start characters=${roster.join(",") || "none"}`);
 					const prompt = buildCharacterStatePrompt({ userText, narrative: assistantText, currentMvu: formatMvuData(mvu), characterNames: roster, characterProfiles });
 					let output = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1400);
