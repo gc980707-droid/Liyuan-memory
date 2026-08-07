@@ -30,6 +30,12 @@ function withClock(value: string, minutes: number): string | null {
 	return value.replace(/\d{1,2}\s*(?:[:：点时])\s*\d{2}?/u, `${String(Math.floor(next / 60)).padStart(2, "0")}:${String(next % 60).padStart(2, "0")}`);
 }
 
+/** 从角色卡开场文本/状态栏中提取可用的首个时钟值。 */
+export function extractClockTime(text: string): string | null {
+	const match = text.match(/(?:上午|下午|晚上|夜里|深夜|凌晨)?\s*\d{1,2}\s*[:：点时]\s*\d{2}/u);
+	return match?.[0]?.trim() ?? null;
+}
+
 export function gateTimePatch(userText: string, currentTime: string, requestedTime: unknown, declared?: { action?: unknown; durationMin?: unknown; durationMax?: unknown }): { allowed: boolean; value?: string; reason?: string } {
 	if (typeof requestedTime !== "string" || !requestedTime.trim()) return { allowed: true };
 	if (requestedTime.trim() === currentTime.trim()) return { allowed: true, value: requestedTime };

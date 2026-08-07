@@ -36,7 +36,7 @@ import { loadValidatedStatus, saveValidatedStatus, validateStatusSubmission, typ
 import { formatPreflightAdvice, hardenPreflightAdvice, parsePreflightAdvice } from "../../src/preflight.ts";
 import { coreCharacterNames } from "../../src/character-roster.ts";
 import { buildTurnPlan, formatTurnPlan } from "../../src/turn-orchestrator.ts";
-import { gateStatusTime, gateTimePatch } from "../../src/time-gate.ts";
+import { extractClockTime, gateStatusTime, gateTimePatch } from "../../src/time-gate.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
 import {
 	constantEntries,
@@ -1458,6 +1458,15 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 
 			stateFile = join(dir(ctx.cwd, "state"), `${ctx.sessionManager.getSessionId()}.json`);
 			state = loadState(stateFile);
+			if (!state.time) {
+				const cardText = `${card?.firstMes ?? ""}\n${card?.scenario ?? ""}`;
+				const initialClock = extractClockTime(cardText);
+				if (initialClock) {
+					state = { ...state, time: initialClock };
+					saveState(stateFile, state);
+					snapshotState();
+				}
+			}
 			// fork 出的新会话文件没有状态缓存：从复制过来的剧情分支快照恢复
 			if (JSON.stringify(state) === JSON.stringify(defaultState()) && restoreStateFromBranch(ctx.sessionManager)) {
 				saveState(stateFile, state);

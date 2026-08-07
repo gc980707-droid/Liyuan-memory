@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { gateStatusTime, gateTimePatch, hasExplicitTimeAdvance, inferActionDuration } from "../src/time-gate.ts";
+import { extractClockTime, gateStatusTime, gateTimePatch, hasExplicitTimeAdvance, inferActionDuration } from "../src/time-gate.ts";
 
 test("普通动作不推进时间", () => {
 	assert.equal(hasExplicitTimeAdvance("起来上厕所"), false);
@@ -26,6 +26,11 @@ test("自然动作允许小范围耗时", () => {
 test("通用动作通过模型声明耗时，不依赖关键词表", () => {
 	assert.equal(gateTimePatch("去花市买花", "7月15日14:30", "7月15日15:10", { action: "往返花市", durationMin: 30, durationMax: 60 }).allowed, true);
 	assert.equal(gateTimePatch("去花市买花", "7月15日14:30", "7月15日23:00", { action: "往返花市", durationMin: 30, durationMax: 60 }).allowed, false);
+});
+
+test("从开场文本提取时间基准", () => {
+	assert.equal(extractClockTime("开场时间：7月15日 14:30，地点：列车包厢"), "14:30");
+	assert.equal(extractClockTime("没有时钟信息"), null);
 });
 
 test("状态栏时间不能绕过世界状态门禁", () => {
