@@ -726,7 +726,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					value: Type.Optional(Type.Any()),
 				}), { maxItems: 100 }),
 			}),
-			async execute(_id, params) {
+			async execute(_id, params, _signal, toolCtx) {
 				const result = applyMvuOperations(mvu, params.operations);
 				if (result.applied.length) {
 					mvu = result.data;
@@ -745,7 +745,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			label: "提交状态栏",
 			description: "Submit ONLY the complete raw status block after writing the narrative. The harness validates it against this character card's display regex. If rejected, fix exactly the reported format errors and submit again; do not rewrite the narrative. Maximum 3 attempts per turn.",
 			parameters: Type.Object({ status: Type.String({ description: "Complete raw status markup only, including required opening/closing tags" }) }),
-			async execute(_id, params) {
+			async execute(_id, params, _signal, toolCtx) {
 				statusSubmitAttempts++;
 				if (statusSubmitAttempts > 3) return { content: [{ type: "text", text: "本轮状态栏已达到 3 次校验上限。保留上一份有效状态栏；不要继续提交，也不要重写正文。" }], isError: true };
 				let raw: Record<string, unknown> | null = null;
@@ -756,7 +756,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					content: [{ type: "text", text: `状态栏校验失败（第 ${statusSubmitAttempts}/3 次）：\n- ${result.errors.join("\n- ")}\n只修复状态栏后再次调用 status_submit；正文不要重写。` }],
 					isError: true,
 				};
-				const branch = ctx.sessionManager.getBranch() as Array<Record<string, unknown>>;
+				const branch = toolCtx.sessionManager.getBranch() as Array<Record<string, unknown>>;
 				const latestUser = [...branch].reverse().find((entry) => (entry.message as { role?: string } | undefined)?.role === "user");
 				const userText = latestUser ? extractText((latestUser.message as { content?: unknown }) ?? {}) : "";
 				const statusTime = gateStatusTime(userText, state.time, params.status);
@@ -998,7 +998,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				];
 			const patch = canonicalizeCharacterKeys(params as Record<string, unknown>, knownNames);
 			const gateUserText = (() => {
-				const branch = ctx.sessionManager.getBranch() as Array<Record<string, unknown>>;
+				const branch = toolCtx.sessionManager.getBranch() as Array<Record<string, unknown>>;
 				for (let i = branch.length - 1; i >= 0; i--) {
 					const message = branch[i]?.message as { role?: string; content?: unknown } | undefined;
 					if (message?.role === "user") return extractText(message);
