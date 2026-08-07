@@ -746,7 +746,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			label: "提交状态栏",
 			description: "Submit ONLY the complete raw status block after writing the narrative. The harness validates it against this character card's display regex. If rejected, fix exactly the reported format errors and submit again; do not rewrite the narrative. Maximum 3 attempts per turn.",
 			parameters: Type.Object({ status: Type.String({ description: "Complete raw status markup only, including required opening/closing tags" }) }),
-			async execute(_id, params, _signal, toolCtx) {
+			async execute(_id, params, _signal, _onUpdate, toolCtx) {
 				statusSubmitAttempts++;
 				if (statusSubmitAttempts > 3) return { content: [{ type: "text", text: "本轮状态栏已达到 3 次校验上限。保留上一份有效状态栏；不要继续提交，也不要重写正文。" }], isError: true };
 				let raw: Record<string, unknown> | null = null;
@@ -991,7 +991,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				flags: Type.Optional(Type.Record(Type.String(), Type.Union([Type.String(), Type.Null()]))),
 				plot_threads: Type.Optional(Type.Array(Type.String(), { description: "COMPLETE list of open plot threads" })),
 			}),
-			async execute(_id, params, _signal, toolCtx) {
+			async execute(_id, params, _signal, _onUpdate, toolCtx) {
 				const knownNames = [
 					...(card ? [card.name] : []),
 					config.userName,
