@@ -5,6 +5,7 @@ import type { CharacterCard, LorebookEntry } from "./types.ts";
 import { cardStatusBarFormats, extractRegexScripts } from "./cardfront.ts";
 import type { MvuData } from "./mvu.ts";
 import { readFileSync, existsSync } from "node:fs";
+import { loreFingerprint, appendLorebookFileEntry } from "./lorebook.ts";
 
 export interface CardManifest {
 	version: 1;
@@ -77,4 +78,26 @@ export function manifestAgentCharacters(manifest: CardManifest, sceneText: strin
 export function loadCardManifest(file: string): CardManifest | null {
 	if (!existsSync(file)) return null;
 	try { return JSON.parse(readFileSync(file, "utf8")) as CardManifest; } catch { return null; }
+}
+
+export function addManifestCharacterToLore(
+	manifest: CardManifest,
+	manifestFile: string,
+	bookFile: string,
+	input: { name: string; description: string; aliases?: string[]; kind?: "core" | "recurring" | "background" },
+): CardManifest {
+	const entry = appendLorebookFileEntry(bookFile, {
+		comment: input.name.trim(),
+		keys: [input.name, ...(input.aliases ?? [])],
+		content: input.description.trim(),
+		constant: false,
+	});
+	if (!entry) throw new Error("角色档案内容为空或已存在");
+	const next = promoteManifestCharacter(manifest, input.name, input.kind ?? "recurring");
+	const withLink = {
+		...next,
+		characters: next.characters.map((character) => character.name === input.name.trim() ? { ...character, loreFingerprint: loreFingerprint(entry.content) } : character),
+	};
+	saveCardManifest(manifestFile, withLink);
+	return withLink;
 }
