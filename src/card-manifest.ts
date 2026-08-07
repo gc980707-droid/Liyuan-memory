@@ -57,6 +57,19 @@ export function buildCardManifest(input: { raw: Record<string, unknown>; card: C
 	};
 }
 
+export function syncCardManifestCharacters(manifest: CardManifest, input: { card: CharacterCard; lore: LorebookEntry[]; userName?: string }): CardManifest {
+	const userName = input.userName?.trim();
+	const names = new Set<string>();
+	const cardName = input.card.name.trim();
+	if (cardName && cardName !== userName && !/{{user}}/i.test(cardName) && !/福利姬|角色卡|剧本|故事|录$/u.test(cardName)) names.add(cardName);
+	for (const entry of input.lore) {
+		if (entry.comment && entry.comment !== userName && entry.comment !== "{{user}}" && !/状态|规则|文风|世界|设定|资料|profile|rule/i.test(entry.comment)) names.add(entry.comment.trim());
+	}
+	const previous = new Map(manifest.characters.map((character) => [character.name, character]));
+	const characters = [...names].slice(0, 64).map((name) => previous.get(name) ?? { name, kind: "background" as const, agentEnabled: false });
+	return { ...manifest, characters, updatedAt: new Date().toISOString() };
+}
+
 export function saveCardManifest(file: string, manifest: CardManifest): void {
 	mkdirSync(dirname(file), { recursive: true });
 	writeFileSync(file, JSON.stringify(manifest, null, 2), "utf8");

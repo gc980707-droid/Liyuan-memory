@@ -132,6 +132,7 @@ import {
 	loadCardManifest,
 	promoteManifestCharacter,
 	saveCardManifest,
+	syncCardManifestCharacters,
 	type CardManifest,
 } from "../src/card-manifest.ts";
 
@@ -2857,8 +2858,12 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 					cardPath,
 					lore: card.book,
 				});
-				saveCardManifest(manifestPath, manifest);
-				sendJson(res, 200, { manifest });
+				const overlay = overlayPathFor(host.cwd, card.name);
+				const files = mountedLorebookPaths(config).map((p) => resolvePath(host.cwd, p)).filter(existsSync).map(loadLorebookFile);
+				const runtimeLore = applyLoreOverrides(mergeEntries(...files, existsSync(overlay) ? loadLorebookFile(overlay) : []), config.disabledLore, config.enabledLore);
+				const synced = syncCardManifestCharacters(manifest, { card, lore: runtimeLore });
+				saveCardManifest(manifestPath, synced);
+				sendJson(res, 200, { manifest: synced });
 				return true;
 			}
 			case "POST /api/card/characters/promote": {
