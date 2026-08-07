@@ -6,6 +6,7 @@ import { cardStatusBarFormats, extractRegexScripts } from "./cardfront.ts";
 import type { MvuData } from "./mvu.ts";
 import { readFileSync, existsSync } from "node:fs";
 import { loreFingerprint, appendLorebookFileEntry } from "./lorebook.ts";
+import { loreCharacterNames } from "./character-roster.ts";
 
 export interface CardManifest {
 	version: 1;
@@ -36,19 +37,13 @@ export function buildCardManifest(input: { raw: Record<string, unknown>; card: C
 	const ext = data.extensions && typeof data.extensions === "object" ? data.extensions as Record<string, unknown> : {};
 	const helper = ext.tavern_helper && typeof ext.tavern_helper === "object";
 	const now = new Date().toISOString();
-	const names = new Set<string>();
-	const userName = input.userName?.trim();
-	const cardName = input.card.name.trim();
-	if (cardName && cardName !== userName && !/{{user}}/i.test(cardName) && !/福利姬|角色卡|剧本|故事|录$/u.test(cardName)) names.add(cardName);
-	for (const entry of input.lore) {
-		if (entry.comment && entry.comment !== userName && entry.comment !== "{{user}}" && !/状态|规则|文风|世界|设定|资料|profile|rule/i.test(entry.comment)) names.add(entry.comment);
-	}
+	const names = loreCharacterNames(input.lore, input.userName);
 	return {
 		version: 1,
 		cardId: cardManifestId(input.raw),
 		cardPath: input.cardPath,
 		cardName: input.card.name,
-		characters: [...names].slice(0, 32).map((name, index) => ({ name, kind: index === 0 ? "core" : "background", agentEnabled: index === 0 })),
+		characters: names.slice(0, 32).map((name, index) => ({ name, kind: index === 0 ? "core" : "background", agentEnabled: index === 0 })),
 		mvu: { initial: input.initialMvu ?? {}, detected: !!input.initialMvu && Object.keys(input.initialMvu).length > 0 },
 		status: { required: cardStatusBarFormats(input.raw).length > 0, formats: cardStatusBarFormats(input.raw), regexRuleCount: extractRegexScripts(input.raw).length },
 		capabilities: { mvu: !!input.initialMvu && Object.keys(input.initialMvu).length > 0, displayRegex: extractRegexScripts(input.raw).length > 0, tavernHelper: helper },
@@ -58,15 +53,9 @@ export function buildCardManifest(input: { raw: Record<string, unknown>; card: C
 }
 
 export function syncCardManifestCharacters(manifest: CardManifest, input: { card: CharacterCard; lore: LorebookEntry[]; userName?: string }): CardManifest {
-	const userName = input.userName?.trim();
-	const names = new Set<string>();
-	const cardName = input.card.name.trim();
-	if (cardName && cardName !== userName && !/{{user}}/i.test(cardName) && !/福利姬|角色卡|剧本|故事|录$/u.test(cardName)) names.add(cardName);
-	for (const entry of input.lore) {
-		if (entry.comment && entry.comment !== userName && entry.comment !== "{{user}}" && !/状态|规则|文风|世界|设定|资料|profile|rule/i.test(entry.comment)) names.add(entry.comment.trim());
-	}
+	const names = loreCharacterNames(input.lore, input.userName);
 	const previous = new Map(manifest.characters.map((character) => [character.name, character]));
-	const characters = [...names].slice(0, 64).map((name) => previous.get(name) ?? { name, kind: "background" as const, agentEnabled: false });
+	const characters = names.map((name) => previous.get(name) ?? { name, kind: "background" as const, agentEnabled: false });
 	return { ...manifest, characters, updatedAt: new Date().toISOString() };
 }
 
