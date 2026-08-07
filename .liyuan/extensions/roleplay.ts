@@ -1700,10 +1700,13 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				const current = `用户输入：${prompt}\n\n世界状态：${formatState(state)}\n\nMVU：${formatMvuData(mvu).slice(0, 12000)}`;
 				const roster = cardManifest ? manifestAgentCharacters(cardManifest, prompt) : coreCharacterNames(card ?? ({ name: "" } as CharacterCard), allEntries(), { userName: config.userName, sceneText: prompt });
 				const turnPlan = buildTurnPlan(prompt, roster, false);
-				const proposals = await Promise.all(roster.map(async (name) => ({
-					name,
-					proposal: await sideComplete(ctx, `你是角色「${name}」的独立动机 Agent。只输出该角色本轮的目标、情绪、约束和可能行动；不要写正文，不替用户做决定，不调用工具，不改变正典。\n\n编排计划：${formatTurnPlan(turnPlan)}`, current, 900),
-				})));
+				const proposals = await Promise.all(roster.map(async (name) => {
+					const profile = allEntries().find((entry) => entry.comment.trim() === name)?.content.trim().slice(0, 3000) ?? "";
+					return {
+						name,
+						proposal: await sideComplete(ctx, `你是角色「${name}」的独立动机 Agent。只输出该角色本轮的目标、情绪、约束和可能行动；不要写正文，不替用户做决定，不调用工具，不改变正典。${profile ? `\n\n世界书角色档案（仅作背景参考，不代表本轮已发生事实）：\n${profile}` : ""}\n\n编排计划：${formatTurnPlan(turnPlan)}`, current, 900),
+					};
+				}));
 				const proposalText = proposals.map((item) => `角色 ${item.name}：${item.proposal ?? "无"}`).join("\n");
 				const director = await sideComplete(ctx, "你是剧情导演。只输出 JSON：{\"focus\":\"\",\"characterIntents\":[],\"constraints\":[],\"avoid\":[]}。整合多个角色提案为隐藏创作指导，不写正文。", `${current}\n\n角色提案：\n${proposalText}`, 1400);
 				const fallbackProposal = proposals.map((item) => `${item.name}：${item.proposal ?? ""}`).filter(Boolean).join("\n");
