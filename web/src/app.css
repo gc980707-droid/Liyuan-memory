@@ -782,6 +782,8 @@ html[data-theme="dark"] [data-tip]:focus-visible::after {
 .mvu-leaf-head strong { color: var(--accent); text-align: right; overflow-wrap: anywhere; }
 .status-sidebar-panel { display: grid; gap: 10px; align-content: start; }
 .status-sidebar-panel iframe { width: 100%; overflow: hidden; }
+.status-sidebar-panel .msg-html-expand { overflow: visible; }
+.status-sidebar-panel .msg-html-expand .msg-html-frame { overflow: hidden; }
 .status-sidebar-text { white-space: pre-wrap; word-break: break-word; margin: 0; padding: 12px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--surface-soft); }
 .fallback-status { display: grid; gap: 10px; }
 .fallback-meta { padding: 9px 11px; border-radius: 10px; color: var(--muted); background: var(--surface-soft); }

@@ -161,7 +161,7 @@ export function HtmlFrame({
 
 	return (
 		<figure
-			className={`msg-html ${scripts ? "msg-html-scripts" : ""} ${seamless ? "msg-html-seamless" : ""} ${programApp ? "msg-html-program" : ""}`}
+			className={`msg-html ${scripts ? "msg-html-scripts" : ""} ${seamless ? "msg-html-seamless" : ""} ${programApp ? "msg-html-program" : ""} ${expandToContent ? "msg-html-expand" : ""}`}
 		>
 			{!seamless && (
 				<div className="msg-html-bar">
