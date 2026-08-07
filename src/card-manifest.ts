@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import type { CharacterCard, LorebookEntry } from "./types.ts";
 import { cardStatusBarFormats, extractRegexScripts } from "./cardfront.ts";
 import type { MvuData } from "./mvu.ts";
+import { readFileSync, existsSync } from "node:fs";
 
 export interface CardManifest {
 	version: 1;
@@ -51,4 +52,29 @@ export function buildCardManifest(input: { raw: Record<string, unknown>; card: C
 export function saveCardManifest(file: string, manifest: CardManifest): void {
 	mkdirSync(dirname(file), { recursive: true });
 	writeFileSync(file, JSON.stringify(manifest, null, 2), "utf8");
+}
+
+export function promoteManifestCharacter(manifest: CardManifest, name: string, kind: "core" | "recurring" | "background"): CardManifest {
+	const target = name.trim();
+	if (!target || target === "{{user}}") throw new Error("无效的常驻角色名");
+	const characters = [...manifest.characters];
+	const existing = characters.find((character) => character.name === target);
+	if (existing) {
+		existing.kind = kind;
+		existing.agentEnabled = kind !== "background";
+	} else {
+		characters.push({ name: target, kind, agentEnabled: kind !== "background" });
+	}
+	return { ...manifest, characters, updatedAt: new Date().toISOString() };
+}
+
+export function manifestAgentCharacters(manifest: CardManifest, sceneText: string): string[] {
+	return manifest.characters
+		.filter((character) => character.agentEnabled && (character.kind === "core" ? sceneText.includes(character.name) : sceneText.includes(character.name)))
+		.map((character) => character.name);
+}
+
+export function loadCardManifest(file: string): CardManifest | null {
+	if (!existsSync(file)) return null;
+	try { return JSON.parse(readFileSync(file, "utf8")) as CardManifest; } catch { return null; }
 }

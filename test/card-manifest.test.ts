@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildCardManifest } from "../src/card-manifest.ts";
+import { buildCardManifest, manifestAgentCharacters, promoteManifestCharacter } from "../src/card-manifest.ts";
 
 test("生成跨卡通用 Card Manifest", () => {
 	const manifest = buildCardManifest({ raw: { data: { name: "卡A", extensions: { regex_scripts: [], tavern_helper: { variables: {} } } } }, card: { name: "卡A", book: [] } as never, cardPath: "cards/a.png", lore: [], initialMvu: { stat_data: {} }, userName: "旅人" });
 	assert.equal(manifest.cardName, "卡A");
 	assert.equal(manifest.mvu.detected, true);
 	assert.equal(manifest.capabilities.tavernHelper, true);
+});
+
+test("Manifest 角色可升级并按场景调度", () => {
+	const base = buildCardManifest({ raw: { data: { name: "卡A" } }, card: { name: "卡A", book: [] } as never, cardPath: "cards/a.png", lore: [], userName: "旅人" });
+	const next = promoteManifestCharacter(base, "林夏", "recurring");
+	assert.deepEqual(manifestAgentCharacters(next, "林夏抬头"), ["林夏"]);
+	assert.deepEqual(manifestAgentCharacters(next, "窗外风声"), []);
 });
 
 test("Manifest 不把卡标题和 user 当角色", () => {

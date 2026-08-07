@@ -37,7 +37,7 @@ import { formatPreflightAdvice, hardenPreflightAdvice, parsePreflightAdvice } fr
 import { coreCharacterNames } from "../../src/character-roster.ts";
 import { buildTurnPlan, formatTurnPlan } from "../../src/turn-orchestrator.ts";
 import { buildCharacterStatePrompt, parseCharacterStateAgent } from "../../src/character-state-agent.ts";
-import { buildCardManifest, saveCardManifest } from "../../src/card-manifest.ts";
+import { buildCardManifest, loadCardManifest, manifestAgentCharacters, saveCardManifest } from "../../src/card-manifest.ts";
 import { extractClockTime, gateStatusTime, gateTimePatch } from "../../src/time-gate.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
 import {
@@ -180,6 +180,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	let statusSubmitAttempts = 0;
 	let preflightKey = "";
 	let preflightAdvice: string | null = null;
+	let cardManifest: import("../../src/card-manifest.ts").CardManifest | null = null;
 	// agent 自建面板（柱 2）：与 state 同一套「磁盘缓存 + 会话树快照」机制
 	let panels: PanelMap = {};
 	let panelsFile = "";
@@ -1487,9 +1488,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				const manifestCardPath = resolvePath(ctx.cwd, config.card);
 				const rawCard = readCardRawJson(manifestCardPath).raw;
 				const manifestFile = join(dir(ctx.cwd, "manifests"), `${manifestCardPath.replace(/[^A-Za-z0-9._-]/g, "_")}.json`);
-				const manifest = buildCardManifest({ raw: rawCard, card, cardPath: config.card, lore: card.book, initialMvu: initialMvuFromCard(), userName: config.userName });
-				saveCardManifest(manifestFile, manifest);
-				if (process.env.RP_DEBUG) console.error(`[rp-manifest] saved ${manifestFile} characters=${manifest.characters.length} mvu=${manifest.capabilities.mvu} regex=${manifest.capabilities.displayRegex}`);
+				cardManifest = loadCardManifest(manifestFile) ?? buildCardManifest({ raw: rawCard, card, cardPath: config.card, lore: card.book, initialMvu: initialMvuFromCard(), userName: config.userName });
+				saveCardManifest(manifestFile, cardManifest);
+				if (process.env.RP_DEBUG) console.error(`[rp-manifest] saved ${manifestFile} characters=${cardManifest.characters.length} mvu=${cardManifest.capabilities.mvu} regex=${cardManifest.capabilities.displayRegex}`);
 			} catch (error) {
 				if (process.env.RP_DEBUG) console.error(`[rp-manifest] skipped: ${error instanceof Error ? error.message : String(error)}`);
 			}
@@ -1696,7 +1697,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			try {
 				if (process.env.RP_DEBUG) console.error(`[rp-preflight] start session=${ctx.sessionManager.getSessionId().slice(0, 12)} prompt=${prompt.slice(0, 80)}`);
 				const current = `用户输入：${prompt}\n\n世界状态：${formatState(state)}\n\nMVU：${formatMvuData(mvu).slice(0, 12000)}`;
-				const roster = coreCharacterNames(card ?? ({ name: "" } as CharacterCard), allEntries(), { userName: config.userName, sceneText: prompt });
+				const roster = cardManifest ? manifestAgentCharacters(cardManifest, prompt) : coreCharacterNames(card ?? ({ name: "" } as CharacterCard), allEntries(), { userName: config.userName, sceneText: prompt });
 				const turnPlan = buildTurnPlan(prompt, roster, false);
 				const proposals = await Promise.all(roster.map(async (name) => ({
 					name,
@@ -1931,7 +1932,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		if (config.multiAgentPreflight === true && card) {
 			void (async () => {
 				try {
-					const roster = coreCharacterNames(card, allEntries(), { userName: config.userName, sceneText: assistantText });
+					const roster = cardManifest ? manifestAgentCharacters(cardManifest, assistantText) : coreCharacterNames(card, allEntries(), { userName: config.userName, sceneText: assistantText });
 					if (process.env.RP_DEBUG) console.error(`[rp-character-state] start characters=${roster.join(",") || "none"}`);
 					const prompt = buildCharacterStatePrompt({ userText, narrative: assistantText, currentMvu: formatMvuData(mvu), characterNames: roster });
 					let output = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1400);
