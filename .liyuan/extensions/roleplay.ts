@@ -1934,8 +1934,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			void (async () => {
 				try {
 					const roster = cardManifest ? manifestAgentCharacters(cardManifest, assistantText) : coreCharacterNames(card, allEntries(), { userName: config.userName, sceneText: assistantText });
+					const characterProfiles = Object.fromEntries(allEntries().filter((entry) => roster.includes(entry.comment.trim())).map((entry) => [entry.comment.trim(), entry.content]));
 					if (process.env.RP_DEBUG) console.error(`[rp-character-state] start characters=${roster.join(",") || "none"}`);
-					const prompt = buildCharacterStatePrompt({ userText, narrative: assistantText, currentMvu: formatMvuData(mvu), characterNames: roster });
+					const prompt = buildCharacterStatePrompt({ userText, narrative: assistantText, currentMvu: formatMvuData(mvu), characterNames: roster, characterProfiles });
 					let output = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1400);
 					let operations = output ? parseCharacterStateAgent(output) : null;
 					if (!operations) {
