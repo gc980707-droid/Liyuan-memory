@@ -681,7 +681,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			parameters: Type.Object({
 				query: Type.String({ description: "Keywords in the lorebook's own language" }),
 			}),
-			async execute(_id, params, _signal, toolCtx) {
+			async execute(_id, params, _signal, _onUpdate, toolCtx) {
 				const hits = searchEntries(allEntries(), params.query, 3);
 				if (hits.length === 0) {
 					return { content: [{ type: "text", text: "No matching lore entries. The detail is unwritten — invent it consistently with established facts, then record important inventions via world_state_update (plot_threads or flags)." }] };
@@ -726,7 +726,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					value: Type.Optional(Type.Any()),
 				}), { maxItems: 100 }),
 			}),
-			async execute(_id, params, _signal, toolCtx) {
+			async execute(_id, params, _signal, _onUpdate, toolCtx) {
 				const result = applyMvuOperations(mvu, params.operations);
 				if (result.applied.length) {
 					mvu = result.data;
