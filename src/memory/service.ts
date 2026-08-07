@@ -32,6 +32,17 @@ import type {
 } from "./types.ts";
 import { DEFAULT_MEMORY_CONFIG } from "./types.ts";
 
+const memoryWriteQueues = new Map<string, Promise<unknown>>();
+
+function enqueueMemoryWrite<T>(key: string, task: () => Promise<T>): Promise<T> {
+	const previous = memoryWriteQueues.get(key) ?? Promise.resolve();
+	const next = previous.then(task, task);
+	memoryWriteQueues.set(key, next.finally(() => {
+		if (memoryWriteQueues.get(key) === next) memoryWriteQueues.delete(key);
+	}));
+	return next;
+}
+
 function embedCtxFrom(cfg: MemoryConfig): EmbedContext {
 	return { mode: cfg.embedMode, cloud: cfg.cloudEmbed };
 }
@@ -351,6 +362,7 @@ export async function onNarrativeTurnEnd(
 	error?: string;
 	noop?: boolean;
 }> {
+	return enqueueMemoryWrite(`${cwd}:${memoryScopeId(normalizeScope(scope))}`, async () => {
 	const cfg = loadMemoryConfig(cwd);
 	if (!cfg.enabled) return { stored: false, counter: 0 };
 	const store = cfg.stores.find((s) => s.id === "narrative" && s.enabled);
@@ -389,6 +401,7 @@ export async function onNarrativeTurnEnd(
 	} catch (e) {
 		return { stored: false, counter: next, error: e instanceof Error ? e.message : String(e) };
 	}
+	});
 }
 
 export function defaultMemoryConfig(): MemoryConfig {
