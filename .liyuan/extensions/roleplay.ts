@@ -1943,27 +1943,34 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				try {
 					const raw = readCardRawJson(resolvePath(appCwd, config.card)).raw;
 					const rules = displayRules(extractRegexScripts(raw));
-					const recovery = buildStatusRecoveryPrompt({
-						rules,
-						charName: card?.name ?? "",
-						userName: config.userName,
-						state: formatState(state),
-						mvu: formatMvuData(mvu),
-						userText,
-						narrative: assistantText,
-						previous: validatedStatus?.raw,
-					});
-					const recovered = await sideComplete(ctx, recovery.systemPrompt, recovery.userText, 1800);
-					if (!recovered) return;
-					const result = validateStatusSubmission(recovered, { rules, charName: card?.name ?? "", userName: config.userName });
-					if (!result.ok) {
-						if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] rejected ${result.errors.join(" | ")}`);
-						return;
+					let error = "";
+					for (let attempt = 1; attempt <= 3; attempt++) {
+						const recovery = buildStatusRecoveryPrompt({
+							rules,
+							charName: card?.name ?? "",
+							userName: config.userName,
+							state: formatState(state),
+							mvu: formatMvuData(mvu),
+							userText,
+							narrative: assistantText,
+							previous: validatedStatus?.raw,
+							error,
+						});
+						const recovered = await sideComplete(ctx, recovery.systemPrompt, recovery.userText, 1800);
+						if (!recovered) { error = "状态栏为空"; continue; }
+						const result = validateStatusSubmission(recovered, { rules, charName: card?.name ?? "", userName: config.userName });
+						if (result.ok) {
+							validatedStatus = result.status;
+							if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
+							snapshotValidatedStatus();
+							if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] restored attempt=${attempt}`);
+							return;
+						}
+						error = result.errors.join(" | ");
+						if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] rejected attempt=${attempt} ${error}`);
 					}
-					validatedStatus = result.status;
-					if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
-					snapshotValidatedStatus();
-					if (process.env.RP_DEBUG) console.error("[rp-status-recovery] restored");
+					// 永远保留上一份已验证状态，绝不以空值或未验证文本覆盖它。
+					if (process.env.RP_DEBUG) console.error("[rp-status-recovery] failed; previous status retained");
 				} catch (error) {
 					if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] skipped: ${error instanceof Error ? error.message : String(error)}`);
 				}

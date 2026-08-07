@@ -21,9 +21,10 @@ export function buildStatusRecoveryPrompt(input: {
 	userText: string;
 	narrative: string;
 	previous?: string;
+	error?: string;
 }): { systemPrompt: string; userText: string } {
 	return {
-		systemPrompt: `你是角色卡状态栏恢复 Agent。只输出完整的状态栏原文，不要输出解释、Markdown 围栏、正文或 JSON。必须尽量复用上一份有效状态栏的结构，并根据本轮明确发生的事实更新字段。角色卡显示规则由程序最终校验，不要自行改变标签、字段顺序或包裹结构。角色名：${input.charName}；用户名：${input.userName}。显示规则摘要：${JSON.stringify(input.rules).slice(0, 12000)}`,
+		systemPrompt: `你是角色卡状态栏恢复 Agent。只输出完整的状态栏原文，不要输出解释、Markdown 围栏、正文或 JSON。必须尽量复用上一份有效状态栏的结构，并根据本轮明确发生的事实更新字段。角色卡显示规则由程序最终校验，不要自行改变标签、字段顺序或包裹结构。角色名：${input.charName}；用户名：${input.userName}。${input.error ? `上次输出被程序拒绝，必须修复：${input.error}` : ""}显示规则摘要：${JSON.stringify(input.rules).slice(0, 12000)}`,
 		userText: `【上一份有效状态栏】\n${input.previous || "（无）"}\n\n【当前世界账本】\n${input.state}\n\n【当前 MVU】\n${input.mvu}\n\n【本轮用户输入】\n${input.userText}\n\n【本轮正文】\n${input.narrative}`,
 	};
 }

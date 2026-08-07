@@ -20,6 +20,11 @@ test("状态栏恢复提示要求复用上一份结构并只输出状态栏", ()
 	assert.match(prompt.userText, /StatusBlock/);
 });
 
+test("状态栏恢复提示可携带程序校验错误", () => {
+	const prompt = buildStatusRecoveryPrompt({ rules: [], charName: "A", userName: "U", state: "{}", mvu: "{}", userText: "继续", narrative: "A 看向窗外", error: "缺少闭合标签" });
+	assert.match(prompt.systemPrompt, /缺少闭合标签/);
+});
+
 test("status_submit 格式错误返回可修复提示", () => {
 	const result = validateStatusSubmission("- HP: 10", skin);
 	assert.equal(result.ok, false);
