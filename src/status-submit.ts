@@ -13,13 +13,25 @@ export interface ValidatedStatus {
 
 /** 判断任意 XML/HTML 状态容器是否完整，不依赖某张卡的固定标签名。 */
 export function hasCompleteStatusContainer(text: string): boolean {
-	const source = text.trim();
+	const source = normalizeStatusSubmission(text);
 	if (/<style[\s>][\s\S]*<\/style>/i.test(source) && /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>/i.test(source)) return true;
 	const tag = source.match(/^\s*<([A-Za-z_\u4e00-\u9fff][\w.\-\u4e00-\u9fff]*)\b[^>]*>/);
 	if (!tag || !new RegExp(`<\\/${tag[1]}\\s*>\\s*$`, "i").test(source)) return false;
 	const open = new RegExp(`<${tag[1]}\\b`, "gi");
 	const close = new RegExp(`<\\/${tag[1]}\\s*>`, "gi");
 	return [...source.matchAll(open)].length === [...source.matchAll(close)].length;
+}
+
+/** 去掉恢复 Agent 常见的代码围栏/解释前缀，但不改写状态正文。 */
+export function normalizeStatusSubmission(raw: string): string {
+	let text = raw.trim();
+	// 模型偶尔会在状态块前加一句说明；从第一个标签开始截取。
+	const firstTag = text.search(/<[A-Za-z_\u4e00-\u9fff]/);
+	if (firstTag > 0) text = text.slice(firstTag).trim();
+	const fenced = text.match(/^```(?:html|xml|text)?\s*([\s\S]*?)\s*```\s*$/i);
+	if (fenced) text = fenced[1].trim();
+	else text = text.replace(/\s*```\s*$/i, "").trim();
+	return text;
 }
 
 /** 缺失状态栏时给旁路恢复 Agent 的提示；规则本身仍由代码执行和校验。 */
@@ -45,7 +57,7 @@ export function validateStatusSubmission(
 	raw: string,
 	skin: { rules: DisplayRule[]; charName: string; userName: string },
 ): { ok: true; status: ValidatedStatus } | { ok: false; errors: string[] } {
-	const text = raw.trim();
+	const text = normalizeStatusSubmission(raw);
 	const errors: string[] = [];
 	if (!text) return { ok: false, errors: ["状态栏为空"] };
 	const rendered = prepareDisplayText(text, skin);

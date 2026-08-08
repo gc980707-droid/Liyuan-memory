@@ -32,7 +32,7 @@ import { buildGreeting, buildSystemPrompt, buildTurnInjection, detectsLanguageMi
 import { formatMemoryIndex, inheritMemoryScope, memoryRecallForTurn } from "../../src/memory/index.ts";
 import { applyMvuOperations, defaultMvuData, formatMvuData, loadMvuData, parseInitVar, parseMvuUpdates, saveMvuData, type MvuData } from "../../src/mvu.ts";
 import { createMacroEnv, evalPresetMacros } from "../../src/preset-macro.ts";
-import { buildStatusRecoveryPrompt, loadValidatedStatus, saveValidatedStatus, validateStatusSubmission, type ValidatedStatus } from "../../src/status-submit.ts";
+import { buildStatusRecoveryPrompt, loadValidatedStatus, normalizeStatusSubmission, saveValidatedStatus, validateStatusSubmission, type ValidatedStatus } from "../../src/status-submit.ts";
 import { formatPreflightAdvice, hardenPreflightAdvice, parsePreflightAdvice } from "../../src/preflight.ts";
 import { coreCharacterNames } from "../../src/character-roster.ts";
 import { buildTurnPlan, formatTurnPlan } from "../../src/turn-orchestrator.ts";
@@ -769,7 +769,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				let raw: Record<string, unknown> | null = null;
 				try { raw = readCardRawJson(resolvePath(appCwd, config.card)).raw; } catch { /* handled by no rules */ }
 				const rules = raw ? displayRules(extractRegexScripts(raw)) : [];
-				const result = validateStatusSubmission(params.status, { rules, charName: card?.name ?? "", userName: config.userName });
+					const result = validateStatusSubmission(normalizeStatusSubmission(params.status), { rules, charName: card?.name ?? "", userName: config.userName });
 				if (!result.ok) return {
 					content: [{ type: "text", text: `状态栏校验失败（第 ${statusSubmitAttempts}/3 次）：\n- ${result.errors.join("\n- ")}\n只修复状态栏后再次调用 status_submit；正文不要重写。` }],
 					isError: true,
@@ -2023,7 +2023,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						});
 						const recovered = await sideComplete(ctx, recovery.systemPrompt, recovery.userText, 1800);
 						if (!recovered) { error = "状态栏为空"; continue; }
-						const result = validateStatusSubmission(recovered, { rules, charName: card?.name ?? "", userName: config.userName });
+						const result = validateStatusSubmission(normalizeStatusSubmission(recovered), { rules, charName: card?.name ?? "", userName: config.userName });
 						if (result.ok && isCurrentTurn(turn, generation)) {
 							const statusTime = gateStatusTime(userText, state.time, recovered);
 							if (!statusTime.allowed) { error = statusTime.reason; continue; }

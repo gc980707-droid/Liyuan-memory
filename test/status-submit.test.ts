@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildStatusRecoveryPrompt, validateStatusSubmission } from "../src/status-submit.ts";
+import { buildStatusRecoveryPrompt, normalizeStatusSubmission, validateStatusSubmission } from "../src/status-submit.ts";
 
 const skin = {
 	charName: "甲",
@@ -29,6 +29,10 @@ test("状态栏恢复提示要求复用上一份结构并只输出状态栏", ()
 test("状态栏恢复提示可携带程序校验错误", () => {
 	const prompt = buildStatusRecoveryPrompt({ rules: [], charName: "A", userName: "U", state: "{}", mvu: "{}", userText: "继续", narrative: "A 看向窗外", error: "缺少闭合标签" });
 	assert.match(prompt.systemPrompt, /缺少闭合标签/);
+});
+
+test("状态栏校验接受 HTML 围栏和前置说明", () => {
+	assert.equal(normalizeStatusSubmission("这是状态栏：\n```html\n<Status_block>HP: 10</Status_block>\n```"), "<Status_block>HP: 10</Status_block>");
 });
 
 test("status_submit 格式错误返回可修复提示", () => {
