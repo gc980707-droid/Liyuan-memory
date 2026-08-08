@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildStatusRecoveryPrompt, normalizeStatusSubmission, validateStatusSubmission } from "../src/status-submit.ts";
+import { buildStatusRecoveryPrompt, extractStatusSubmission, normalizeStatusSubmission, validateStatusSubmission } from "../src/status-submit.ts";
 
 const skin = {
 	charName: "甲",
@@ -33,6 +33,10 @@ test("状态栏恢复提示可携带程序校验错误", () => {
 
 test("状态栏校验接受 HTML 围栏和前置说明", () => {
 	assert.equal(normalizeStatusSubmission("这是状态栏：\n```html\n<Status_block>HP: 10</Status_block>\n```"), "<Status_block>HP: 10</Status_block>");
+});
+
+test("状态栏模型恢复失败时可从主演原文提取状态块", () => {
+	assert.equal(extractStatusSubmission("正文\n<Status_block>时间：14:33</Status_block>"), "<Status_block>时间：14:33</Status_block>");
 });
 
 test("status_submit 格式错误返回可修复提示", () => {

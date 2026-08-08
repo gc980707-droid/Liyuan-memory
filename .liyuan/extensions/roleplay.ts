@@ -32,7 +32,7 @@ import { buildGreeting, buildSystemPrompt, buildTurnInjection, detectsLanguageMi
 import { formatMemoryIndex, inheritMemoryScope, memoryRecallForTurn } from "../../src/memory/index.ts";
 import { applyMvuOperations, defaultMvuData, formatMvuData, loadMvuData, parseInitVar, parseMvuUpdates, saveMvuData, type MvuData } from "../../src/mvu.ts";
 import { createMacroEnv, evalPresetMacros } from "../../src/preset-macro.ts";
-import { buildStatusRecoveryPrompt, loadValidatedStatus, normalizeStatusSubmission, saveValidatedStatus, validateStatusSubmission, type ValidatedStatus } from "../../src/status-submit.ts";
+import { buildStatusRecoveryPrompt, extractStatusSubmission, loadValidatedStatus, normalizeStatusSubmission, saveValidatedStatus, validateStatusSubmission, type ValidatedStatus } from "../../src/status-submit.ts";
 import { formatPreflightAdvice, hardenPreflightAdvice, parsePreflightAdvice } from "../../src/preflight.ts";
 import { coreCharacterNames } from "../../src/character-roster.ts";
 import { buildTurnPlan, formatTurnPlan } from "../../src/turn-orchestrator.ts";
@@ -2041,6 +2041,17 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						}
 						error = result.errors.join(" | ");
 						if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] rejected attempt=${attempt} ${error}`);
+					}
+					const rawFromNarrative = extractStatusSubmission(assistantText);
+					if (rawFromNarrative) {
+						const direct = validateStatusSubmission(rawFromNarrative, { rules, charName: card?.name ?? "", userName: config.userName });
+						if (direct.ok && isCurrentTurn(turn, generation)) {
+							validatedStatus = direct.status;
+							if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
+							snapshotValidatedStatus();
+							if (process.env.RP_DEBUG) console.error("[rp-status-recovery] restored from narrative fallback");
+							return;
+						}
 					}
 					// 永远保留上一份已验证状态，绝不以空值或未验证文本覆盖它。
 					if (process.env.RP_DEBUG) console.error("[rp-status-recovery] failed; previous status retained");

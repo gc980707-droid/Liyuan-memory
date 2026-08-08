@@ -34,6 +34,12 @@ export function normalizeStatusSubmission(raw: string): string {
 	return text;
 }
 
+/** 从主演原始输出中找回卡片状态块，旁路恢复模型无响应时使用。 */
+export function extractStatusSubmission(text: string): string | null {
+	const match = text.match(/<(StatusBlock|status_block|Status_block|statusblock|status|statusbar|normal_status|special_status|state\s*\d+)\b[^>]*>[\s\S]*?<\/\1\s*>/i);
+	return match ? normalizeStatusSubmission(match[0]) : null;
+}
+
 /** 缺失状态栏时给旁路恢复 Agent 的提示；规则本身仍由代码执行和校验。 */
 export function buildStatusRecoveryPrompt(input: {
 	rules: unknown[];
