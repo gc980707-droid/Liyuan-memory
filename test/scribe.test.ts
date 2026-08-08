@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { buildLoreAliasPrompt, buildScribeTurnPrompt, parseLoreAliases, parseScribeResult } from "../src/scribe.ts";
+import { buildLoreAliasPrompt, buildScribeRetryPrompt, buildScribeTurnPrompt, parseLoreAliases, parseScribeResult } from "../src/scribe.ts";
 import { withAliases } from "../src/lorebook.ts";
 import { defaultState } from "../src/state.ts";
 import type { LorebookEntry } from "../src/types.ts";
@@ -22,6 +22,11 @@ test("场记提示词：只记账，不含连续性审查", () => {
 	assert.ok(systemPrompt.includes("青梧"));
 	assert.ok(userText.includes("【当前账本】"));
 	assert.ok(userText.includes("阿远：*我递出怀表*"));
+});
+
+test("场记重试提示要求严格 JSON patch", () => {
+	const prompt = buildScribeRetryPrompt({ state: defaultState(), userText: "继续", assistantText: "她点头", charName: "A", userName: "U" });
+	assert.match(prompt.systemPrompt, /严格为/);
 });
 
 test("场记提示词：detectUnaskedTurn 已忽略", () => {

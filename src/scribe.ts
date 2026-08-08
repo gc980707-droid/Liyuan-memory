@@ -64,6 +64,14 @@ ${charName}：${assistantText}`;
 	return { systemPrompt, userText: user };
 }
 
+export function buildScribeRetryPrompt(input: ScribePromptInput): { systemPrompt: string; userText: string } {
+	const prompt = buildScribeTurnPrompt(input);
+	return {
+		systemPrompt: `${prompt.systemPrompt}\n必须只输出一个可解析的 JSON 对象，格式严格为 {"patch":{}}；没有明确变化也输出 {"patch":{}}。不要输出 Markdown、解释或代码围栏。`,
+		userText: prompt.userText,
+	};
+}
+
 /** 宽容解析场记输出：剥代码围栏、截取首个 JSON 对象；解析失败返回 null（调用方静默跳过本轮） */
 export function parseScribeResult(text: string): ScribeResult | null {
 	let t = text.trim();

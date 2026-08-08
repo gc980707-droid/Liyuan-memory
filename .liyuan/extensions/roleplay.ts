@@ -78,7 +78,7 @@ import { enabledBlocks, normalizeRpPreset, type RpPreset } from "../../src/prese
 import { applyProjectedSamplers } from "../../src/samplers.ts";
 import { registerStoryPanelSync, registerStoryStateSync } from "../../src/story-sync.ts";
 import { formatPruneStats, pruneClosedTurns } from "../../src/retention.ts";
-import { buildLoreAliasPrompt, buildScribeTurnPrompt, parseLoreAliases, parseScribeResult } from "../../src/scribe.ts";
+import { buildLoreAliasPrompt, buildScribeRetryPrompt, buildScribeTurnPrompt, parseLoreAliases, parseScribeResult } from "../../src/scribe.ts";
 import { shouldApplyStoryPreset } from "../../src/turn-intent.ts";
 import { listSkills } from "../../src/skills.ts";
 import { formatUploadIndex, listUploads } from "../../src/uploads.ts";
@@ -2093,13 +2093,14 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				});
 				// 只抽 patch，输出短，token 上限收紧
 				let text = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1024);
-				if (!text && isCurrentGeneration(generation)) {
-					text = await sideComplete(ctx, `${prompt.systemPrompt}\n必须只输出有效 JSON；无变化输出 {"patch":{}}。`, prompt.userText, 700);
+				let result = text ? parseScribeResult(text) : null;
+				if (!result && isCurrentGeneration(generation)) {
+					const retry = buildScribeRetryPrompt({ state, userText, assistantText, charName: card.name, userName: config.userName });
+					text = await sideComplete(ctx, retry.systemPrompt, retry.userText, 700);
+					result = text ? parseScribeResult(text) : null;
 				}
-				if (!text) return;
-				const result = parseScribeResult(text);
 				if (!result) {
-					if (process.env.RP_DEBUG) console.error(`[rp-scribe] 输出不可解析，本轮跳过`);
+					if (process.env.RP_DEBUG) console.error(`[rp-scribe] 输出不可解析，本轮跳过 raw=${(text ?? "<empty>").slice(0, 300).replace(/\s+/g, " ")}`);
 					return;
 				}
 				if (Object.keys(result.patch).length > 0 && isCurrentGeneration(generation)) {
