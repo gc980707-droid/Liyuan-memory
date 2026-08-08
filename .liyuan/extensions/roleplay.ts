@@ -1967,6 +1967,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 							narrative: assistantText,
 							previous: validatedStatus?.raw,
 							error,
+							manifestStatus: cardManifest?.status,
 						});
 						const recovered = await sideComplete(ctx, recovery.systemPrompt, recovery.userText, 1800);
 						if (!recovered) { error = "状态栏为空"; continue; }

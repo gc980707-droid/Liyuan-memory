@@ -1775,12 +1775,25 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 				try {
 					const card = loadCardFile(dest);
 					if (!card.name.trim()) throw new Error("卡名为空");
+					const raw = readCardRawJson(dest).raw;
+					const manifest = buildCardManifest({
+						raw,
+						card,
+						cardPath: `assets/cards/${safe}`,
+						lore: card.book,
+					});
+					saveCardManifest(cardManifestFile(host.cwd, `assets/cards/${safe}`), manifest);
 					host.notify("info", `已导入角色卡「${card.name}」`);
 					sendJson(res, 200, {
 						ok: true,
 						path: `assets/cards/${safe}`,
 						name: card.name,
 						embeddedLoreCount: card.book.length,
+						manifest: {
+							status: manifest.status,
+							capabilities: manifest.capabilities,
+							characterCount: manifest.characters.length,
+						},
 					});
 				} catch (e) {
 					unlinkSync(dest); // 坏卡不留盘
