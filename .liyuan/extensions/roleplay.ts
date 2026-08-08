@@ -78,7 +78,7 @@ import { enabledBlocks, normalizeRpPreset, type RpPreset } from "../../src/prese
 import { applyProjectedSamplers } from "../../src/samplers.ts";
 import { registerStoryPanelSync, registerStoryStateSync } from "../../src/story-sync.ts";
 import { formatPruneStats, pruneClosedTurns } from "../../src/retention.ts";
-import { buildLoreAliasPrompt, buildScribeRetryPrompt, buildScribeTurnPrompt, parseLoreAliases, parseScribeResult } from "../../src/scribe.ts";
+import { buildLoreAliasPrompt, buildScribeRetryPrompt, buildScribeTurnPrompt, extractDeterministicLedgerPatch, parseLoreAliases, parseScribeResult } from "../../src/scribe.ts";
 import { shouldApplyStoryPreset } from "../../src/turn-intent.ts";
 import { listSkills } from "../../src/skills.ts";
 import { formatUploadIndex, listUploads } from "../../src/uploads.ts";
@@ -2135,14 +2135,20 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				// 只抽 patch，输出短，token 上限收紧
 				let text = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1024);
 				let result = text ? parseScribeResult(text) : null;
-				if (!result && isCurrentGeneration(generation)) {
+				for (let retryNo = 1; !result && retryNo <= 2 && isCurrentGeneration(generation); retryNo++) {
 					const retry = buildScribeRetryPrompt({ state, userText, assistantText: ledgerText, charName: card.name, userName: config.userName });
-					text = await sideComplete(ctx, retry.systemPrompt, retry.userText, 700);
+					text = await sideComplete(ctx, retry.systemPrompt, `${retry.userText}\n重试编号：${retryNo}`, 700);
 					result = text ? parseScribeResult(text) : null;
+					if (process.env.RP_DEBUG) console.error(`[rp-scribe] retry=${retryNo} parsed=${!!result} raw=${(text ?? "<empty>").slice(0, 180).replace(/\s+/g, " ")}`);
 				}
 				if (!result) {
-					if (process.env.RP_DEBUG) console.error(`[rp-scribe] 输出不可解析，本轮跳过 raw=${(text ?? "<empty>").slice(0, 300).replace(/\s+/g, " ")}`);
-					return;
+					const fallbackPatch = extractDeterministicLedgerPatch(ledgerText);
+					if (Object.keys(fallbackPatch).length === 0) {
+						if (process.env.RP_DEBUG) console.error(`[rp-scribe] 输出不可解析且无确定性字段，跳过 raw=${(text ?? "<empty>").slice(0, 300).replace(/\s+/g, " ")}`);
+						return;
+					}
+					result = { patch: fallbackPatch, warnings: [], unaskedTurn: null };
+					if (process.env.RP_DEBUG) console.error(`[rp-scribe] deterministic fallback fields=${Object.keys(fallbackPatch).join(",")}`);
 				}
 				if (Object.keys(result.patch).length > 0 && isCurrentGeneration(generation)) {
 					const knownNames = [card.name, config.userName, ...Object.keys(state.characters)];

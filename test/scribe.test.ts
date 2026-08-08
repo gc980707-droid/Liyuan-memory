@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { buildLoreAliasPrompt, buildScribeRetryPrompt, buildScribeTurnPrompt, parseLoreAliases, parseScribeResult } from "../src/scribe.ts";
+import { buildLoreAliasPrompt, buildScribeRetryPrompt, buildScribeTurnPrompt, extractDeterministicLedgerPatch, parseLoreAliases, parseScribeResult } from "../src/scribe.ts";
 import { withAliases } from "../src/lorebook.ts";
 import { defaultState } from "../src/state.ts";
 import type { LorebookEntry } from "../src/types.ts";
@@ -27,6 +27,10 @@ test("场记提示词：只记账，不含连续性审查", () => {
 test("场记重试提示要求严格 JSON patch", () => {
 	const prompt = buildScribeRetryPrompt({ state: defaultState(), userText: "继续", assistantText: "她点头", charName: "A", userName: "U" });
 	assert.match(prompt.systemPrompt, /严格为/);
+});
+
+test("场记模型空响应时可提取时间地点兜底", () => {
+	assert.deepEqual(extractDeterministicLedgerPatch("📅 日期：7月15日 | ⏰ 时间：14:33 | 📍 位置：1号包厢"), { time: "14:33", location: "1号包厢" });
 });
 
 test("场记提示词：detectUnaskedTurn 已忽略", () => {

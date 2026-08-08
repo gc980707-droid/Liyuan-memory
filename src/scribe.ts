@@ -72,6 +72,16 @@ export function buildScribeRetryPrompt(input: ScribePromptInput): { systemPrompt
 	};
 }
 
+/** 从正文/状态栏中提取低风险的时间和地点兜底，避免场记模型空响应时账本完全不动。 */
+export function extractDeterministicLedgerPatch(text: string): Record<string, unknown> {
+	const patch: Record<string, unknown> = {};
+	const time = text.match(/(?:时间|时刻|⏰)\s*[：:]\s*([^\n|，,。]{2,40})/u)?.[1]?.trim();
+	const location = text.match(/(?:位置|地点|场所|📍)\s*[：:]\s*([^\n|，,。]{2,80})/u)?.[1]?.trim();
+	if (time) patch.time = time;
+	if (location) patch.location = location;
+	return patch;
+}
+
 /** 宽容解析场记输出：剥代码围栏、截取首个 JSON 对象；解析失败返回 null（调用方静默跳过本轮） */
 export function parseScribeResult(text: string): ScribeResult | null {
 	let t = text.trim();
