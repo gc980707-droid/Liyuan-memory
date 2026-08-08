@@ -40,6 +40,7 @@ import { buildCharacterStatePrompt, parseCharacterStateAgent } from "../../src/c
 import { buildCharacterIntentPrompt } from "../../src/character-intent-agent.ts";
 import { buildCharacterContinuityPrompt, parseCharacterContinuityAgent } from "../../src/character-continuity-agent.ts";
 import { buildSceneStatePrompt, formatSceneStateAdvice, parseSceneStateAdvice } from "../../src/scene-state-agent.ts";
+import { SessionStateService } from "../../src/session-state-service.ts";
 import { buildCardManifest, cardManifestFile, characterLoreProfiles, loadCardManifest, manifestAgentCharacters, manifestMatchesCard, saveCardManifest, syncCardManifestCharacters } from "../../src/card-manifest.ts";
 import { advanceTimeForKnownAction, alignStatusClock, extractClockTime, gateStatusTime, gateTimePatch } from "../../src/time-gate.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
@@ -177,6 +178,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	let stateFile = "";
 	let mvu: MvuData = defaultMvuData();
 	let mvuFile = "";
+	let stateService: SessionStateService | null = null;
 	let validatedStatus: ValidatedStatus | null = null;
 	let statusFile = "";
 	/** 每次树导航递增；所有旁路 Agent 写入前必须验证，防止旧回合污染新分支。 */
@@ -742,12 +744,10 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				}), { maxItems: 100 }),
 			}),
 			async execute(_id, params, _signal, _onUpdate, toolCtx) {
-				const result = applyMvuOperations(mvu, params.operations);
-				if (result.applied.length) {
-					mvu = result.data;
-					if (mvuFile) saveMvuData(mvuFile, mvu);
-					snapshotMvu();
-				}
+				const result = stateService
+					? await stateService.patchMvu(params.operations, { source: "roleplay-tool", turn: turnGeneration })
+					: applyMvuOperations(mvu, params.operations);
+				mvu = result.data;
 				return {
 					content: [{ type: "text", text: `已更新 ${result.applied.length} 项。${result.warnings.length ? `警告：${result.warnings.join("；")}` : ""}\n${formatMvuData(mvu)}` }],
 					...(result.applied.length === 0 && result.warnings.length ? { isError: true } : {}),
@@ -1010,10 +1010,10 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				delete patch.time;
 				return { content: [{ type: "text", text: `⚠ ${timeGate.reason}\n时间保持不变；如果确实要推进时间，请在用户输入或正文中明确说明经过了多久。` }], details: { state, timeRejected: true } };
 			}
-			const result = applyPatch(state, patch);
-				state = result.state;
-				if (stateFile) saveState(stateFile, state);
-				snapshotState();
+			const result = stateService
+				? await stateService.patchWorldState(patch, { source: "roleplay-tool", turn: turnGeneration })
+				: applyPatch(state, patch);
+			state = result.state;
 				const lines = [...result.applied.map((a) => `✓ ${a}`), ...result.warnings.map((w) => `⚠ ${w}`)];
 				return {
 					content: [{ type: "text", text: lines.length ? lines.join("\n") : "（无变更）" }],
@@ -1471,6 +1471,13 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				saveState(stateFile, state);
 			}
 			mvuFile = join(dir(ctx.cwd, "mvu"), `${ctx.sessionManager.getSessionId()}.json`);
+			stateService = new SessionStateService({
+				stateFile,
+				mvuFile,
+				knownCharacterNames: () => [card?.name ?? "", config.userName, ...Object.keys(state.characters)].filter(Boolean),
+				snapshotState,
+				snapshotMvu,
+			});
 			const restoredMvu = restoreMvuFromBranch(ctx.sessionManager);
 			mvu = restoredMvu ? mvu : loadMvuData(mvuFile);
 			if (!restoredMvu && Object.keys(mvu).length === 0 && sessionMatchesCurrentCard(ctx.sessionManager)) {
@@ -1985,11 +1992,12 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						const stateOperations = operations.map((operation) =>
 							operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
 						);
-						const applied = applyMvuOperations(mvu, stateOperations, { atomic: true });
+						const applied = stateService
+							? await stateService.patchMvu(stateOperations, { source: "side-agent", turn })
+							: applyMvuOperations(mvu, stateOperations, { atomic: true });
+						mvu = applied.data;
 						if (applied.applied.length) {
 							mvu = applied.data;
-							if (mvuFile) saveMvuData(mvuFile, mvu);
-							snapshotMvu();
 						}
 						if (process.env.RP_DEBUG) console.error(`[rp-character-state] applied=${applied.applied.length} warnings=${applied.warnings.length}${applied.warnings.length ? ` details=${applied.warnings.join(" | ")}` : ""}`);
 					} else {
@@ -2001,13 +2009,16 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					const continuityOutput = await sideComplete(ctx, continuityPrompt.systemPrompt, continuityPrompt.userText, 1100);
 					const continuityOperations = continuityOutput ? parseCharacterContinuityAgent(continuityOutput) : null;
 					if (continuityOperations?.length && isCurrentTurn(turn, generation)) {
-						const continuityApplied = applyMvuOperations(mvu, continuityOperations.map((operation) =>
+						const continuityApplied = stateService
+							? await stateService.patchMvu(continuityOperations.map((operation) =>
+								operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
+							), { source: "side-agent", turn })
+							: applyMvuOperations(mvu, continuityOperations.map((operation) =>
 							operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
 						), { atomic: true });
+						mvu = continuityApplied.data;
 						if (continuityApplied.applied.length) {
 							mvu = continuityApplied.data;
-							if (mvuFile) saveMvuData(mvuFile, mvu);
-							snapshotMvu();
 						}
 						if (process.env.RP_DEBUG) console.error(`[rp-character-continuity] applied=${continuityApplied.applied.length} warnings=${continuityApplied.warnings.length}`);
 					}
@@ -2018,11 +2029,12 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		}
 		const mvuOperations = parseMvuUpdates(assistantText);
 		if (mvuOperations.length && isCurrentTurn(turn, generation)) {
-			const applied = applyMvuOperations(mvu, mvuOperations);
+			const applied = stateService
+				? await stateService.patchMvu(mvuOperations, { source: "mvu-parser", turn })
+				: applyMvuOperations(mvu, mvuOperations);
+			mvu = applied.data;
 			if (applied.applied.length) {
 				mvu = applied.data;
-				if (mvuFile) saveMvuData(mvuFile, mvu);
-				snapshotMvu();
 			}
 			if (process.env.RP_DEBUG && applied.warnings.length) console.error(`[rp-mvu] ${applied.warnings.join("；")}`);
 		}
