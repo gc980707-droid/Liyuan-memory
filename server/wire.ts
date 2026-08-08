@@ -436,12 +436,26 @@ function thinkingOf(content: unknown): string {
 }
 
 /** content 是否含 toolCall 块（agent 中间轮会夹带计划旁白 + 工具调用） */
-function hasToolCall(content: unknown): boolean {
+function hasToolCall(content: unknown): boolean {
 	if (!Array.isArray(content)) return false;
 	return content.some(
 		(p) => p && typeof p === "object" && (p as { type?: unknown }).type === "toolCall",
 	);
-}
+}
+
+function textAfterLastToolCall(content: unknown): string {
+	if (!Array.isArray(content)) return "";
+	let last = -1;
+	content.forEach((part, index) => {
+		if (part && typeof part === "object" && (part as { type?: unknown }).type === "toolCall") last = index;
+	});
+	if (last < 0) return "";
+	return content.slice(last + 1)
+		.map((part) => part && typeof part === "object" && (part as { type?: unknown }).type === "text" ? String((part as { text?: unknown }).text ?? "") : "")
+		.filter(Boolean)
+		.join("\n")
+		.trim();
+}
 
 /**
  * 单条 AgentMessage → WireMsg。不属于叙事流的消息（rp-inject、toolResult、
@@ -468,18 +482,24 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 		const channel: WireChannel = opts?.backstage ? "backstage" : "narrative";
 		const modelThinking = thinkingOf(msg.content).trim();
 		// 正常中间 tool 轮：跳过（防叠泡）；**用户中断**的半截须上屏，即便夹着 toolCall
-		if (!aborted && hasToolCall(msg.content)) return null;
+		if (!aborted && hasToolCall(msg.content)) {
+			// 某些模型把最终正文和工具调用放在同一条 assistant 消息里。
+			// 只丢弃纯中间工具轮；有可见正文时保留正文，避免正文消失。
+			if (!textAfterLastToolCall(msg.content)) return null;
+		}
 		// 正常完成且无正文：跳过；中断时即使无 text 也可能有 thinking，后面单独处理
-		if (!aborted && !text) return null;
+		if (!aborted && !text) return null;
+		const sourceText = !aborted && hasToolCall(msg.content) ? textAfterLastToolCall(msg.content) : text;
+		if (!aborted && !sourceText) return null;
 
-		const scaffoldThinking = text ? extractScaffoldThinking(text) : "";
+		const scaffoldThinking = sourceText ? extractScaffoldThinking(sourceText) : "";
 		const thinking = [modelThinking, scaffoldThinking].filter(Boolean).join("\n\n").trim();
 		// narrative：先卡显示正则再策略；backstage 仍纯文本策略（不套角色卡皮肤）
 		// 先从模型原文截出状态块，再分别处理正文和状态块。若先处理整条
 		// 文本，卡片正则可能把状态块变成 HTML，正文就会重新携带状态栏。
-		const rawStatusBlocks = channel === "narrative" ? extractPanelBlocks(text) : [];
-		const prepared = text
-			? (channel === "narrative" ? prepareDisplayText(stripPanelBlocks(text), skin) : prepareDisplayText(text, null))
+		const rawStatusBlocks = channel === "narrative" ? extractPanelBlocks(sourceText) : [];
+		const prepared = sourceText
+			? (channel === "narrative" ? prepareDisplayText(stripPanelBlocks(sourceText), skin) : prepareDisplayText(sourceText, null))
 			: "";
 		const statusBlocks = rawStatusBlocks.map((block) => ({
 			tag: block.tag,
