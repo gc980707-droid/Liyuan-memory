@@ -41,7 +41,7 @@ import { buildCharacterIntentPrompt } from "../../src/character-intent-agent.ts"
 import { buildCharacterContinuityPrompt, parseCharacterContinuityAgent } from "../../src/character-continuity-agent.ts";
 import { buildSceneStatePrompt, formatSceneStateAdvice, parseSceneStateAdvice } from "../../src/scene-state-agent.ts";
 import { buildCardManifest, cardManifestFile, characterLoreProfiles, loadCardManifest, manifestAgentCharacters, manifestMatchesCard, saveCardManifest, syncCardManifestCharacters } from "../../src/card-manifest.ts";
-import { advanceTimeForKnownAction, alignStatusClock, extractClockTime, gateStatusTime, gateTimePatch, projectStatusClock } from "../../src/time-gate.ts";
+import { advanceTimeForKnownAction, alignStatusClock, extractClockTime, gateStatusTime, gateTimePatch } from "../../src/time-gate.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
 import {
 	constantEntries,
@@ -782,12 +782,6 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					content: [{ type: "text", text: `状态栏校验失败（时间门禁）：${statusTime.reason}\n只修正状态栏时间，不要重写正文。` }],
 					isError: true,
 				};
-				const projectedTime = projectStatusClock(state.time, params.status);
-				if (projectedTime && projectedTime !== state.time) {
-					state = { ...state, time: projectedTime };
-					if (stateFile) saveState(stateFile, state);
-					snapshotState();
-				}
 				validatedStatus = result.status;
 				statusSubmittedThisTurn = true;
 				if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
@@ -2027,13 +2021,6 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						if (result.ok && isCurrentTurn(turn, generation)) {
 							const statusTime = gateStatusTime(userText, state.time, recovered);
 							if (!statusTime.allowed) { error = statusTime.reason; continue; }
-							const projectedTime = projectStatusClock(state.time, recovered);
-							if (projectedTime && projectedTime !== state.time) {
-								state = { ...state, time: projectedTime };
-								if (stateFile) saveState(stateFile, state);
-								snapshotState();
-								if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] projected ledger time=${state.time}`);
-							}
 							validatedStatus = result.status;
 							if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
 							snapshotValidatedStatus();
