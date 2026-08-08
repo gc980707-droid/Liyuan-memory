@@ -134,7 +134,8 @@ test("显示层剥预设脚手架：draft_notes/content/HTML 注释；假思维�
 	assert.ok(!w?.text.includes("分析要点"));
 	assert.ok(!w?.text.includes("<content>"));
 	assert.ok(!w?.text.includes("Prism"));
-	assert.ok(w?.text.includes("<StatusBlock>") || w?.text.includes("地点:御书房"), "状态栏保留显示");
+	assert.ok(w?.statusBlocks?.some((block) => block.body.includes("地点:御书房")), "状态栏应从正文剥离并单独传给状态面板");
+	assert.ok(!w?.text.includes("地点:御书房"), "状态栏不应进入正文");
 	assert.ok(w?.thinking?.includes("分析要点"), "草稿进折叠思维链");
 });
 

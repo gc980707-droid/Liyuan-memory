@@ -12,6 +12,7 @@ import {
 	extractScaffoldThinking,
 	prepareDisplayText,
 	stripPanelBlocks,
+	extractPanelBlocks,
 	type DisplaySkin,
 } from "../src/postprocess.ts";
 import { isBackstageText } from "../src/stance.ts";
@@ -46,11 +47,13 @@ export interface WireSwipe {
 	total: number;
 }
 
-export interface WireMsg {
+export interface WireMsg {
 	channel: WireChannel;
 	/** 发言者显示名（narrative/greeting 为角色名，user 为用户名） */
 	name?: string;
-	text: string;
+	text: string;
+	/** 从正文剥离的状态面板，供左栏展示；不进入正文气泡。 */
+	statusBlocks?: Array<{ tag: string; body: string }>;
 	/** 模型思维链（原始输出，UI 折叠呈现；无则缺省） */
 	thinking?: string;
 	/**
@@ -472,14 +475,14 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 		const scaffoldThinking = text ? extractScaffoldThinking(text) : "";
 		const thinking = [modelThinking, scaffoldThinking].filter(Boolean).join("\n\n").trim();
 		// narrative：先卡显示正则再策略；backstage 仍纯文本策略（不套角色卡皮肤）
-		const narrativeText = channel === "narrative" ? stripPanelBlocks(text) : text;
-		const display = narrativeText
-			? channel === "narrative"
-				? prepareDisplayText(narrativeText, skin)
-				: prepareDisplayText(narrativeText, null)
-			: "";
+		// 先应用卡片正则，再提取状态块。反过来会把 StatusBlock/stateN
+		// 拆掉，使卡片状态正则永远匹配不到。
+		const prepared = text ? (channel === "narrative" ? prepareDisplayText(text, skin) : prepareDisplayText(text, null)) : "";
+		const statusBlocks = channel === "narrative" ? extractPanelBlocks(prepared) : [];
+		const display = channel === "narrative" ? stripPanelBlocks(prepared) : prepared;
+		const hasPanel = statusBlocks.length > 0;
 
-		if (!display && !thinking) {
+		if (!display && !thinking && !hasPanel) {
 			// 空中断：仍留一条锚点，避免 agent_end→resync 后像「什么都没发生」
 			if (aborted) {
 				return {
@@ -492,14 +495,13 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 			return null;
 		}
 
-		const body =
-			display ||
-			(aborted ? "（正文未流出，见思维链）" : "（脚手架已折叠，见思维链）");
-		return {
+		const body = display || (hasPanel ? "" : aborted ? "（正文未流出，见思维链）" : "（脚手架已折叠，见思维链）");
+		return {
 			channel,
 			name: names.charName,
 			text: body,
-			...(thinking ? { thinking } : {}),
+			...(thinking ? { thinking } : {}),
+			...(statusBlocks.length ? { statusBlocks } : {}),
 			...(aborted ? { unfinished: true } : {}),
 		};
 	}

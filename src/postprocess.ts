@@ -280,6 +280,12 @@ export function stripPanelBlocks(text: string): string {
 	return applyPolicies(text, { keepPanel: false, collectFold: false }).text;
 }
 
+export function extractPanelBlocks(text: string): Array<{ tag: string; body: string }> {
+	return scanTaggedBlocks(text)
+		.filter((block) => block.policy === "panel")
+		.map((block) => ({ tag: block.tag, body: block.body.trim() }));
+}
+
 /** wire / 显示管线注入的一档皮肤 */
 export type DisplaySkin = {
 	rules: DisplayRule[];

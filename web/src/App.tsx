@@ -545,6 +545,10 @@ export default function App() {
 		for (let i = messages.length - 1; i >= 0; i--) {
 			const message = messages[i];
 			if (message.channel !== "narrative" && message.channel !== "greeting") continue;
+			if (message.statusBlocks?.length) {
+				const block = message.statusBlocks.at(-1)!;
+				return { kind: "status", body: block.body };
+			}
 			const fallback = parseFallbackStatus(message.text);
 			const parts = splitRichContentParts(message.text, cardSkin);
 			// 这里仅用于提取左侧状态栏；正文 RichContent 会过滤 status part。
