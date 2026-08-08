@@ -1977,7 +1977,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		// 状态栏可能是数万字符的 HTML，不能把它原样喂给场记；否则旁路模型
 		// 容易被 UI 模板淹没而不返回账本 JSON。正文与状态栏是两条独立数据链。
 		const ledgerText = cleanAssistantText(assistantText).slice(0, 24000);
-		let currentTurnScribeDone: Promise<void> = Promise.resolve();
+		let resolveCurrentTurnScribe!: () => void;
+		const currentTurnScribeDone = new Promise<void>((resolve) => { resolveCurrentTurnScribe = resolve; });
 		if (statusBarFormats.length > 0) {
 			const runStatusRecovery = async () => {
 				try {
@@ -2044,6 +2045,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] skipped: ${error instanceof Error ? error.message : String(error)}`);
 				}
 			};
+			if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] queued turn=${turn}`);
 			statusRecoveryQueue = statusRecoveryQueue.then(runStatusRecovery, runStatusRecovery);
 		}
 		if (config.multiAgentPreflight === true && card) {
@@ -2118,6 +2120,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			try {
 				// 场记只绑定世界线，不绑定回合：上一轮慢一点也必须完成记账。
 				if (!isCurrentGeneration(generation)) return;
+				if (process.env.RP_DEBUG) console.error(`[rp-scribe] start turn=${turn}`);
 				const prompt = buildScribeTurnPrompt({
 					state,
 					userText,
@@ -2153,17 +2156,18 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						console.error(`[rp-scribe] ${applied.applied.join("；") || "（无变更）"}`);
 					}
 				}
+				if (process.env.RP_DEBUG) console.error(`[rp-scribe] complete turn=${turn}`);
 			} catch (err) {
 				if (process.env.RP_DEBUG) {
 					console.error(`[rp-scribe] 失败（本轮跳过）：${err instanceof Error ? err.message : String(err)}`);
 				}
 			}
 		};
-			scribeQueue = scribeQueue.then(runScribe, runScribe).finally(() => {
-				scribePending -= 1;
-				scribeBusy = scribePending > 0;
-			});
-		currentTurnScribeDone = scribeQueue;
+		scribeQueue = scribeQueue.then(runScribe, runScribe).finally(() => {
+			scribePending -= 1;
+			scribeBusy = scribePending > 0;
+			resolveCurrentTurnScribe();
+		});
 	});
 
 	// 剧情向压缩接管：用场记提示词替代 pi 默认的 coding 摘要模板
