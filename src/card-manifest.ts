@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { CharacterCard, LorebookEntry } from "./types.ts";
-import { cardStatusBarFormats, extractRegexScripts } from "./cardfront.ts";
+import { cardStatusBarFormats, displayRules, extractRegexScripts } from "./cardfront.ts";
 import type { MvuData } from "./mvu.ts";
 import { readFileSync, existsSync } from "node:fs";
 import { loreFingerprint, appendLorebookFileEntry } from "./lorebook.ts";
@@ -46,8 +46,8 @@ export function buildCardManifest(input: { raw: Record<string, unknown>; card: C
 		cardName: input.card.name,
 		characters: names.slice(0, 32).map((name, index) => ({ name, kind: index === 0 ? "core" : "background", agentEnabled: index === 0 })),
 		mvu: { initial: input.initialMvu ?? {}, detected: !!input.initialMvu && Object.keys(input.initialMvu).length > 0 },
-		status: { required: cardStatusBarFormats(input.raw).length > 0, formats: cardStatusBarFormats(input.raw), regexRuleCount: extractRegexScripts(input.raw).length },
-		capabilities: { mvu: !!input.initialMvu && Object.keys(input.initialMvu).length > 0, displayRegex: extractRegexScripts(input.raw).length > 0, tavernHelper: helper },
+		status: { required: cardStatusBarFormats(input.raw).length > 0, formats: cardStatusBarFormats(input.raw), regexRuleCount: displayRules(extractRegexScripts(input.raw)).length },
+		capabilities: { mvu: !!input.initialMvu && Object.keys(input.initialMvu).length > 0, displayRegex: displayRules(extractRegexScripts(input.raw)).length > 0, tavernHelper: helper },
 		createdAt: now,
 		updatedAt: now,
 	};

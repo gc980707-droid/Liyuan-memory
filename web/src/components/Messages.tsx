@@ -197,7 +197,7 @@ function StatusPanel({ tag, body }: { tag: string; body: string }) {
  * skin → HTML 块（保护皮肤内 <status>）→ 剩余文本上的状态面板 → RP 排版
  */
 export function RichContent({ text, skin }: { text: string; skin?: SkinProp | null }) {
-	const parts = splitRichContentParts(stripFallbackStatus(text), skin).filter((part) => part.kind === "text");
+	const parts = splitRichContentParts(stripFallbackStatus(text), skin);
 	const onlyPlain = parts.length === 1 && parts[0].kind === "text";
 	if (onlyPlain) {
 		return <Paragraphs text={parts[0].text} />;

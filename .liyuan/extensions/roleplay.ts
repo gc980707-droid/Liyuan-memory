@@ -2675,9 +2675,17 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			const cardAbs = resolvePath(cwd, config.card);
 			card = loadCardFile(cardAbs);
 			try {
-				statusBarFormats = cardStatusBarFormats(readCardRawJson(cardAbs).raw);
+				const rawCard = readCardRawJson(cardAbs).raw;
+				statusBarFormats = cardStatusBarFormats(rawCard);
+				const manifestFile = cardManifestFile(cwd, config.card);
+				const cachedManifest = loadCardManifest(manifestFile);
+				cardManifest = manifestMatchesCard(cachedManifest, rawCard, config.card)
+					? syncCardManifestCharacters(cachedManifest, { card, lore: entries, userName: config.userName })
+					: buildCardManifest({ raw: rawCard, card, cardPath: config.card, lore: entries, initialMvu: initialMvuFromCard(), userName: config.userName });
+				saveCardManifest(manifestFile, cardManifest);
 			} catch {
 				statusBarFormats = [];
+				cardManifest = null;
 			}
 		}
 		const fileGroups: LorebookEntry[][] = [];

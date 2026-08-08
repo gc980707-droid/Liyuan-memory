@@ -50,7 +50,7 @@ export function readCardJsonFromPng(buf: Buffer): unknown {
 		throw new Error("PNG 中没有找到角色卡数据（无 ccv3/chara tEXt chunk）");
 	}
 	const json = Buffer.from(raw, "base64").toString("utf8");
-	return JSON.parse(json);
+	return JSON.parse(json.charCodeAt(0) === 0xfeff ? json.slice(1) : json);
 }
 
 function str(v: unknown): string {
