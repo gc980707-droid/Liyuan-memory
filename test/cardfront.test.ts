@@ -36,6 +36,7 @@ test("extractRegexScripts: data.extensions 与顶层 extensions 都认,缺失返
 	assert.equal(extractRegexScripts({ extensions: { regex_scripts: [skinScript] } }).length, 1);
 	assert.deepEqual(extractRegexScripts({ name: "x" }), []);
 	assert.deepEqual(extractRegexScripts({ data: { extensions: { regex_scripts: "bad" } } }), []);
+	assert.equal(extractRegexScripts({ data: { name: "x" }, extensions: { regex_scripts: [skinScript] } }).length, 1);
 });
 
 test("displayRules: 显示向保留,promptOnly/disabled/非AI输出排除", () => {

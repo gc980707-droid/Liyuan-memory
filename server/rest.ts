@@ -124,6 +124,7 @@ import {
 import { listSkills, saveSkill } from "../src/skills.ts";
 import { DEFAULT_CONFIG, type LorebookEntry, type RpConfig } from "../src/types.ts";
 import { readJsonFile } from "../src/jsonio.ts";
+import { parseInitVar, type MvuData } from "../src/mvu.ts";
 import { formatBytes, listMedia, listUploads, saveUpload } from "../src/uploads.ts";
 import {
 	addManifestCharacterToLore,
@@ -272,6 +273,17 @@ export interface RestHost {
 	updateDiscard(): void;
 	/** 重启进程应用更新（启动脚本包裹下：退出后由脚本循环重拉） */
 	updateRestart(): void;
+}
+
+function initialMvuFromRaw(raw: Record<string, unknown>): MvuData {
+	const data = raw.data && typeof raw.data === "object" ? raw.data as Record<string, unknown> : raw;
+	const ext = data.extensions && typeof data.extensions === "object" ? data.extensions as Record<string, unknown> : {};
+	const helper = ext.tavern_helper && typeof ext.tavern_helper === "object" ? ext.tavern_helper as Record<string, unknown> : {};
+	const variables = helper.variables && typeof helper.variables === "object" ? helper.variables as Record<string, unknown> : null;
+	if (variables) return variables as MvuData;
+	const texts = [data.description, data.scenario, data.first_mes, data.mes_example, data.system_prompt, data.post_history_instructions].filter((x): x is string => typeof x === "string").join("\n");
+	const match = texts.match(/\[InitVar\]([\s\S]*?)(?:\[\/InitVar\]|$)/i);
+	return match ? parseInitVar(match[1]) ?? {} : {};
 }
 
 export interface SessionInfoLite {
@@ -1781,6 +1793,7 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 						card,
 						cardPath: `assets/cards/${safe}`,
 						lore: card.book,
+						initialMvu: initialMvuFromRaw(raw),
 					});
 					saveCardManifest(cardManifestFile(host.cwd, `assets/cards/${safe}`), manifest);
 					host.notify("info", `已导入角色卡「${card.name}」`);

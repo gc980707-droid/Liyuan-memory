@@ -16,7 +16,10 @@ export function hasCompleteStatusContainer(text: string): boolean {
 	const source = text.trim();
 	if (/<style[\s>][\s\S]*<\/style>/i.test(source) && /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>/i.test(source)) return true;
 	const tag = source.match(/^\s*<([A-Za-z_\u4e00-\u9fff][\w.\-\u4e00-\u9fff]*)\b[^>]*>/);
-	return !!tag && new RegExp(`<\\/${tag[1]}\\s*>\\s*$`, "i").test(source);
+	if (!tag || !new RegExp(`<\\/${tag[1]}\\s*>\\s*$`, "i").test(source)) return false;
+	const open = new RegExp(`<${tag[1]}\\b`, "gi");
+	const close = new RegExp(`<\\/${tag[1]}\\s*>`, "gi");
+	return [...source.matchAll(open)].length === [...source.matchAll(close)].length;
 }
 
 /** 缺失状态栏时给旁路恢复 Agent 的提示；规则本身仍由代码执行和校验。 */

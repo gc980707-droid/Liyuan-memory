@@ -126,6 +126,10 @@ export function loadCardManifest(file: string): CardManifest | null {
 	try { return JSON.parse(readFileSync(file, "utf8")) as CardManifest; } catch { return null; }
 }
 
+export function manifestMatchesCard(manifest: CardManifest | null, raw: Record<string, unknown>, cardPath: string): manifest is CardManifest {
+	return !!manifest && manifest.version === 1 && manifest.cardId === cardManifestId(raw) && manifest.cardPath === cardPath;
+}
+
 export function addManifestCharacterToLore(
 	manifest: CardManifest,
 	manifestFile: string,

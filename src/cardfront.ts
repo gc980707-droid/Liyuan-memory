@@ -48,9 +48,12 @@ export function buildCardFrontSnapshot(
 
 /** ST 卡的 regex_scripts 数组(data.extensions 优先,顶层 extensions 兜底) */
 export function extractRegexScripts(raw: Record<string, unknown>): unknown[] {
-	const data = raw.data && typeof raw.data === "object" ? (raw.data as Record<string, unknown>) : raw;
-	const ext = data.extensions && typeof data.extensions === "object" ? (data.extensions as Record<string, unknown>) : {};
-	return Array.isArray(ext.regex_scripts) ? ext.regex_scripts : [];
+	const data = raw.data && typeof raw.data === "object" ? (raw.data as Record<string, unknown>) : {};
+	const nested = data.extensions && typeof data.extensions === "object" ? (data.extensions as Record<string, unknown>) : {};
+	const top = raw.extensions && typeof raw.extensions === "object" ? (raw.extensions as Record<string, unknown>) : {};
+	const nestedScripts = Array.isArray(nested.regex_scripts) ? nested.regex_scripts : [];
+	const topScripts = Array.isArray(top.regex_scripts) ? top.regex_scripts : [];
+	return nestedScripts.length ? nestedScripts : topScripts;
 }
 
 /**
@@ -62,7 +65,7 @@ export function cardStatusBarFormats(raw: Record<string, unknown> | null | undef
 	if (!raw || typeof raw !== "object") return [];
 	const found = new Set<string>();
 	const note = (s: string) => {
-		if (/status[_ -]?(?:block|bar)?|state\s*\d+/i.test(s)) found.add("卡片状态标签/状态区");
+		if (/<\/?(?:status(?:[_ -]?(?:block|bar)?)|state\s*\d+|normal[_ -]?status|special[_ -]?status)\b/i.test(s)) found.add("卡片状态标签/状态区");
 		if (/<\s*state\d+|state\\d|<\(state/i.test(s) || /多状态栏|状态展示/i.test(s)) {
 			found.add("`<state1>…</state1>`（或卡约定的 state 序号）");
 		}
@@ -71,9 +74,9 @@ export function cardStatusBarFormats(raw: Record<string, unknown> | null | undef
 		if (!s || typeof s !== "object") continue;
 		const r = s as Record<string, unknown>;
 		const blob = [
-			typeof r.scriptName === "string" ? r.scriptName : "",
-			typeof r.findRegex === "string" ? r.findRegex : "",
-			typeof r.replaceString === "string" ? r.replaceString.slice(0, 400) : "",
+			typeof r.scriptName === "string" ? r.scriptName : typeof r.script_name === "string" ? r.script_name : "",
+			typeof r.findRegex === "string" ? r.findRegex : typeof r.find_regex === "string" ? r.find_regex : "",
+			typeof r.replaceString === "string" ? r.replaceString : typeof r.replace_string === "string" ? r.replace_string : "",
 		].join("\n");
 		note(blob);
 	}
@@ -81,6 +84,11 @@ export function cardStatusBarFormats(raw: Record<string, unknown> | null | undef
 	const greet = [
 		typeof data.first_mes === "string" ? data.first_mes : "",
 		...(Array.isArray(data.alternate_greetings) ? data.alternate_greetings.map((g) => String(g ?? "")) : []),
+		typeof data.mes_example === "string" ? data.mes_example : "",
+		typeof data.description === "string" ? data.description : "",
+		typeof data.creator_notes === "string" ? data.creator_notes : "",
+		typeof data.system_prompt === "string" ? data.system_prompt : "",
+		typeof data.post_history_instructions === "string" ? data.post_history_instructions : "",
 	].join("\n");
 	note(greet);
 	return [...found];

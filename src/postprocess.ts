@@ -289,7 +289,7 @@ export function isHtmlDisplayPayload(text: string): boolean {
 	if (!text) return false;
 	if (isFullPageHtmlPayload(text)) return true;
 	// 皮肤包的大块 styled div（淫宫状态栏等）
-	if (/<div\b[^>]*\bstyle\s*=/i.test(text) && /<\/div>/i.test(text) && text.length > 60) return true;
+	if (/<div\b[^>]*(?:\bstyle\s*=|\bclass\s*=)/i.test(text) && /<\/div>/i.test(text) && text.length > 60) return true;
 	return false;
 }
 
@@ -300,7 +300,6 @@ function isFullPageHtmlPayload(text: string): boolean {
 	// 围栏整页（可带开场前缀）
 	if (/(?:^|\n)```[^\n`]*\r?\n\s*<!doctype\s+html/i.test(text) && /<\/html\s*>/i.test(text)) return true;
 	if (/(?:^|\n)```[^\n`]*\r?\n\s*<html[\s>]/i.test(text) && /<\/html\s*>/i.test(text)) return true;
-	if (/(?:^|\n)```html\b/i.test(text) && text.length > 80) return true;
 	// 裸整页
 	const head = t.slice(0, 80).toLowerCase();
 	if (head.startsWith("<!doctype html") || head.startsWith("<html")) return true;
