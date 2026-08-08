@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractClockTime, gateStatusTime, gateTimePatch, hasExplicitTimeAdvance, inferActionDuration } from "../src/time-gate.ts";
+import { extractClockTime, gateStatusTime, gateTimePatch, hasExplicitTimeAdvance, inferActionDuration, projectStatusClock } from "../src/time-gate.ts";
 
 test("普通动作不推进时间", () => {
 	assert.equal(hasExplicitTimeAdvance("起来上厕所"), false);
@@ -37,4 +37,8 @@ test("状态栏时间不能绕过世界状态门禁", () => {
 	assert.equal(gateStatusTime("起来上厕所", "7月15日14:30", "📅 7月15日 | ⏰ 14:42").allowed, true);
 	assert.equal(gateStatusTime("起来上厕所", "7月15日14:30", "📅 7月15日 | ⏰ 15:00").allowed, false);
 	assert.equal(gateStatusTime("过了十五分钟", "7月15日14:30", "⏰ 14:45").allowed, true);
+});
+
+test("通过门禁的状态栏时间可投影回账本时钟", () => {
+	assert.equal(projectStatusClock("7月15日14:30", "📅 7月15日 | ⏰ 14:33"), "7月15日14:33");
 });

@@ -76,3 +76,12 @@ export function extractClockPair(text: string): { value: number; raw: string } |
 	if (hour > 23 || minute > 59) return null;
 	return { value: hour * 60 + minute, raw: match[0] };
 }
+
+/** 将已通过时间门禁的状态栏时钟投影回世界账本，保持两条显示链一致。 */
+export function projectStatusClock(currentTime: string, statusText: string): string | null {
+	const requested = extractClockPair(statusText);
+	if (!requested) return null;
+	const replacement = `${String(Math.floor(requested.value / 60)).padStart(2, "0")}:${String(requested.value % 60).padStart(2, "0")}`;
+	const clock = /\d{1,2}\s*(?:[:：点时])\s*\d{2}?/u;
+	return clock.test(currentTime) ? currentTime.replace(clock, replacement) : replacement;
+}
