@@ -1,6 +1,7 @@
 import { HtmlFrame } from "./HtmlFrame.tsx";
 import { MvuPanel } from "./MvuPanel.tsx";
 import type { FallbackStatus } from "../statusFallback.ts";
+import { parseFallbackStatus } from "../statusFallback.ts";
 
 export type SidebarStatus =
 	| { kind: "html"; html: string; scripts: boolean }
@@ -15,7 +16,13 @@ export function StatusSidebarPanel({ status, mvu }: { status: SidebarStatus | nu
 			{status?.kind === "html" ? (
 				<HtmlFrame html={status.html} scripts={status.scripts} seamless minHeight={180} maxHeight={20_000} expandToContent title="角色状态栏" />
 			) : null}
-			{status?.kind === "status" ? <pre className="status-sidebar-text">{status.body}</pre> : null}
+			{status?.kind === "status" ? (() => {
+				const fallback = parseFallbackStatus(status.body);
+				return fallback ? <div className="fallback-status">
+					{fallback.meta.length ? <div className="fallback-meta">{fallback.meta.join(" · ")}</div> : null}
+					{fallback.sections.map((section) => <section key={section.title} className="fallback-card"><h3>{section.title}</h3>{section.fields.map((field, index) => <div className="fallback-row" key={`${field.label}-${index}`}><span>{field.label}</span><strong>{field.value}</strong></div>)}</section>)}
+				</div> : <pre className="status-sidebar-text">{status.body}</pre>;
+			})() : null}
 			{status?.kind === "fallback" ? (
 				<div className="fallback-status">
 					{status.data.meta.length ? <div className="fallback-meta">{status.data.meta.join(" · ")}</div> : null}

@@ -41,7 +41,7 @@ import { buildCharacterIntentPrompt } from "../../src/character-intent-agent.ts"
 import { buildCharacterContinuityPrompt, parseCharacterContinuityAgent } from "../../src/character-continuity-agent.ts";
 import { buildSceneStatePrompt, formatSceneStateAdvice, parseSceneStateAdvice } from "../../src/scene-state-agent.ts";
 import { buildCardManifest, cardManifestFile, characterLoreProfiles, loadCardManifest, manifestAgentCharacters, manifestMatchesCard, saveCardManifest, syncCardManifestCharacters } from "../../src/card-manifest.ts";
-import { alignStatusClock, extractClockTime, gateStatusTime, gateTimePatch, projectStatusClock } from "../../src/time-gate.ts";
+import { advanceTimeForKnownAction, alignStatusClock, extractClockTime, gateStatusTime, gateTimePatch, projectStatusClock } from "../../src/time-gate.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
 import {
 	constantEntries,
@@ -2173,6 +2173,13 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					}
 					const applied = applyPatch(state, scribePatch);
 					state = applied.state;
+					if (!scribePatch.time) {
+						const inferredTime = advanceTimeForKnownAction(state.time, userText);
+						if (inferredTime) {
+							state = { ...state, time: inferredTime };
+							if (process.env.RP_DEBUG) console.error(`[rp-scribe] inferred action time → ${inferredTime}`);
+						}
+					}
 					if (stateFile) saveState(stateFile, state);
 					snapshotState();
 					if (process.env.RP_DEBUG) {

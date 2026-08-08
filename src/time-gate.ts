@@ -93,3 +93,10 @@ export function alignStatusClock(statusText: string, currentTime: string): strin
 	const re = /(?:上午|下午|晚上|夜里|深夜|凌晨)?\s*\d{1,2}\s*[:：点时]\s*\d{2}/u;
 	return re.test(statusText) ? statusText.replace(re, clock.raw) : statusText;
 }
+
+/** 对明确的短动作给账本一个确定的最小耗时，防止场记模型漏掉 time 字段。 */
+export function advanceTimeForKnownAction(currentTime: string, userText: string): string | null {
+	const action = inferActionDuration(userText);
+	if (!action || action.name === "本轮动作" || action.min <= 0) return null;
+	return withClock(currentTime, action.min);
+}
