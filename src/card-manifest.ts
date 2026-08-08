@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { DIRS } from "./paths.ts";
 import type { CharacterCard, LorebookEntry } from "./types.ts";
 import { cardStatusBarFormats, displayRules, extractRegexScripts } from "./cardfront.ts";
 import type { MvuData } from "./mvu.ts";
@@ -97,7 +98,7 @@ export function saveCardManifest(file: string, manifest: CardManifest): void {
 /** Manifest 是运行配置，按角色卡路径隔离并持久化到项目目录。 */
 export function cardManifestFile(cwd: string, cardPath: string): string {
 	const id = resolve(cwd, cardPath).replace(/[^A-Za-z0-9._-]/g, "_");
-	return join(cwd, "manifests", `${id}.json`);
+	return join(cwd, DIRS.manifests, `${id}.json`);
 }
 
 export function promoteManifestCharacter(manifest: CardManifest, name: string, kind: "core" | "recurring" | "background"): CardManifest {

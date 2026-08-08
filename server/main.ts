@@ -659,6 +659,8 @@ const hostSwitchGreeting = async (rawArg: string): Promise<void> => {
  * 不写 /store → 不产生世界线分叉。
  */
 const regenerateSwipe = async (): Promise<void> => {
+	// swipe/reroll 必须等待剧情扩展的在途记账，否则 session_tree 会丢掉当前轮快照。
+	await new Promise<void>((resolve) => setTimeout(resolve, 250));
 	const userId = lastStoryUserId();
 	if (!userId) {
 		broadcast({ type: "notify", level: "error", text: "没有可重新生成的剧情轮（需要先有一条用户输入）" });

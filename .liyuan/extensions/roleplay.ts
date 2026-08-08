@@ -1706,6 +1706,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		}
 		if (!rpMode) return undefined;
 		branchGeneration += 1;
+		const generation = branchGeneration;
 		statusSubmitAttempts = 0;
 		statusSubmittedThisTurn = false;
 		// 预设只服务剧情生成：按本轮用户原文判定，整段 agent 循环（含 tool 轮）沿用
@@ -1730,6 +1731,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				const director = await sideComplete(ctx, "你是剧情导演。只输出 JSON：{\"focus\":\"\",\"characterIntents\":[],\"constraints\":[],\"avoid\":[]}。整合多个角色提案为隐藏创作指导，不写正文。", `${current}\n\n角色提案：\n${proposalText}`, 1400);
 				const fallbackProposal = proposals.map((item) => `${item.name}：${item.proposal ?? ""}`).filter(Boolean).join("\n");
 				const parsed = parsePreflightAdvice(director || fallbackProposal);
+				if (generation !== branchGeneration) return undefined;
 				preflightAdvice = parsed ? formatPreflightAdvice(hardenPreflightAdvice(parsed, `${formatState(state)}\n\n编排计划：${formatTurnPlan(turnPlan)}`)) : null;
 				if (process.env.RP_DEBUG) console.error(`[rp-preflight] ${preflightAdvice ? `ready (${preflightAdvice.length} chars)` : "empty; normal story path"}`);
 			} catch (error) {
@@ -1979,6 +1981,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						if (!recovered) { error = "状态栏为空"; continue; }
 						const result = validateStatusSubmission(recovered, { rules, charName: card?.name ?? "", userName: config.userName });
 						if (result.ok && isCurrentGeneration(generation)) {
+							const statusTime = gateStatusTime(userText, state.time, recovered);
+							if (!statusTime.allowed) { error = statusTime.reason; continue; }
 							validatedStatus = result.status;
 							if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
 							snapshotValidatedStatus();

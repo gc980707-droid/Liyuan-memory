@@ -18,7 +18,7 @@ export function normalizeStatusTag(tag: string): string {
 export function isPanelTagName(tag: string): boolean {
 	const raw = tag.trim();
 	const n = normalizeStatusTag(raw);
-	return /^(?:status(?:block|bar)?|normalstatus|specialstatus|char(?:acter)?status|状态|状态栏|人物状态|场景状态)$/i.test(
+	return /^(?:status(?:block|bar)?|normalstatus|specialstatus|char(?:acter)?status|state\s*\d+|状态|状态栏|人物状态|场景状态)$/i.test(
 		n,
 	) || /^(?:status(?:_?block|bar)?|normal_?status|special_?status)$/i.test(raw);
 }
