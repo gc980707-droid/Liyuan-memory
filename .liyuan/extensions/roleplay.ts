@@ -209,6 +209,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	// 场记记账：进行中标志（防重入）；连续性审查已关闭
 	let scribeBusy = false;
 	let scribePending = 0;
+	/** 状态栏和场记是两个独立数据管线，各自排队，互不阻断。 */
+	let statusRecoveryQueue: Promise<void> = Promise.resolve();
 	let scribeQueue: Promise<void> = Promise.resolve();
 	// 世界书中文别名：一次性生成 + 磁盘缓存的懒初始化
 	let aliasPromise: Promise<void> | null = null;
@@ -1972,7 +1974,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		// 容易被 UI 模板淹没而不返回账本 JSON。正文与状态栏是两条独立数据链。
 		const ledgerText = cleanAssistantText(assistantText).slice(0, 24000);
 		if (!statusSubmittedThisTurn && statusBarFormats.length > 0) {
-			void (async () => {
+			const runStatusRecovery = async () => {
 				try {
 					const raw = readCardRawJson(resolvePath(appCwd, config.card)).raw;
 					const rules = displayRules(extractRegexScripts(raw));
@@ -2010,10 +2012,12 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					}
 					// 永远保留上一份已验证状态，绝不以空值或未验证文本覆盖它。
 					if (process.env.RP_DEBUG) console.error("[rp-status-recovery] failed; previous status retained");
+					if (process.env.RP_DEBUG) console.error("[rp-status-recovery] task complete");
 				} catch (error) {
 					if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] skipped: ${error instanceof Error ? error.message : String(error)}`);
 				}
-			})();
+			};
+			statusRecoveryQueue = statusRecoveryQueue.then(runStatusRecovery, runStatusRecovery);
 		}
 		if (config.multiAgentPreflight === true && card) {
 			void (async () => {
