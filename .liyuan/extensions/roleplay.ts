@@ -41,7 +41,7 @@ import { buildCharacterIntentPrompt } from "../../src/character-intent-agent.ts"
 import { buildCharacterContinuityPrompt, parseCharacterContinuityAgent } from "../../src/character-continuity-agent.ts";
 import { buildSceneStatePrompt, formatSceneStateAdvice, parseSceneStateAdvice } from "../../src/scene-state-agent.ts";
 import { buildCardManifest, cardManifestFile, characterLoreProfiles, loadCardManifest, manifestAgentCharacters, manifestMatchesCard, saveCardManifest, syncCardManifestCharacters } from "../../src/card-manifest.ts";
-import { extractClockTime, gateStatusTime, gateTimePatch, projectStatusClock } from "../../src/time-gate.ts";
+import { alignStatusClock, extractClockTime, gateStatusTime, gateTimePatch, projectStatusClock } from "../../src/time-gate.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
 import {
 	constantEntries,
@@ -1977,16 +1977,26 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		// 状态栏可能是数万字符的 HTML，不能把它原样喂给场记；否则旁路模型
 		// 容易被 UI 模板淹没而不返回账本 JSON。正文与状态栏是两条独立数据链。
 		const ledgerText = cleanAssistantText(assistantText).slice(0, 24000);
+		let currentTurnScribeDone: Promise<void> = Promise.resolve();
 		if (statusBarFormats.length > 0) {
 			const runStatusRecovery = async () => {
 				try {
 					// 状态栏的时间是 world state 的渲染投影，必须等本轮场记提交后再校准。
+					await currentTurnScribeDone;
 					await scribeQueue;
 					if (!isCurrentTurn(turn, generation)) return;
-					const statusIsCurrent = statusSubmittedThisTurn && validatedStatus
-						? gateStatusTime("", state.time, validatedStatus.raw).allowed
-						: false;
-					if (statusIsCurrent) return;
+					if (statusSubmittedThisTurn && validatedStatus) {
+						const aligned = alignStatusClock(validatedStatus.raw, state.time);
+						if (aligned !== validatedStatus.raw) {
+							const alignedResult = validateStatusSubmission(aligned, { rules: displayRules(extractRegexScripts(readCardRawJson(resolvePath(appCwd, config.card)).raw)), charName: card?.name ?? "", userName: config.userName });
+							if (alignedResult.ok) {
+								validatedStatus = alignedResult.status;
+								if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
+								snapshotValidatedStatus();
+							}
+						}
+						return;
+					}
 					const raw = readCardRawJson(resolvePath(appCwd, config.card)).raw;
 					const rules = displayRules(extractRegexScripts(raw));
 					let error = "";
@@ -2149,10 +2159,11 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				}
 			}
 		};
-		scribeQueue = scribeQueue.then(runScribe, runScribe).finally(() => {
-			scribePending -= 1;
-			scribeBusy = scribePending > 0;
-		});
+			scribeQueue = scribeQueue.then(runScribe, runScribe).finally(() => {
+				scribePending -= 1;
+				scribeBusy = scribePending > 0;
+			});
+		currentTurnScribeDone = scribeQueue;
 	});
 
 	// 剧情向压缩接管：用场记提示词替代 pi 默认的 coding 摘要模板

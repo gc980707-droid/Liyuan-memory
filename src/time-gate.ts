@@ -85,3 +85,11 @@ export function projectStatusClock(currentTime: string, statusText: string): str
 	const clock = /\d{1,2}\s*(?:[:：点时])\s*\d{2}?/u;
 	return clock.test(currentTime) ? currentTime.replace(clock, replacement) : replacement;
 }
+
+/** 将账本当前时钟写回已生成的状态栏原文，避免两个投影在旁路调用交错时分叉。 */
+export function alignStatusClock(statusText: string, currentTime: string): string {
+	const clock = extractClockPair(currentTime);
+	if (!clock) return statusText;
+	const re = /(?:上午|下午|晚上|夜里|深夜|凌晨)?\s*\d{1,2}\s*[:：点时]\s*\d{2}/u;
+	return re.test(statusText) ? statusText.replace(re, clock.raw) : statusText;
+}
