@@ -205,6 +205,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	let appCwd = process.cwd();
 	// 场记记账：进行中标志（防重入）；连续性审查已关闭
 	let scribeBusy = false;
+	let scribePending = 0;
+	let scribeQueue: Promise<void> = Promise.resolve();
 	// 世界书中文别名：一次性生成 + 磁盘缓存的懒初始化
 	let aliasPromise: Promise<void> | null = null;
 	// MCP 外设（柱 4）：本会话启用集 + 已注册工具（agent 绑对话，新对话=新窗口）
@@ -1703,6 +1705,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			syncStateFromDisk();
 		}
 		if (!rpMode) return undefined;
+		branchGeneration += 1;
 		statusSubmitAttempts = 0;
 		statusSubmittedThisTurn = false;
 		// 预设只服务剧情生成：按本轮用户原文判定，整段 agent 循环（含 tool 轮）沿用
@@ -1958,6 +1961,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					let error = "";
 					for (let attempt = 1; attempt <= 3; attempt++) {
 						if (!isCurrentGeneration(generation)) return;
+						if (statusSubmitAttempts >= 3) return;
+						statusSubmitAttempts += 1;
 						const recovery = buildStatusRecoveryPrompt({
 							rules,
 							charName: card?.name ?? "",
@@ -2056,9 +2061,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			if (process.env.RP_DEBUG && applied.warnings.length) console.error(`[rp-mvu] ${applied.warnings.join("；")}`);
 		}
 
-		if (scribeBusy) return;
+		scribePending += 1;
 		scribeBusy = true;
-		void (async () => {
+		const runScribe = async () => {
 			try {
 				if (!isCurrentGeneration(generation)) return;
 				const prompt = buildScribeTurnPrompt({
@@ -2096,10 +2101,12 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				if (process.env.RP_DEBUG) {
 					console.error(`[rp-scribe] 失败（本轮跳过）：${err instanceof Error ? err.message : String(err)}`);
 				}
-			} finally {
-				scribeBusy = false;
 			}
-		})();
+		};
+		scribeQueue = scribeQueue.then(runScribe, runScribe).finally(() => {
+			scribePending -= 1;
+			scribeBusy = scribePending > 0;
+		});
 	});
 
 	// 剧情向压缩接管：用场记提示词替代 pi 默认的 coding 摘要模板
@@ -2533,8 +2540,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			});
 			// 钉档前再刷一次账本/面板快照，保证 /back 到此点时状态对齐
 			snapshotState();
-			snapshotPanels();
-			snapshotMvu();
+			 snapshotPanels();
+			 snapshotMvu();
+			 snapshotValidatedStatus();
 			snapshotCodexMounts();
 			pi.appendEntry(RP_SAVE_TYPE, data);
 			const lineNote =
