@@ -617,10 +617,13 @@ export function foldTurnNarratives(msgs: WireMsg[]): WireMsg[] {
 				const prev = out[turnRoleIdx];
 				const thinking = join(prev.thinking, m.thinking);
 				const unfinished = prev.unfinished === true || m.unfinished === true;
-				out[turnRoleIdx] = {
+				out[turnRoleIdx] = {
 					...prev,
 					text: join(prev.text, m.text),
-					...(thinking ? { thinking } : {}),
+					...(thinking ? { thinking } : {}),
+					...((prev.statusBlocks?.length || m.statusBlocks?.length) ? {
+						statusBlocks: [...(prev.statusBlocks ?? []), ...(m.statusBlocks ?? [])],
+					} : {}),
 					// 变体元数据以最后一段为准（annotateSwipes 挂在末条）
 					...(m.swipe ? { swipe: m.swipe } : prev.swipe ? { swipe: prev.swipe } : {}),
 					...(m.name ? { name: m.name } : {}),
