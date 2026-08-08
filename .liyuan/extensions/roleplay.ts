@@ -1715,6 +1715,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			syncStateFromDisk();
 		}
 		if (!rpMode) return undefined;
+		// 一轮的账本/状态栏必须在下一轮开始前落位；否则下一轮会递增 turn
+		// generation，把上一轮仍在途的状态栏结果当成过期结果丢掉。
+		await Promise.allSettled([statusRecoveryQueue, scribeQueue]);
 		turnGeneration += 1;
 		const generation = branchGeneration;
 		const turn = turnGeneration;
@@ -1982,9 +1985,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		if (statusBarFormats.length > 0) {
 			const runStatusRecovery = async () => {
 				try {
+					if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] start turn=${turn}`);
 					// 状态栏的时间是 world state 的渲染投影，必须等本轮场记提交后再校准。
 					await currentTurnScribeDone;
-					await scribeQueue;
 					if (!isCurrentTurn(turn, generation)) return;
 					if (statusSubmittedThisTurn && validatedStatus) {
 						const aligned = alignStatusClock(validatedStatus.raw, state.time);
