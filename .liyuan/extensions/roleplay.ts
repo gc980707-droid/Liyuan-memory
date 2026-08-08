@@ -1968,6 +1968,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			.filter(Boolean)
 			.join("\n");
 		if (!assistantText.trim()) return;
+		// 状态栏可能是数万字符的 HTML，不能把它原样喂给场记；否则旁路模型
+		// 容易被 UI 模板淹没而不返回账本 JSON。正文与状态栏是两条独立数据链。
+		const ledgerText = cleanAssistantText(assistantText).slice(0, 24000);
 		if (!statusSubmittedThisTurn && statusBarFormats.length > 0) {
 			void (async () => {
 				try {
@@ -2087,7 +2090,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				const prompt = buildScribeTurnPrompt({
 					state,
 					userText,
-					assistantText,
+					assistantText: ledgerText,
 					charName: card.name,
 					userName: config.userName,
 				});
@@ -2095,7 +2098,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				let text = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1024);
 				let result = text ? parseScribeResult(text) : null;
 				if (!result && isCurrentGeneration(generation)) {
-					const retry = buildScribeRetryPrompt({ state, userText, assistantText, charName: card.name, userName: config.userName });
+					const retry = buildScribeRetryPrompt({ state, userText, assistantText: ledgerText, charName: card.name, userName: config.userName });
 					text = await sideComplete(ctx, retry.systemPrompt, retry.userText, 700);
 					result = text ? parseScribeResult(text) : null;
 				}
