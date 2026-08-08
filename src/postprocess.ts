@@ -280,10 +280,10 @@ export function stripPanelBlocks(text: string): string {
 	return applyPolicies(text, { keepPanel: false, collectFold: false }).text;
 }
 
-export function extractPanelBlocks(text: string): Array<{ tag: string; body: string }> {
+export function extractPanelBlocks(text: string): Array<{ tag: string; body: string; raw: string }> {
 	return scanTaggedBlocks(text)
 		.filter((block) => block.policy === "panel")
-		.map((block) => ({ tag: block.tag, body: block.body.trim() }));
+		.map((block) => ({ tag: block.tag, body: block.body.trim(), raw: block.raw }));
 }
 
 /** wire / 显示管线注入的一档皮肤 */

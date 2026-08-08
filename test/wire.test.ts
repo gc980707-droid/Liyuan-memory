@@ -319,8 +319,8 @@ test("wire + skin: narrative 先正则后策略，state 变成 HTML 载荷", () 
 	assert.ok(w);
 	assert.equal(w!.channel, "narrative");
 	assert.ok(!w!.text.includes("<state1>"), "标记须被皮肤吃掉");
-	assert.ok(w!.text.includes("白荷"));
-	assert.ok(w!.text.includes("```html") || w!.text.includes("<!DOCTYPE html>"));
+	assert.ok(w!.statusBlocks?.some((block) => block.rendered?.includes("白荷")));
+	assert.ok(!w!.text.includes("白荷"), "状态栏 HTML 不应进入正文");
 });
 
 test("toolResult 与未知类型跳过；字符串与内容块数组两种 content 都可读", () => {

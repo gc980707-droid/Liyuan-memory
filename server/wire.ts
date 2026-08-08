@@ -53,7 +53,7 @@ export interface WireMsg {
 	name?: string;
 	text: string;
 	/** 从正文剥离的状态面板，供左栏展示；不进入正文气泡。 */
-	statusBlocks?: Array<{ tag: string; body: string }>;
+	statusBlocks?: Array<{ tag: string; body: string; rendered?: string }>;
 	/** 模型思维链（原始输出，UI 折叠呈现；无则缺省） */
 	thinking?: string;
 	/**
@@ -475,11 +475,18 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 		const scaffoldThinking = text ? extractScaffoldThinking(text) : "";
 		const thinking = [modelThinking, scaffoldThinking].filter(Boolean).join("\n\n").trim();
 		// narrative：先卡显示正则再策略；backstage 仍纯文本策略（不套角色卡皮肤）
-		// 先应用卡片正则，再提取状态块。反过来会把 StatusBlock/stateN
-		// 拆掉，使卡片状态正则永远匹配不到。
-		const prepared = text ? (channel === "narrative" ? prepareDisplayText(text, skin) : prepareDisplayText(text, null)) : "";
-		const statusBlocks = channel === "narrative" ? extractPanelBlocks(prepared) : [];
-		const display = channel === "narrative" ? stripPanelBlocks(prepared) : prepared;
+		// 先从模型原文截出状态块，再分别处理正文和状态块。若先处理整条
+		// 文本，卡片正则可能把状态块变成 HTML，正文就会重新携带状态栏。
+		const rawStatusBlocks = channel === "narrative" ? extractPanelBlocks(text) : [];
+		const prepared = text
+			? (channel === "narrative" ? prepareDisplayText(stripPanelBlocks(text), skin) : prepareDisplayText(text, null))
+			: "";
+		const statusBlocks = rawStatusBlocks.map((block) => ({
+			tag: block.tag,
+			body: block.body,
+			rendered: prepareDisplayText(block.raw, skin),
+		}));
+		const display = prepared;
 		const hasPanel = statusBlocks.length > 0;
 
 		if (!display && !thinking && !hasPanel) {

@@ -547,6 +547,13 @@ export default function App() {
 			if (message.channel !== "narrative" && message.channel !== "greeting") continue;
 			if (message.statusBlocks?.length) {
 				const block = message.statusBlocks.at(-1)!;
+				const rendered = block.rendered ?? block.body;
+				const renderedParts = splitRichContentParts(rendered, null);
+				for (let k = renderedParts.length - 1; k >= 0; k--) {
+					const part = renderedParts[k];
+					if (part.kind === "html") return { kind: "html", html: part.html, scripts: part.scripts };
+					if (part.kind === "status") return { kind: "status", body: part.body };
+				}
 				return { kind: "status", body: block.body };
 			}
 			const fallback = parseFallbackStatus(message.text);
