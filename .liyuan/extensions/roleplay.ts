@@ -39,6 +39,7 @@ import { buildTurnPlan, formatTurnPlan } from "../../src/turn-orchestrator.ts";
 import { buildCharacterStatePrompt, parseCharacterStateAgent } from "../../src/character-state-agent.ts";
 import { buildCharacterIntentPrompt } from "../../src/character-intent-agent.ts";
 import { buildCharacterContinuityPrompt, parseCharacterContinuityAgent } from "../../src/character-continuity-agent.ts";
+import { buildSceneStatePrompt, formatSceneStateAdvice, parseSceneStateAdvice } from "../../src/scene-state-agent.ts";
 import { buildCardManifest, cardManifestFile, characterLoreProfiles, loadCardManifest, manifestAgentCharacters, manifestMatchesCard, saveCardManifest, syncCardManifestCharacters } from "../../src/card-manifest.ts";
 import { extractClockTime, gateStatusTime, gateTimePatch } from "../../src/time-gate.ts";
 import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
@@ -185,6 +186,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	let branchGeneration = 0;
 	let preflightKey = "";
 	let preflightAdvice: string | null = null;
+	let sceneStateAdvice: string | null = null;
 	let cardManifest: import("../../src/card-manifest.ts").CardManifest | null = null;
 	// agent 自建面板（柱 2）：与 state 同一套「磁盘缓存 + 会话树快照」机制
 	let panels: PanelMap = {};
@@ -1707,6 +1709,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		if (!rpMode) return undefined;
 		branchGeneration += 1;
 		const generation = branchGeneration;
+		preflightAdvice = null;
+		sceneStateAdvice = null;
 		statusSubmitAttempts = 0;
 		statusSubmittedThisTurn = false;
 		// 预设只服务剧情生成：按本轮用户原文判定，整段 agent 循环（含 tool 轮）沿用
@@ -1720,6 +1724,11 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				const current = `用户输入：${prompt}\n\n世界状态：${formatState(state)}\n\nMVU：${formatMvuData(mvu).slice(0, 12000)}`;
 				const roster = cardManifest ? manifestAgentCharacters(cardManifest, prompt) : coreCharacterNames(card ?? ({ name: "" } as CharacterCard), allEntries(), { userName: config.userName, sceneText: prompt });
 				const turnPlan = buildTurnPlan(prompt, roster, false);
+				const scenePrompt = buildSceneStatePrompt({ text: prompt, characterNames: roster, worldState: formatState(state), characterProfiles: characterLoreProfiles(allEntries(), roster) });
+				const sceneOutput = await sideComplete(ctx, scenePrompt.systemPrompt, scenePrompt.userText, 700);
+				const sceneAdvice = sceneOutput ? parseSceneStateAdvice(sceneOutput) : null;
+				if (generation !== branchGeneration) return undefined;
+				sceneStateAdvice = sceneAdvice ? formatSceneStateAdvice(sceneAdvice, roster) : null;
 				const proposals = await Promise.all(roster.map(async (name) => {
 					const intent = buildCharacterIntentPrompt({ name, profile: characterLoreProfiles(allEntries(), [name])[name], turnPlan: formatTurnPlan(turnPlan) });
 					return {
@@ -1732,7 +1741,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				const fallbackProposal = proposals.map((item) => `${item.name}：${item.proposal ?? ""}`).filter(Boolean).join("\n");
 				const parsed = parsePreflightAdvice(director || fallbackProposal);
 				if (generation !== branchGeneration) return undefined;
-				preflightAdvice = parsed ? formatPreflightAdvice(hardenPreflightAdvice(parsed, `${formatState(state)}\n\n编排计划：${formatTurnPlan(turnPlan)}`)) : null;
+				preflightAdvice = parsed ? formatPreflightAdvice(hardenPreflightAdvice(parsed, `${formatState(state)}\n\n${sceneStateAdvice ?? ""}\n\n编排计划：${formatTurnPlan(turnPlan)}`)) : null;
 				if (process.env.RP_DEBUG) console.error(`[rp-preflight] ${preflightAdvice ? `ready (${preflightAdvice.length} chars)` : "empty; normal story path"}`);
 			} catch (error) {
 				if (process.env.RP_DEBUG) console.error(`[rp-preflight] 跳过：${error instanceof Error ? error.message : String(error)}`);
@@ -2055,7 +2064,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			})();
 		}
 		const mvuOperations = parseMvuUpdates(assistantText);
-		if (mvuOperations.length) {
+		if (mvuOperations.length && isCurrentGeneration(generation)) {
 			const applied = applyMvuOperations(mvu, mvuOperations);
 			if (applied.applied.length) {
 				mvu = applied.data;
