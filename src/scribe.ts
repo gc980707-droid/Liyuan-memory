@@ -77,20 +77,40 @@ export function parseScribeResult(text: string): ScribeResult | null {
 	let t = text.trim();
 	const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
 	if (fence) t = fence[1].trim();
-	const start = t.indexOf("{");
-	const end = t.lastIndexOf("}");
-	if (start === -1 || end <= start) return null;
-	try {
-		const obj = JSON.parse(t.slice(start, end + 1)) as Record<string, unknown>;
-		const patch =
-			obj.patch && typeof obj.patch === "object" && !Array.isArray(obj.patch)
-				? (obj.patch as Record<string, unknown>)
-				: {};
-		// 审查字段一律丢弃（即使旧模型仍返回）
-		return { patch, warnings: [], unaskedTurn: null };
-	} catch {
-		return null;
+	const candidates: string[] = [];
+	let start = -1;
+	let depth = 0;
+	let quoted = false;
+	let escaped = false;
+	for (let i = 0; i < t.length; i++) {
+		const ch = t[i];
+		if (quoted) {
+			if (escaped) escaped = false;
+			else if (ch === "\\") escaped = true;
+			else if (ch === '"') quoted = false;
+			continue;
+		}
+		if (ch === '"') { quoted = true; continue; }
+		if (ch === "{" && depth === 0) start = i;
+		if (ch === "{") depth++;
+		if (ch === "}" && depth > 0) {
+			depth--;
+			if (depth === 0 && start >= 0) {
+				candidates.push(t.slice(start, i + 1));
+				start = -1;
+			}
+		}
 	}
+	for (const candidate of candidates) {
+		try {
+			const obj = JSON.parse(candidate) as Record<string, unknown>;
+			const patch = obj.patch && typeof obj.patch === "object" && !Array.isArray(obj.patch)
+				? obj.patch as Record<string, unknown>
+				: null;
+			return { patch: patch ?? {}, warnings: [], unaskedTurn: null };
+		} catch { /* 尝试同一输出中的下一个 JSON 对象 */ }
+	}
+	return null;
 }
 
 // ---------- 世界书中文别名（修复：专有名词中译后英文关键词地板失效） ----------
