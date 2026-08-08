@@ -134,7 +134,6 @@ const RP_TOOLS = [
 	"world_state_update",
 	"mvu_get",
 	"mvu_patch",
-	"status_submit",
 	"lorebook_write",
 	"codex_create",
 	"codex_mount",
@@ -180,8 +179,6 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	let mvuFile = "";
 	let validatedStatus: ValidatedStatus | null = null;
 	let statusFile = "";
-	let statusSubmitAttempts = 0;
-	let statusSubmittedThisTurn = false;
 	/** 每次树导航递增；所有旁路 Agent 写入前必须验证，防止旧回合污染新分支。 */
 	let branchGeneration = 0;
 	let turnGeneration = 0;
@@ -1695,8 +1692,6 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		const turn = turnGeneration;
 		preflightAdvice = null;
 		sceneStateAdvice = null;
-		statusSubmitAttempts = 0;
-		statusSubmittedThisTurn = false;
 		// 预设只服务剧情生成：按本轮用户原文判定，整段 agent 循环（含 tool 轮）沿用
 		const prompt = typeof event?.prompt === "string" ? event.prompt : "";
 		const preflightId = `${ctx.sessionManager.getSessionId()}::${ctx.sessionManager.getLeafId() ?? "root"}::${prompt}`;
@@ -1954,99 +1949,18 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		const ledgerText = cleanAssistantText(assistantText).slice(0, 24000);
 		let resolveCurrentTurnScribe!: () => void;
 		const currentTurnScribeDone = new Promise<void>((resolve) => { resolveCurrentTurnScribe = resolve; });
-		if (true) {
-			if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] eligible turn=${turn} formats=${statusBarFormats.length} manifestRequired=${cardManifest?.status.required === true}`);
-			const runStatusRecovery = async () => {
-				try {
-					if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] start turn=${turn}`);
-					// 状态栏的时间是 world state 的渲染投影，必须等本轮场记提交后再校准。
-					await currentTurnScribeDone;
-					if (!isCurrentTurn(turn, generation)) return;
-					const harnessStatus = buildDeterministicStatusHtml({ state: formatState(state), mvu: formatMvuData(mvu), charName: card?.name ?? "角色" });
-					const harnessResult = validateStatusSubmission(harnessStatus, { rules: [], charName: card?.name ?? "", userName: config.userName }, { agentControlled: true });
-					if (harnessResult.ok) {
-						validatedStatus = harnessResult.status;
-						if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
-						snapshotValidatedStatus();
-						if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] harness projection saved stateTime=${state.time || "<empty>"}`);
-						return;
-					}
-					if (statusSubmittedThisTurn && validatedStatus) {
-						const aligned = alignStatusClock(validatedStatus.raw, state.time);
-						if (aligned !== validatedStatus.raw) {
-							const alignedResult = validateStatusSubmission(aligned, { rules: [], charName: card?.name ?? "", userName: config.userName }, { agentControlled: true });
-							if (alignedResult.ok) {
-								validatedStatus = alignedResult.status;
-								if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
-								snapshotValidatedStatus();
-							}
-						}
-						return;
-					}
-					const rules: never[] = [];
-					let error = "";
-					for (let attempt = 1; attempt <= 3; attempt++) {
-						if (!isCurrentTurn(turn, generation)) return;
-						if (statusSubmitAttempts >= 3) return;
-						statusSubmitAttempts += 1;
-						const recovery = buildStatusRecoveryPrompt({
-							rules,
-							charName: card?.name ?? "",
-							userName: config.userName,
-							state: formatState(state),
-							mvu: formatMvuData(mvu),
-							userText,
-							narrative: assistantText,
-							previous: validatedStatus?.raw,
-							error,
-							manifestStatus: cardManifest?.status,
-						});
-						const recovered = await sideComplete(ctx, recovery.systemPrompt, recovery.userText, 1800);
-						if (!recovered) { error = "状态栏为空"; continue; }
-						const result = validateStatusSubmission(normalizeStatusSubmission(recovered), { rules, charName: card?.name ?? "", userName: config.userName }, { agentControlled: true });
-						if (result.ok && isCurrentTurn(turn, generation)) {
-							const statusTime = gateStatusTime(userText, state.time, recovered);
-							if (!statusTime.allowed) { error = statusTime.reason; continue; }
-							validatedStatus = result.status;
-							if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
-							snapshotValidatedStatus();
-							if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] saved validated status chars=${validatedStatus.raw.length} rendered=${validatedStatus.rendered.length}`);
-							if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] restored attempt=${attempt}`);
-							return;
-						}
-						error = result.errors.join(" | ");
-						if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] rejected attempt=${attempt} ${error}`);
-					}
-					const rawFromNarrative = extractStatusSubmission(assistantText);
-					if (rawFromNarrative) {
-							const direct = validateStatusSubmission(rawFromNarrative, { rules, charName: card?.name ?? "", userName: config.userName }, { agentControlled: true });
-						if (direct.ok && isCurrentTurn(turn, generation)) {
-							validatedStatus = direct.status;
-							if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
-							snapshotValidatedStatus();
-							if (process.env.RP_DEBUG) console.error("[rp-status-recovery] restored from narrative fallback");
-							return;
-						}
-					}
-					const deterministic = buildDeterministicStatusHtml({ state: formatState(state), mvu: formatMvuData(mvu), charName: card?.name ?? "角色" });
-					const deterministicResult = validateStatusSubmission(deterministic, { rules: [], charName: card?.name ?? "", userName: config.userName }, { agentControlled: true });
-					if (deterministicResult.ok && isCurrentTurn(turn, generation)) {
-						validatedStatus = deterministicResult.status;
-						if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
-						snapshotValidatedStatus();
-						if (process.env.RP_DEBUG) console.error("[rp-status-recovery] deterministic fallback restored");
-						return;
-					}
-					// 永远保留上一份已验证状态，绝不以空值或未验证文本覆盖它。
-						if (process.env.RP_DEBUG) console.error("[rp-status-recovery] failed; previous status retained");
-					if (process.env.RP_DEBUG) console.error("[rp-status-recovery] task complete");
-				} catch (error) {
-					if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] skipped: ${error instanceof Error ? error.message : String(error)}`);
-				}
-			};
-			if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] queued turn=${turn}`);
-			statusRecoveryQueue = statusRecoveryQueue.then(runStatusRecovery, runStatusRecovery);
-		}
+		const runStatusProjection = async () => {
+			await currentTurnScribeDone;
+			if (!isCurrentTurn(turn, generation)) return;
+			const harnessStatus = buildDeterministicStatusHtml({ state: formatState(state), mvu: formatMvuData(mvu), charName: card?.name ?? "角色" });
+			const result = validateStatusSubmission(harnessStatus, { rules: [], charName: card?.name ?? "", userName: config.userName }, { agentControlled: true });
+			if (!result.ok) return;
+			validatedStatus = result.status;
+			if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
+			snapshotValidatedStatus();
+			if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] harness projection saved stateTime=${state.time || "<empty>"}`);
+		};
+		statusRecoveryQueue = statusRecoveryQueue.then(runStatusProjection, runStatusProjection);
 		if (config.multiAgentPreflight === true && card) {
 			void (async () => {
 				try {
