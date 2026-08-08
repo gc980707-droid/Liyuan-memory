@@ -198,14 +198,15 @@ function StatusPanel({ tag, body }: { tag: string; body: string }) {
  */
 export function RichContent({ text, skin }: { text: string; skin?: SkinProp | null }) {
 	const parts = splitRichContentParts(stripFallbackStatus(text), skin);
-	const onlyPlain = parts.length === 1 && parts[0].kind === "text";
+	// 状态栏由左侧状态面板展示，正文气泡不重复绘制状态内容。
+	const visibleParts = parts.filter((part) => part.kind !== "status");
+	const onlyPlain = visibleParts.length === 1 && visibleParts[0].kind === "text";
 	if (onlyPlain) {
-		return <Paragraphs text={parts[0].text} />;
+		return <Paragraphs text={visibleParts[0].text} />;
 	}
 	return (
 		<>
-			{parts.map((p, i) => {
-				if (p.kind === "status") return <StatusPanel key={i} tag={p.tag} body={p.body} />;
+			{visibleParts.map((p, i) => {
 				// 皮肤/正文内嵌 HTML：无痕 seamless；agent show_html 通道不经此路径
 				if (p.kind === "html") return <HtmlFrame key={i} html={p.html} scripts={p.scripts} seamless />;
 				if (p.kind === "text" && p.text.trim()) return <Paragraphs key={i} text={p.text} />;

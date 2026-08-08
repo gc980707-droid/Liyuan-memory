@@ -547,6 +547,7 @@ export default function App() {
 			if (message.channel !== "narrative" && message.channel !== "greeting") continue;
 			const fallback = parseFallbackStatus(message.text);
 			const parts = splitRichContentParts(message.text, cardSkin);
+			// 这里仅用于提取左侧状态栏；正文 RichContent 会过滤 status part。
 			for (let j = parts.length - 1; j >= 0; j--) {
 				const part = parts[j];
 				if (part.kind === "html") {
