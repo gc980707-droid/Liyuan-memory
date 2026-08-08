@@ -323,6 +323,18 @@ test("wire + skin: narrative 先正则后策略，state 变成 HTML 载荷", () 
 	assert.ok(!w!.text.includes("白荷"), "状态栏 HTML 不应进入正文");
 });
 
+test("status_submit 工具轮保留工具前已经生成的正文", () => {
+	const msg = {
+		role: "assistant",
+		content: [
+			{ type: "text", text: "她整理好裙摆，抬头看向98。" },
+			{ type: "toolCall", id: "s1", name: "status_submit", arguments: { status: "<StatusBlock>...</StatusBlock>" } },
+		],
+	};
+	const wire = toWireMsg(msg, names);
+	assert.equal(wire?.text, "她整理好裙摆，抬头看向98。");
+});
+
 test("开场白状态栏不进入 greeting 正文", () => {
 	const raw = "【开场】\n列车驶入山区。\n<Status_block>\n时间：14:30\n地点：1号包厢\n</Status_block>";
 	const greeting = toWireMsg({ role: "custom", customType: "rp-greeting", content: raw }, names);

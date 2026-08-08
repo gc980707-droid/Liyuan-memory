@@ -457,6 +457,17 @@ function textAfterLastToolCall(content: unknown): string {
 		.trim();
 }
 
+function textBeforeFirstToolCall(content: unknown): string {
+	if (!Array.isArray(content)) return "";
+	const index = content.findIndex((part) => part && typeof part === "object" && (part as { type?: unknown }).type === "toolCall");
+	if (index < 0) return "";
+	return content.slice(0, index)
+		.map((part) => part && typeof part === "object" && (part as { type?: unknown }).type === "text" ? String((part as { text?: unknown }).text ?? "") : "")
+		.filter(Boolean)
+		.join("\n")
+		.trim();
+}
+
 function hasToolCallNamed(content: unknown, name: string): boolean {
 	return Array.isArray(content) && content.some((part) =>
 		part && typeof part === "object" && (part as { type?: unknown }).type === "toolCall" &&
@@ -492,12 +503,12 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 		if (!aborted && hasToolCall(msg.content)) {
 			// 某些模型把最终正文和工具调用放在同一条 assistant 消息里。
 			// 只丢弃纯中间工具轮；有可见正文时保留正文，避免正文消失。
-			if (!textAfterLastToolCall(msg.content)) return null;
+			if (!textAfterLastToolCall(msg.content) && !hasToolCallNamed(msg.content, "status_submit")) return null;
 		}
 		// 正常完成且无正文：跳过；中断时即使无 text 也可能有 thinking，后面单独处理
 		if (!aborted && !text) return null;
 		const sourceText = !aborted && hasToolCall(msg.content)
-			? textAfterLastToolCall(msg.content) || (hasToolCallNamed(msg.content, "status_submit") ? text : "")
+			? textAfterLastToolCall(msg.content) || (hasToolCallNamed(msg.content, "status_submit") ? textBeforeFirstToolCall(msg.content) || text : "")
 			: text;
 		if (!aborted && !sourceText) return null;
 
