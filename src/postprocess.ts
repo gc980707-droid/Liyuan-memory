@@ -275,6 +275,11 @@ export function displayAssistantText(text: string): string {
 	return tidyWhitespace(t);
 }
 
+/** 从叙事气泡移除状态面板原文；状态栏由 validatedStatus 单独展示。 */
+export function stripPanelBlocks(text: string): string {
+	return applyPolicies(text, { keepPanel: false, collectFold: false }).text;
+}
+
 /** wire / 显示管线注入的一档皮肤 */
 export type DisplaySkin = {
 	rules: DisplayRule[];

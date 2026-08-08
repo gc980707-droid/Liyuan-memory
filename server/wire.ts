@@ -10,7 +10,8 @@
 
 import {
 	extractScaffoldThinking,
-	prepareDisplayText,
+	prepareDisplayText,
+	stripPanelBlocks,
 	type DisplaySkin,
 } from "../src/postprocess.ts";
 import { isBackstageText } from "../src/stance.ts";
@@ -471,11 +472,12 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 		const scaffoldThinking = text ? extractScaffoldThinking(text) : "";
 		const thinking = [modelThinking, scaffoldThinking].filter(Boolean).join("\n\n").trim();
 		// narrative：先卡显示正则再策略；backstage 仍纯文本策略（不套角色卡皮肤）
-		const display = text
-			? channel === "narrative"
-				? prepareDisplayText(text, skin)
-				: prepareDisplayText(text, null)
-			: "";
+		const narrativeText = channel === "narrative" ? stripPanelBlocks(text) : text;
+		const display = narrativeText
+			? channel === "narrative"
+				? prepareDisplayText(narrativeText, skin)
+				: prepareDisplayText(narrativeText, null)
+			: "";
 
 		if (!display && !thinking) {
 			// 空中断：仍留一条锚点，避免 agent_end→resync 后像「什么都没发生」
