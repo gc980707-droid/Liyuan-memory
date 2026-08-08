@@ -136,6 +136,13 @@ export function stripOrphanStatusTags(text: string): string {
 		.trim();
 }
 
+export function stripStatusMarkup(text: string): string {
+	return text
+		.replace(/<(?:StatusBlock|status_block|Status_block|statusblock|status|statusbar|normal_status|special_status|state\s*\d+)\b[^>]*>[\s\S]*?<\/(?:StatusBlock|status_block|Status_block|statusblock|status|statusbar|normal_status|special_status|state\s*\d+)\s*>/gi, "")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+}
+
 export function statusLabel(tag: string): string {
 	const n = normalizeStatusTag(tag);
 	return LABEL_BY_NORM[n] ?? "状态";

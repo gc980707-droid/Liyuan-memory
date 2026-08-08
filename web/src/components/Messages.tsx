@@ -13,6 +13,7 @@ import { applyCardSkin } from "../cardSkin.ts";
 import { isFullInterface } from "../htmlEmbed.ts";
 import { splitRichContentParts, type SkinMacros } from "../richContentParts.ts";
 import { stripFallbackStatus } from "../statusFallback.ts";
+import { stripStatusMarkup } from "../statusBlocks.ts";
 import { displayAssistantText } from "../../../src/postprocess.ts";
 import { splitMarkdownParts } from "../markdown.ts";
 import {
@@ -197,7 +198,7 @@ function StatusPanel({ tag, body }: { tag: string; body: string }) {
  * skin → HTML 块（保护皮肤内 <status>）→ 剩余文本上的状态面板 → RP 排版
  */
 export function RichContent({ text, skin }: { text: string; skin?: SkinProp | null }) {
-	const parts = splitRichContentParts(stripFallbackStatus(text), skin);
+	const parts = splitRichContentParts(stripStatusMarkup(stripFallbackStatus(text)), skin);
 	// 状态栏由左侧状态面板展示，正文气泡不重复绘制状态内容。
 	const visibleParts = parts.filter((part) => part.kind !== "status");
 	const onlyPlain = visibleParts.length === 1 && visibleParts[0].kind === "text";

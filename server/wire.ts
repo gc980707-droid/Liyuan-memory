@@ -506,7 +506,7 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 		return {
 			channel,
 			name: names.charName,
-			text: body,
+					text: body,
 			...(thinking ? { thinking } : {}),
 			...(statusBlocks.length ? { statusBlocks } : {}),
 			...(aborted ? { unfinished: true } : {}),
