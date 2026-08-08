@@ -323,6 +323,15 @@ test("wire + skin: narrative 先正则后策略，state 变成 HTML 载荷", () 
 	assert.ok(!w!.text.includes("白荷"), "状态栏 HTML 不应进入正文");
 });
 
+test("开场白状态栏不进入 greeting 正文", () => {
+	const raw = "【开场】\n列车驶入山区。\n<Status_block>\n时间：14:30\n地点：1号包厢\n</Status_block>";
+	const greeting = toWireMsg({ role: "custom", customType: "rp-greeting", content: raw }, names);
+	assert.equal(greeting?.channel, "greeting");
+	assert.ok(greeting?.statusBlocks?.some((block) => block.body.includes("14:30")));
+	assert.ok(!greeting?.text.includes("14:30"));
+	assert.ok(!greeting?.text.includes("<Status_block>"));
+});
+
 test("toolResult 与未知类型跳过；字符串与内容块数组两种 content 都可读", () => {
 	assert.equal(toWireMsg({ role: "toolResult", content: [{ type: "text", text: "lore" }] }, names), null);
 	assert.equal(toWireMsg({ role: "bashExecution", content: "ls" }, names), null);

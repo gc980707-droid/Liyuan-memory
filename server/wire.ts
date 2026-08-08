@@ -514,8 +514,10 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 	}
 	if (msg.role === "custom") {
 		if (msg.display === false) return null; // rp-inject 等幕后注入
-		if (msg.customType === "rp-greeting") {
-			if (!text) return null;
+		if (msg.customType === "rp-greeting") {
+			if (!text) return null;
+			const rawStatusBlocks = extractPanelBlocks(text);
+			const statusBlocks = rawStatusBlocks.map((block) => ({ tag: block.tag, body: block.body, rendered: prepareDisplayText(block.raw, skin) }));
 			const pick =
 				msg.details && typeof msg.details === "object"
 					? (msg.details as { rpGreeting?: { index?: unknown; total?: unknown } }).rpGreeting
@@ -527,7 +529,8 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 			return {
 				channel: "greeting",
 				name: names.charName,
-				text: prepareDisplayText(text, skin),
+				text: prepareDisplayText(stripPanelBlocks(text), skin),
+				...(statusBlocks.length ? { statusBlocks } : {}),
 				...(index !== undefined && total !== undefined && total > 0
 					? { greetingPick: { index, total } }
 					: {}),
