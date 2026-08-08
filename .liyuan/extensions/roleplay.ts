@@ -2041,6 +2041,15 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 							return;
 						}
 					}
+					const deterministic = buildDeterministicStatusHtml({ state: formatState(state), mvu: formatMvuData(mvu), charName: card?.name ?? "角色" });
+					const deterministicResult = validateStatusSubmission(deterministic, { rules: [], charName: card?.name ?? "", userName: config.userName }, { agentControlled: true });
+					if (deterministicResult.ok && isCurrentTurn(turn, generation)) {
+						validatedStatus = deterministicResult.status;
+						if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
+						snapshotValidatedStatus();
+						if (process.env.RP_DEBUG) console.error("[rp-status-recovery] deterministic fallback restored");
+						return;
+					}
 					// 永远保留上一份已验证状态，绝不以空值或未验证文本覆盖它。
 						if (process.env.RP_DEBUG) console.error("[rp-status-recovery] failed; previous status retained");
 					if (process.env.RP_DEBUG) console.error("[rp-status-recovery] task complete");
