@@ -1975,7 +1975,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		const ledgerText = cleanAssistantText(assistantText).slice(0, 24000);
 		let resolveCurrentTurnScribe!: () => void;
 		const currentTurnScribeDone = new Promise<void>((resolve) => { resolveCurrentTurnScribe = resolve; });
-		if (statusBarFormats.length > 0 || cardManifest?.status.required === true) {
+		if (true) {
 			if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] eligible turn=${turn} formats=${statusBarFormats.length} manifestRequired=${cardManifest?.status.required === true}`);
 			const runStatusRecovery = async () => {
 				try {
@@ -1995,7 +1995,6 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						}
 						return;
 					}
-					const raw = readCardRawJson(resolvePath(appCwd, config.card)).raw;
 					const rules: never[] = [];
 					let error = "";
 					for (let attempt = 1; attempt <= 3; attempt++) {
