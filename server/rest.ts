@@ -131,6 +131,7 @@ import {
 	buildCardManifest,
 	cardManifestFile,
 	loadCardManifest,
+	manifestMatchesCard,
 	promoteManifestCharacter,
 	saveCardManifest,
 	syncCardManifestCharacters,
@@ -2878,15 +2879,17 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 				const cardPath = config.card;
 				const card = loadCardFile(resolvePath(host.cwd, cardPath));
 				const manifestPath = cardManifestFile(host.cwd, cardPath);
-				const manifest = loadCardManifest(manifestPath) ?? buildCardManifest({
-					raw: readCardRawJson(resolvePath(host.cwd, cardPath)).raw,
+				const rawCard = readCardRawJson(resolvePath(host.cwd, cardPath)).raw;
+				const cached = loadCardManifest(manifestPath);
+				const manifest = manifestMatchesCard(cached, rawCard, cardPath) ? cached : buildCardManifest({
+					raw: rawCard,
 					card,
 					cardPath,
 					lore: card.book,
 				});
 				const overlay = overlayPathFor(host.cwd, card.name);
 				const files = mountedLorebookPaths(config).map((p) => resolvePath(host.cwd, p)).filter(existsSync).map(loadLorebookFile);
-				const runtimeLore = applyLoreOverrides(mergeEntries(...files, existsSync(overlay) ? loadLorebookFile(overlay) : []), config.disabledLore, config.enabledLore);
+				const runtimeLore = applyLoreOverrides(mergeEntries(card.book, ...files, existsSync(overlay) ? loadLorebookFile(overlay) : []), config.disabledLore, config.enabledLore);
 				const synced = syncCardManifestCharacters(manifest, { card, lore: runtimeLore });
 				saveCardManifest(manifestPath, synced);
 				sendJson(res, 200, { manifest: synced });
