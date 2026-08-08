@@ -527,9 +527,19 @@ export default function App() {
 	const [cardSkin, setCardSkin] = useState<SkinProp | null>(null);
 	const latestStatus = useMemo<SidebarStatus | null>(() => {
 		if (validatedStatus) {
-			const rendered = validatedStatus.rendered;
-			const complete = /<style[\s>][\s\S]*<\/style>/i.test(rendered) && /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>\s*$/i.test(rendered.trim());
-			if (complete) return { kind: "html", html: rendered, scripts: false };
+			// validatedStatus 也必须走和正文相同的状态标签/HTML 拆分路径。
+			// 直接把 raw 当 pre 展示会绕过卡片正则，导致 <Status_block> 永远没有 UI。
+			const statusParts = splitRichContentParts(validatedStatus.rendered, cardSkin);
+			for (let j = statusParts.length - 1; j >= 0; j--) {
+				const part = statusParts[j];
+				if (part.kind === "html") {
+					const complete = /<style[\s>][\s\S]*<\/style>/i.test(part.html) && /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>\s*$/i.test(part.html.trim());
+					if (complete) return { kind: "html", html: part.html, scripts: part.scripts };
+				}
+				if (part.kind === "status") return { kind: "status", body: part.body };
+			}
+			const renderedComplete = /<style[\s>][\s\S]*<\/style>/i.test(validatedStatus.rendered) && /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>\s*$/i.test(validatedStatus.rendered.trim());
+			if (renderedComplete) return { kind: "html", html: validatedStatus.rendered, scripts: false };
 			return { kind: "status", body: validatedStatus.raw };
 		}
 		for (let i = messages.length - 1; i >= 0; i--) {

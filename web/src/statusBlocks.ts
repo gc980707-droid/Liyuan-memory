@@ -36,7 +36,7 @@ const LABEL_BY_NORM: Record<string, string> = {
 
 /** 任意「像状态」的开标签 + 少量历史别名 */
 const OPEN_RE =
-	/<(StatusBlock|status_block|statusblock|status|statusbar|normal_status|special_status|NextCharacterPanel|[A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff.\-]*)(?:\s[^>]*)?>/gi;
+	/<(StatusBlock|status_block|statusblock|Status_block|status|statusbar|normal_status|special_status|NextCharacterPanel|[A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff.\-]*)(?:\s[^>]*)?>/gi;
 
 function isStatusOpen(tag: string): boolean {
 	const n = normalizeStatusTag(tag);
@@ -49,7 +49,7 @@ function isStatusOpen(tag: string): boolean {
 function closePattern(tag: string): RegExp {
 	const n = normalizeStatusTag(tag);
 	if (n === "statusblock" || n === "status" || n === "statusbar") {
-		return /<\/(?:StatusBlock|status_block|statusblock|status|statusbar)\s*>/i;
+		return /<\/(?:StatusBlock|status_block|statusblock|Status_block|status|statusbar)\s*>/i;
 	}
 	if (n === "normalstatus") return /<\/normal_status\s*>/i;
 	if (n === "specialstatus") return /<\/special_status\s*>/i;
@@ -128,7 +128,7 @@ export function splitStatusParts(text: string): StatusPart[] {
 export function stripOrphanStatusTags(text: string): string {
 	return text
 		.replace(
-			/<\/?(?:StatusBlock|status_block|statusblock|status|statusbar|normal_status|special_status)(?:\s[^>]*)?>/gi,
+			/<\/?(?:StatusBlock|status_block|statusblock|Status_block|status|statusbar|normal_status|special_status)(?:\s[^>]*)?>/gi,
 			"",
 		)
 		.replace(/^\s*$/gm, "")
