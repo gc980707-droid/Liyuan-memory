@@ -533,12 +533,12 @@ export default function App() {
 			for (let j = statusParts.length - 1; j >= 0; j--) {
 				const part = statusParts[j];
 				if (part.kind === "html") {
-					const complete = /<style[\s>][\s\S]*<\/style>/i.test(part.html) && /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>\s*$/i.test(part.html.trim());
+					const complete = /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>\s*$/i.test(part.html.trim());
 					if (complete) return { kind: "html", html: part.html, scripts: part.scripts };
 				}
 				if (part.kind === "status") return { kind: "status", body: part.body };
 			}
-			const renderedComplete = /<style[\s>][\s\S]*<\/style>/i.test(validatedStatus.rendered) && /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>\s*$/i.test(validatedStatus.rendered.trim());
+			const renderedComplete = /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>\s*$/i.test(validatedStatus.rendered.trim());
 			if (renderedComplete) return { kind: "html", html: validatedStatus.rendered, scripts: false };
 			return { kind: "status", body: validatedStatus.raw };
 		}
@@ -562,7 +562,7 @@ export default function App() {
 			for (let j = parts.length - 1; j >= 0; j--) {
 				const part = parts[j];
 				if (part.kind === "html") {
-					const complete = /<style[\s>][\s\S]*<\/style>/i.test(part.html) && /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>\s*$/i.test(part.html.trim());
+					const complete = /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>\s*$/i.test(part.html.trim());
 					if (complete) return { kind: "html", html: part.html, scripts: part.scripts };
 				}
 				if (part.kind === "status") return { kind: "status", body: part.body };

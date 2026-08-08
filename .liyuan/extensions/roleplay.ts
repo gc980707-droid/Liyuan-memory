@@ -2032,10 +2032,12 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 								state = { ...state, time: projectedTime };
 								if (stateFile) saveState(stateFile, state);
 								snapshotState();
+								if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] projected ledger time=${state.time}`);
 							}
 							validatedStatus = result.status;
 							if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
 							snapshotValidatedStatus();
+							if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] saved validated status chars=${validatedStatus.raw.length} rendered=${validatedStatus.rendered.length}`);
 							if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] restored attempt=${attempt}`);
 							return;
 						}
@@ -2174,7 +2176,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					if (stateFile) saveState(stateFile, state);
 					snapshotState();
 					if (process.env.RP_DEBUG) {
-						console.error(`[rp-scribe] ${applied.applied.join("；") || "（无变更）"}`);
+						console.error(`[rp-scribe] ${applied.applied.join("；") || "（无变更）"} stateTime=${state.time || "<empty>"}`);
 					}
 				}
 				if (process.env.RP_DEBUG) console.error(`[rp-scribe] complete turn=${turn}`);
