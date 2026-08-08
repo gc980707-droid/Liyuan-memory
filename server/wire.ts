@@ -501,11 +501,9 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 		const prepared = sourceText
 			? (channel === "narrative" ? prepareDisplayText(stripPanelBlocks(sourceText), skin) : prepareDisplayText(sourceText, null))
 			: "";
-		const statusBlocks = rawStatusBlocks.map((block) => ({
-			tag: block.tag,
-			body: block.body,
-			rendered: prepareDisplayText(block.raw, skin),
-		}));
+		// assistant 正文里的状态标签只是模型回显，不能绕过 status_submit
+		// 直接成为当前状态；真正的状态栏由 validatedStatus 独立传输。
+		const statusBlocks: Array<{ tag: string; body: string; rendered?: string }> = [];
 		const display = prepared;
 		const hasPanel = statusBlocks.length > 0;
 

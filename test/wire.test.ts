@@ -134,7 +134,7 @@ test("显示层剥预设脚手架：draft_notes/content/HTML 注释；假思维�
 	assert.ok(!w?.text.includes("分析要点"));
 	assert.ok(!w?.text.includes("<content>"));
 	assert.ok(!w?.text.includes("Prism"));
-	assert.ok(w?.statusBlocks?.some((block) => block.body.includes("地点:御书房")), "状态栏应从正文剥离并单独传给状态面板");
+	assert.equal(w?.statusBlocks?.length ?? 0, 0, "assistant 正文状态标签不能绕过 status_submit");
 	assert.ok(!w?.text.includes("地点:御书房"), "状态栏不应进入正文");
 	assert.ok(w?.thinking?.includes("分析要点"), "草稿进折叠思维链");
 });
@@ -319,7 +319,7 @@ test("wire + skin: narrative 先正则后策略，state 变成 HTML 载荷", () 
 	assert.ok(w);
 	assert.equal(w!.channel, "narrative");
 	assert.ok(!w!.text.includes("<state1>"), "标记须被皮肤吃掉");
-	assert.ok(w!.statusBlocks?.some((block) => block.rendered?.includes("白荷")));
+	assert.equal(w!.statusBlocks?.length ?? 0, 0);
 	assert.ok(!w!.text.includes("白荷"), "状态栏 HTML 不应进入正文");
 });
 
