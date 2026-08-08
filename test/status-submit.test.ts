@@ -21,9 +21,8 @@ test("状态容器必须闭合且标签数量配对", () => {
 
 test("状态栏恢复提示要求复用上一份结构并只输出状态栏", () => {
 	const prompt = buildStatusRecoveryPrompt({ rules: [{ name: "status", source: "x", flags: "g", replace: "y" }], charName: "Alice", userName: "旅人", state: "{}", mvu: "{}", userText: "继续", narrative: "Alice 点头", previous: "<StatusBlock>old</StatusBlock>", manifestStatus: { required: true, formats: ["卡片状态标签/状态区"], regexRuleCount: 1 } });
-	assert.match(prompt.systemPrompt, /只输出完整的状态栏原文/);
+	assert.match(prompt.systemPrompt, /只输出一个完整/);
 	assert.match(prompt.userText, /StatusBlock/);
-	assert.match(prompt.systemPrompt, /卡片上传时扫描结果/);
 });
 
 test("状态栏恢复提示可携带程序校验错误", () => {

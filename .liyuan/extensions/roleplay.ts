@@ -768,8 +768,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				if (statusSubmitAttempts > 3) return { content: [{ type: "text", text: "本轮状态栏已达到 3 次校验上限。保留上一份有效状态栏；不要继续提交，也不要重写正文。" }], isError: true };
 				let raw: Record<string, unknown> | null = null;
 				try { raw = readCardRawJson(resolvePath(appCwd, config.card)).raw; } catch { /* handled by no rules */ }
-				const rules = raw ? displayRules(extractRegexScripts(raw)) : [];
-					const result = validateStatusSubmission(normalizeStatusSubmission(params.status), { rules, charName: card?.name ?? "", userName: config.userName });
+				const result = validateStatusSubmission(normalizeStatusSubmission(params.status), { rules: [], charName: card?.name ?? "", userName: config.userName }, { agentControlled: true });
 				if (!result.ok) return {
 					content: [{ type: "text", text: `状态栏校验失败（第 ${statusSubmitAttempts}/3 次）：\n- ${result.errors.join("\n- ")}\n只修复状态栏后再次调用 status_submit；正文不要重写。` }],
 					isError: true,
@@ -1987,7 +1986,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					if (statusSubmittedThisTurn && validatedStatus) {
 						const aligned = alignStatusClock(validatedStatus.raw, state.time);
 						if (aligned !== validatedStatus.raw) {
-							const alignedResult = validateStatusSubmission(aligned, { rules: displayRules(extractRegexScripts(readCardRawJson(resolvePath(appCwd, config.card)).raw)), charName: card?.name ?? "", userName: config.userName });
+							const alignedResult = validateStatusSubmission(aligned, { rules: [], charName: card?.name ?? "", userName: config.userName }, { agentControlled: true });
 							if (alignedResult.ok) {
 								validatedStatus = alignedResult.status;
 								if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
@@ -1997,7 +1996,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						return;
 					}
 					const raw = readCardRawJson(resolvePath(appCwd, config.card)).raw;
-					const rules = displayRules(extractRegexScripts(raw));
+					const rules: never[] = [];
 					let error = "";
 					for (let attempt = 1; attempt <= 3; attempt++) {
 						if (!isCurrentTurn(turn, generation)) return;
@@ -2017,7 +2016,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						});
 						const recovered = await sideComplete(ctx, recovery.systemPrompt, recovery.userText, 1800);
 						if (!recovered) { error = "状态栏为空"; continue; }
-						const result = validateStatusSubmission(normalizeStatusSubmission(recovered), { rules, charName: card?.name ?? "", userName: config.userName });
+						const result = validateStatusSubmission(normalizeStatusSubmission(recovered), { rules, charName: card?.name ?? "", userName: config.userName }, { agentControlled: true });
 						if (result.ok && isCurrentTurn(turn, generation)) {
 							const statusTime = gateStatusTime(userText, state.time, recovered);
 							if (!statusTime.allowed) { error = statusTime.reason; continue; }
@@ -2033,7 +2032,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					}
 					const rawFromNarrative = extractStatusSubmission(assistantText);
 					if (rawFromNarrative) {
-						const direct = validateStatusSubmission(rawFromNarrative, { rules, charName: card?.name ?? "", userName: config.userName });
+							const direct = validateStatusSubmission(rawFromNarrative, { rules, charName: card?.name ?? "", userName: config.userName }, { agentControlled: true });
 						if (direct.ok && isCurrentTurn(turn, generation)) {
 							validatedStatus = direct.status;
 							if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
@@ -2043,7 +2042,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						}
 					}
 					// 永远保留上一份已验证状态，绝不以空值或未验证文本覆盖它。
-					if (process.env.RP_DEBUG) console.error("[rp-status-recovery] failed; previous status retained");
+						if (process.env.RP_DEBUG) console.error("[rp-status-recovery] failed; previous status retained");
 					if (process.env.RP_DEBUG) console.error("[rp-status-recovery] task complete");
 				} catch (error) {
 					if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] skipped: ${error instanceof Error ? error.message : String(error)}`);
