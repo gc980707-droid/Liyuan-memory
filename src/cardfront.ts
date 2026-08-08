@@ -62,7 +62,7 @@ export function cardStatusBarFormats(raw: Record<string, unknown> | null | undef
 	if (!raw || typeof raw !== "object") return [];
 	const found = new Set<string>();
 	const note = (s: string) => {
-		if (/StatusBlock|status_block/i.test(s)) found.add("`<StatusBlock>…</StatusBlock>`");
+		if (/status[_ -]?(?:block|bar)?|state\s*\d+/i.test(s)) found.add("卡片状态标签/状态区");
 		if (/<\s*state\d+|state\\d|<\(state/i.test(s) || /多状态栏|状态展示/i.test(s)) {
 			found.add("`<state1>…</state1>`（或卡约定的 state 序号）");
 		}
@@ -104,10 +104,10 @@ export function displayRules(scripts: unknown[]): DisplayRule[] {
 	for (const s of scripts) {
 		if (!s || typeof s !== "object") continue;
 		const r = s as Record<string, unknown>;
-		if (r.disabled === true) continue;
+		if (r.disabled === true || r.disable === true) continue;
 		const placement = Array.isArray(r.placement) ? r.placement : [];
 		if (!placement.includes(2)) continue; // 2 = AI 输出
-		if (r.promptOnly === true && r.markdownOnly !== true) continue; // 纯送模侧,显示层不管
+		if ((r.promptOnly === true || r.prompt_only === true) && r.markdownOnly !== true && r.markdown_only !== true) continue; // 纯送模侧,显示层不管
 		if (Array.isArray(r.trimStrings) && r.trimStrings.length > 0) {
 			console.warn(`[cardfront] 规则「${String(r.scriptName ?? "?")}」用了 trimStrings,v1 不支持,跳过`);
 			continue;
@@ -120,7 +120,7 @@ export function displayRules(scripts: unknown[]): DisplayRule[] {
 		if (r.minDepth != null || r.maxDepth != null) {
 			console.warn(`[cardfront] 规则「${String(r.scriptName ?? "?")}」的深度限定被忽略`);
 		}
-		const find = typeof r.findRegex === "string" ? r.findRegex : "";
+		const find = typeof r.findRegex === "string" ? r.findRegex : typeof r.find_regex === "string" ? r.find_regex : "";
 		if (!find.trim()) continue;
 		const parsed = parseFindRegex(find);
 		if (!parsed) {
@@ -128,10 +128,10 @@ export function displayRules(scripts: unknown[]): DisplayRule[] {
 			continue;
 		}
 		out.push({
-			name: typeof r.scriptName === "string" ? r.scriptName : "",
+			name: typeof r.scriptName === "string" ? r.scriptName : typeof r.script_name === "string" ? r.script_name : "",
 			source: parsed.source,
 			flags: parsed.flags,
-			replace: typeof r.replaceString === "string" ? r.replaceString : "",
+			replace: typeof r.replaceString === "string" ? r.replaceString : typeof r.replace_string === "string" ? r.replace_string : "",
 		});
 	}
 	return out;

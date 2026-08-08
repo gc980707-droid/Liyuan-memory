@@ -11,6 +11,14 @@ export interface ValidatedStatus {
 	validatedAt: number;
 }
 
+/** 判断任意 XML/HTML 状态容器是否完整，不依赖某张卡的固定标签名。 */
+export function hasCompleteStatusContainer(text: string): boolean {
+	const source = text.trim();
+	if (/<style[\s>][\s\S]*<\/style>/i.test(source) && /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>/i.test(source)) return true;
+	const tag = source.match(/^\s*<([A-Za-z_\u4e00-\u9fff][\w.\-\u4e00-\u9fff]*)\b[^>]*>/);
+	return !!tag && new RegExp(`<\\/${tag[1]}\\s*>\\s*$`, "i").test(source);
+}
+
 /** 缺失状态栏时给旁路恢复 Agent 的提示；规则本身仍由代码执行和校验。 */
 export function buildStatusRecoveryPrompt(input: {
 	rules: unknown[];
@@ -39,8 +47,8 @@ export function validateStatusSubmission(
 	const rendered = prepareDisplayText(text, skin);
 	const directlySkinned = applyCardSkin(text, skin.rules, skin);
 	const changed = directlySkinned !== text;
-	const completeHtml = /<style[\s>][\s\S]*<\/style>/i.test(rendered) && /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>/i.test(rendered);
-	const completeTag = /<(?:StatusBlock|status_block|statusblock|Status_block|status|statusbar)\b[^>]*>[\s\S]*<\/(?:StatusBlock|status_block|statusblock|Status_block|status|statusbar)>/i.test(text);
+	const completeHtml = hasCompleteStatusContainer(rendered);
+	const completeTag = hasCompleteStatusContainer(text);
 	if (skin.rules.length && !changed) errors.push("角色卡显示正则没有命中，请严格照角色卡规定的标签、字段顺序和标点重写状态栏");
 	if (!completeHtml && !completeTag) errors.push("状态栏结构不完整：缺少完整开闭标签，或未生成闭合的 HTML 容器");
 	if (/```html[\s\S]*<(?:div|section|article)\b(?![\s\S]*```)/i.test(text)) errors.push("HTML 围栏未闭合");

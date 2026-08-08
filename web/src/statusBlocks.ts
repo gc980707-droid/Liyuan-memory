@@ -42,7 +42,7 @@ function isStatusOpen(tag: string): boolean {
 	const n = normalizeStatusTag(tag);
 	// 历史别名：曾当面板渲染的（descriptive_analysis 已改走思维链，此处不再画面板）
 	if (n === "nextcharacterpanel") return true;
-	return isPanelTagName(tag);
+	return isPanelTagName(tag) || /^state\d+$/i.test(tag);
 }
 
 /** plot 等不再当状态面板——后端已 unwrap 进正文；此处只处理 panel 族 */
