@@ -554,8 +554,6 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		model?: Parameters<typeof completeSimple>[0];
 		modelRegistry: { getApiKeyAndHeaders: (m: never) => Promise<{ apiKey?: string; headers?: Record<string, string> }> };
 	};
-	/** 旁侧模型通常复用同一个 provider；串行化请求，避免状态栏和场记并发抢占导致一方丢失。 */
-	let sideRequestQueue: Promise<unknown> = Promise.resolve();
 	const sideComplete = async (
 		ctx: SideCtx,
 		systemPrompt: string,
@@ -563,28 +561,23 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		maxTokens: number,
 		signal?: AbortSignal,
 	): Promise<string | null> => {
-		const run = async () => {
-			if (!ctx.model) return null;
-			const { apiKey, headers } = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model as never);
-			const response = await completeSimple(
-				ctx.model,
-				{
-					systemPrompt,
-					messages: [{ role: "user", content: [{ type: "text", text: userText }], timestamp: Date.now() }],
-				},
-				{ apiKey, headers, signal, maxTokens },
-			);
-			if (response.stopReason === "error") throw new Error(response.errorMessage || "side model error");
-			const text = response.content
-				.filter((c): c is { type: "text"; text: string } => c.type === "text")
-				.map((c) => c.text)
-				.join("\n")
-				.trim();
-			return text || null;
-		};
-		const result = sideRequestQueue.then(run, run);
-		sideRequestQueue = result.then(() => undefined, () => undefined);
-		return result;
+		if (!ctx.model) return null;
+		const { apiKey, headers } = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model as never);
+		const response = await completeSimple(
+			ctx.model,
+			{
+				systemPrompt,
+				messages: [{ role: "user", content: [{ type: "text", text: userText }], timestamp: Date.now() }],
+			},
+			{ apiKey, headers, signal, maxTokens },
+		);
+		if (response.stopReason === "error") throw new Error(response.errorMessage || "side model error");
+		const text = response.content
+			.filter((c): c is { type: "text"; text: string } => c.type === "text")
+			.map((c) => c.text)
+			.join("\n")
+			.trim();
+		return text || null;
 	};
 
 	/** 从任意消息对象提取纯文本（user 字符串、assistant/custom 内容块） */
