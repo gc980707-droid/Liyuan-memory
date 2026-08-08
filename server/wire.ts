@@ -456,6 +456,13 @@ function textAfterLastToolCall(content: unknown): string {
 		.join("\n")
 		.trim();
 }
+
+function hasToolCallNamed(content: unknown, name: string): boolean {
+	return Array.isArray(content) && content.some((part) =>
+		part && typeof part === "object" && (part as { type?: unknown }).type === "toolCall" &&
+		(part as { name?: unknown }).name === name,
+	);
+}
 
 /**
  * 单条 AgentMessage → WireMsg。不属于叙事流的消息（rp-inject、toolResult、
@@ -489,7 +496,9 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 		}
 		// 正常完成且无正文：跳过；中断时即使无 text 也可能有 thinking，后面单独处理
 		if (!aborted && !text) return null;
-		const sourceText = !aborted && hasToolCall(msg.content) ? textAfterLastToolCall(msg.content) : text;
+		const sourceText = !aborted && hasToolCall(msg.content)
+			? textAfterLastToolCall(msg.content) || (hasToolCallNamed(msg.content, "status_submit") ? text : "")
+			: text;
 		if (!aborted && !sourceText) return null;
 
 		const scaffoldThinking = sourceText ? extractScaffoldThinking(sourceText) : "";
