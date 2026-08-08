@@ -2150,7 +2150,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					result = { patch: fallbackPatch, warnings: [], unaskedTurn: null };
 					if (process.env.RP_DEBUG) console.error(`[rp-scribe] deterministic fallback fields=${Object.keys(fallbackPatch).join(",")}`);
 				}
-				if (Object.keys(result.patch).length > 0 && isCurrentGeneration(generation)) {
+				if (isCurrentGeneration(generation)) {
 					const knownNames = [card.name, config.userName, ...Object.keys(state.characters)];
 					const scribePatch = canonicalizeCharacterKeys(result.patch, knownNames);
 					const timeGate = gateTimePatch(userText, state.time, scribePatch.time);
@@ -2172,6 +2172,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					if (process.env.RP_DEBUG) {
 						console.error(`[rp-scribe] ${applied.applied.join("；") || "（无变更）"} stateTime=${state.time || "<empty>"}`);
 					}
+				} else if (process.env.RP_DEBUG) {
+					console.error(`[rp-scribe] stale generation discarded turn=${turn}`);
 				}
 				if (process.env.RP_DEBUG) console.error(`[rp-scribe] complete turn=${turn}`);
 			} catch (err) {

@@ -468,6 +468,21 @@ function textBeforeFirstToolCall(content: unknown): string {
 		.trim();
 }
 
+function textBeforeNamedToolCall(content: unknown, name: string): string {
+	if (!Array.isArray(content)) return "";
+	const index = content.findIndex((part) =>
+		part && typeof part === "object" &&
+		(part as { type?: unknown }).type === "toolCall" &&
+		(part as { name?: unknown }).name === name,
+	);
+	if (index < 0) return "";
+	return content.slice(0, index)
+		.map((part) => part && typeof part === "object" && (part as { type?: unknown }).type === "text" ? String((part as { text?: unknown }).text ?? "") : "")
+		.filter(Boolean)
+		.join("\n")
+		.trim();
+}
+
 function hasToolCallNamed(content: unknown, name: string): boolean {
 	return Array.isArray(content) && content.some((part) =>
 		part && typeof part === "object" && (part as { type?: unknown }).type === "toolCall" &&
@@ -508,7 +523,7 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 		// 正常完成且无正文：跳过；中断时即使无 text 也可能有 thinking，后面单独处理
 		if (!aborted && !text) return null;
 		const sourceText = !aborted && hasToolCall(msg.content)
-			? textAfterLastToolCall(msg.content) || (hasToolCallNamed(msg.content, "status_submit") ? textBeforeFirstToolCall(msg.content) || text : "")
+			? textAfterLastToolCall(msg.content) || (hasToolCallNamed(msg.content, "status_submit") ? textBeforeNamedToolCall(msg.content, "status_submit") || text : "")
 			: text;
 		if (!aborted && !sourceText) return null;
 

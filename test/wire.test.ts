@@ -335,6 +335,19 @@ test("status_submit 工具轮保留工具前已经生成的正文", () => {
 	assert.equal(wire?.text, "她整理好裙摆，抬头看向98。");
 });
 
+test("多个工具调用后 status_submit 仍保留中间生成的正文", () => {
+	const msg = {
+		role: "assistant",
+		content: [
+			{ type: "text", text: "第一段正文。" },
+			{ type: "toolCall", id: "w1", name: "world_state_update", arguments: {} },
+			{ type: "text", text: "第二段正文。" },
+			{ type: "toolCall", id: "s1", name: "status_submit", arguments: {} },
+		],
+	};
+	assert.equal(toWireMsg(msg, names)?.text, "第一段正文。\n第二段正文。");
+});
+
 test("开场白状态栏不进入 greeting 正文", () => {
 	const raw = "【开场】\n列车驶入山区。\n<Status_block>\n时间：14:30\n地点：1号包厢\n</Status_block>";
 	const greeting = toWireMsg({ role: "custom", customType: "rp-greeting", content: raw }, names);
