@@ -18,13 +18,34 @@ export function defaultState(): WorldState {
 		inventory: [],
 		flags: {},
 		plot_threads: [],
+		roster: { characters: {}, items: {}, events: {} },
 	};
 }
 
 export function loadState(file: string): WorldState {
 	try {
 		const raw = readJsonFile(file) as Partial<WorldState>;
-		return { ...defaultState(), ...raw };
+		const base = defaultState();
+		return {
+			time: typeof raw.time === "string" ? raw.time : base.time,
+			location: typeof raw.location === "string" ? raw.location : base.location,
+			characters: raw.characters && typeof raw.characters === "object" && !Array.isArray(raw.characters)
+				? Object.fromEntries(Object.entries(raw.characters).filter(([, value]) => value && typeof value === "object").map(([name, value]) => {
+					const c = value as Partial<CharacterState>;
+					return [name, { affinity: typeof c.affinity === "number" ? clamp(Math.round(c.affinity), -100, 100) : 0, status: typeof c.status === "string" ? c.status : "", notes: typeof c.notes === "string" ? c.notes : "" }];
+				}))
+				: base.characters,
+			inventory: Array.isArray(raw.inventory) ? raw.inventory.filter((x): x is string => typeof x === "string") : base.inventory,
+			flags: raw.flags && typeof raw.flags === "object" && !Array.isArray(raw.flags) ? Object.fromEntries(Object.entries(raw.flags).map(([k, v]) => [k, typeof v === "string" ? v : JSON.stringify(v)])) : base.flags,
+			plot_threads: Array.isArray(raw.plot_threads) ? raw.plot_threads.filter((x): x is string => typeof x === "string") : base.plot_threads,
+			roster: raw.roster && typeof raw.roster === "object" && !Array.isArray(raw.roster)
+				? {
+						characters: raw.roster.characters && typeof raw.roster.characters === "object" ? raw.roster.characters : {},
+						items: raw.roster.items && typeof raw.roster.items === "object" ? raw.roster.items : {},
+						events: raw.roster.events && typeof raw.roster.events === "object" ? raw.roster.events : {},
+					}
+				: base.roster,
+		};
 	} catch {
 		return defaultState();
 	}

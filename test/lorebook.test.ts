@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import {
 	appendLorebookFileEntry,
+	applyLoreOverrides,
 	constantEntries,
 	deleteLorebookFileEntry,
 	loadLorebookFile,
@@ -37,6 +38,14 @@ test("卡内嵌格式归一化（keys/enabled/insertion_order）", () => {
 	assert.equal(entries[0].enabled, false);
 	assert.equal(entries[0].order, 42);
 	assert.equal(entries[0].comment, "t");
+});
+
+test("用户可强制开启源文件原生禁用条目", () => {
+	const [entry] = normalizeEntries([{ id: 1, enabled: false, content: "原生关闭条目", keys: ["x"] }]);
+	const fp = loreFingerprint(entry.content);
+	assert.equal(entry.enabled, false);
+	assert.equal(applyLoreOverrides([entry], undefined, [fp])[0]!.enabled, true);
+	assert.equal(applyLoreOverrides([entry], [fp], [fp])[0]!.enabled, false, "强制关闭优先");
 });
 
 test("合并去重（独立世界书与卡内嵌书内容相同）", () => {

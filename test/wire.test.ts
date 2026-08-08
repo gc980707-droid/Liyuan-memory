@@ -134,7 +134,8 @@ test("显示层剥预设脚手架：draft_notes/content/HTML 注释；假思维�
 	assert.ok(!w?.text.includes("分析要点"));
 	assert.ok(!w?.text.includes("<content>"));
 	assert.ok(!w?.text.includes("Prism"));
-	assert.ok(w?.text.includes("<StatusBlock>") || w?.text.includes("地点:御书房"), "状态栏保留显示");
+	assert.equal(w?.statusBlocks?.length ?? 0, 0, "assistant 正文状态标签不能绕过 status_submit");
+	assert.ok(!w?.text.includes("地点:御书房"), "状态栏不应进入正文");
 	assert.ok(w?.thinking?.includes("分析要点"), "草稿进折叠思维链");
 });
 
@@ -318,8 +319,42 @@ test("wire + skin: narrative 先正则后策略，state 变成 HTML 载荷", () 
 	assert.ok(w);
 	assert.equal(w!.channel, "narrative");
 	assert.ok(!w!.text.includes("<state1>"), "标记须被皮肤吃掉");
-	assert.ok(w!.text.includes("白荷"));
-	assert.ok(w!.text.includes("```html") || w!.text.includes("<!DOCTYPE html>"));
+	assert.equal(w!.statusBlocks?.length ?? 0, 0);
+	assert.ok(!w!.text.includes("白荷"), "状态栏 HTML 不应进入正文");
+});
+
+test("status_submit 工具轮保留工具前已经生成的正文", () => {
+	const msg = {
+		role: "assistant",
+		content: [
+			{ type: "text", text: "她整理好裙摆，抬头看向98。" },
+			{ type: "toolCall", id: "s1", name: "status_submit", arguments: { status: "<StatusBlock>...</StatusBlock>" } },
+		],
+	};
+	const wire = toWireMsg(msg, names);
+	assert.equal(wire?.text, "她整理好裙摆，抬头看向98。");
+});
+
+test("多个工具调用后 status_submit 仍保留中间生成的正文", () => {
+	const msg = {
+		role: "assistant",
+		content: [
+			{ type: "text", text: "第一段正文。" },
+			{ type: "toolCall", id: "w1", name: "world_state_update", arguments: {} },
+			{ type: "text", text: "第二段正文。" },
+			{ type: "toolCall", id: "s1", name: "status_submit", arguments: {} },
+		],
+	};
+	assert.equal(toWireMsg(msg, names)?.text, "第一段正文。\n第二段正文。");
+});
+
+test("开场白状态栏不进入 greeting 正文", () => {
+	const raw = "【开场】\n列车驶入山区。\n<Status_block>\n时间：14:30\n地点：1号包厢\n</Status_block>";
+	const greeting = toWireMsg({ role: "custom", customType: "rp-greeting", content: raw }, names);
+	assert.equal(greeting?.channel, "greeting");
+	assert.ok(greeting?.statusBlocks?.some((block) => block.body.includes("14:30")));
+	assert.ok(!greeting?.text.includes("14:30"));
+	assert.ok(!greeting?.text.includes("<Status_block>"));
 });
 
 test("toolResult 与未知类型跳过；字符串与内容块数组两种 content 都可读", () => {

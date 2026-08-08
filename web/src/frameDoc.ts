@@ -56,7 +56,7 @@ const LEGACY_BASE_CSS =
  */
 const SEAMLESS_FRAGMENT_CSS =
 	`html,body{margin:0;padding:0;background:transparent;` +
-	`white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word}` +
+	`white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word;overflow:hidden!important}` +
 	`img,video{max-width:100%;height:auto;vertical-align:middle}`;
 
 /**
@@ -67,7 +67,7 @@ const SEAMLESS_FRAGMENT_CSS =
  */
 const SEAMLESS_DOC_CSS =
 	`html,body{margin:0;padding:0;background:transparent;` +
-	`min-height:0!important;height:auto!important;overflow:visible!important}` +
+	`min-height:0!important;height:auto!important;overflow:hidden!important}` +
 	`img,video{max-width:100%;height:auto}`;
 
 /**

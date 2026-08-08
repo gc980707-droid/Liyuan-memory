@@ -12,6 +12,8 @@ import {
 	countChunks,
 	deleteChunkById,
 	deleteStoreFiles,
+	importChunks,
+	loadStoreIndex,
 	listChunks,
 	mergeNarrativeText,
 	reembedStore,
@@ -30,6 +32,17 @@ import type {
 } from "./types.ts";
 import { DEFAULT_MEMORY_CONFIG } from "./types.ts";
 
+const memoryWriteQueues = new Map<string, Promise<unknown>>();
+
+function enqueueMemoryWrite<T>(key: string, task: () => Promise<T>): Promise<T> {
+	const previous = memoryWriteQueues.get(key) ?? Promise.resolve();
+	const next = previous.then(task, task);
+	memoryWriteQueues.set(key, next.finally(() => {
+		if (memoryWriteQueues.get(key) === next) memoryWriteQueues.delete(key);
+	}));
+	return next;
+}
+
 function embedCtxFrom(cfg: MemoryConfig): EmbedContext {
 	return { mode: cfg.embedMode, cloud: cfg.cloudEmbed };
 }
@@ -38,6 +51,8 @@ function normalizeScope(scope: MemoryScope | undefined): MemoryScope {
 	return {
 		sessionId: (scope?.sessionId || "_default").trim() || "_default",
 		card: scope?.card?.trim() || undefined,
+		leafId: scope?.leafId?.trim() || undefined,
+		branchEntryIds: scope?.branchEntryIds?.filter(Boolean),
 	};
 }
 
@@ -76,6 +91,86 @@ export function getMemoryStatus(
 			scopeId: memoryScopeId(sc),
 		},
 	};
+}
+
+/**
+ * 分层常驻目录：总览按时间分段，保证再旧的历史也有入口；与本轮相关的条目另行展开。
+ * 数据直接从 JSONL 派生，旧记忆无需迁移。
+ */
+export async function formatMemoryIndex(
+	cwd: string,
+	scope: MemoryScope,
+	query = "",
+	opts?: { maxChars?: number; segmentSize?: number; relevantItems?: number },
+): Promise<string | null> {
+	const cfg = loadMemoryConfig(cwd);
+	if (!cfg.enabled) return null;
+	const sc = normalizeScope(scope);
+	const maxChars = Math.max(800, opts?.maxChars ?? 7000);
+	const segmentSize = Math.max(20, opts?.segmentSize ?? 100);
+	const relevantItems = Math.max(1, opts?.relevantItems ?? 12);
+	const overview: string[] = [];
+	const candidates: Array<{ line: string; text: string; createdAt: string; segment: number }> = [];
+
+	for (const store of cfg.stores) {
+		if (!store.enabled) continue;
+		const index = loadStoreIndex(cwd, sc, store.id);
+		if (!index?.items.length) continue;
+		const visible = sc.branchEntryIds?.length ? new Set(sc.branchEntryIds) : null;
+		const items = index.items.filter((item) => !item.branchEntryId || !visible || visible.has(item.branchEntryId));
+		if (!items.length) continue;
+		for (let start = 0; start < items.length; start += segmentSize) {
+			const segment = items.slice(start, start + segmentSize);
+			const first = segment[0]!;
+			const last = segment[segment.length - 1]!;
+			const from = start + 1;
+			const to = start + segment.length;
+			const head = first.label.slice(0, 44);
+			const tail = last.label.slice(0, 44);
+			overview.push(`- ${store.name} ${from}-${to}/${items.length}：${head}${head === tail ? "" : ` → ${tail}`}`);
+		}
+		for (const item of items) {
+			candidates.push({
+				line: `- [${store.name}:${item.id.slice(0, 8)}] ${item.label.slice(0, store.kind === "narrative" ? 100 : 80)}`,
+				text: item.text,
+				createdAt: item.createdAt,
+				segment: item.segment,
+			});
+		}
+	}
+
+	if (!candidates.length) return null;
+	let expanded = [...candidates]
+		.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+		.slice(0, relevantItems)
+		.map((item) => item.line);
+	const q = query.trim();
+	if (q.length >= 2) {
+		const terms = q.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? [];
+		expanded = candidates
+			.map((item) => ({
+				line: item.line,
+				score: terms.reduce((score, term) => score + (item.text.toLowerCase().includes(term) ? term.length : 0), 0),
+			}))
+			.filter((item) => item.score > 0)
+			.sort((a, b) => b.score - a.score)
+			.slice(0, relevantItems)
+			.map((item) => item.line);
+	}
+
+	const sections = [`分段总览（${candidates.length} 条；每段 ${segmentSize} 条）：`, ...overview];
+	if (expanded.length) sections.push("本轮相关条目：", ...expanded);
+	let result = sections.join("\n");
+	if (result.length > maxChars) {
+		const keepExpanded = expanded.length ? `\n本轮相关条目：\n${expanded.join("\n")}` : "";
+		const budget = Math.max(400, maxChars - keepExpanded.length - 80);
+		const maxLines = Math.max(2, Math.floor(budget / 90));
+		const sampled = overview.length <= maxLines
+			? overview
+			: Array.from({ length: maxLines }, (_, i) => overview[Math.round(i * (overview.length - 1) / (maxLines - 1))]!);
+		result = `分段总览（${candidates.length} 条；超长时等距保留全历史入口）：\n${sampled.join("\n")}${keepExpanded}`;
+	}
+	return result.slice(0, maxChars);
 }
 
 export function updateMemoryConfig(cwd: string, patch: Partial<MemoryConfig>): MemoryConfig {
@@ -124,20 +219,27 @@ export function memoryListChunks(
 	const cfg = loadMemoryConfig(cwd);
 	const store = cfg.stores.find((s) => s.id === storeId);
 	if (!store) throw new Error(`库不存在：${storeId}`);
-	return listChunks(cwd, normalizeScope(scope), storeId);
+	const sc = normalizeScope(scope);
+	const visible = sc.branchEntryIds?.length ? new Set(sc.branchEntryIds) : null;
+	return listChunks(cwd, sc, storeId).filter(
+		(chunk) => !chunk.meta.branchEntryId || !visible || visible.has(chunk.meta.branchEntryId),
+	);
 }
 
 /** 删除单条 */
-export function memoryDeleteChunk(
+export async function memoryDeleteChunk(
 	cwd: string,
 	scope: MemoryScope,
 	storeId: string,
 	chunkId: string,
-): boolean {
+): Promise<boolean> {
 	const cfg = loadMemoryConfig(cwd);
 	const store = cfg.stores.find((s) => s.id === storeId);
 	if (!store) throw new Error(`库不存在：${storeId}`);
-	return deleteChunkById(cwd, normalizeScope(scope), storeId, chunkId);
+	const sc = normalizeScope(scope);
+	const visible = memoryListChunks(cwd, sc, storeId).some((chunk) => chunk.id === chunkId);
+	if (!visible) return false;
+	return deleteChunkById(cwd, sc, storeId, chunkId);
 }
 
 /**
@@ -166,9 +268,10 @@ export async function memoryManualAdd(
 		sc,
 		storeId,
 		parts,
-		{
-			source: "manual",
-			title: opts?.title?.trim() || undefined,
+			{
+				source: "manual",
+				title: opts?.title?.trim() || undefined,
+				branchEntryId: sc.leafId,
 		},
 		store.maxChunks,
 		embedCtxFrom(cfg),
@@ -195,32 +298,49 @@ export async function memoryImportText(
 		sc,
 		storeId,
 		parts,
-		{ source: "import", fileName, title: fileName },
+		{ source: "import", fileName, title: fileName, branchEntryId: sc.leafId },
 		store.maxChunks,
 		embedCtxFrom(cfg),
 	);
 	return { ...r, chunks: parts.length };
 }
 
-export function memoryClearStore(cwd: string, scope: MemoryScope, storeId: string): void {
-	clearStore(cwd, normalizeScope(scope), storeId);
+/** fork 新会话继承父会话当前祖先链可见的记忆；目标已存在时按正文去重。 */
+export async function inheritMemoryScope(
+	cwd: string,
+	from: MemoryScope,
+	to: MemoryScope,
+): Promise<void> {
+	const cfg = loadMemoryConfig(cwd);
+	const visible = to.branchEntryIds?.length ? new Set(to.branchEntryIds) : null;
+	for (const store of cfg.stores) {
+		const inherited = listChunks(cwd, normalizeScope(from), store.id).filter(
+			(chunk) => !chunk.meta.branchEntryId || !visible || visible.has(chunk.meta.branchEntryId),
+		);
+		if (!inherited.length) continue;
+		await importChunks(cwd, normalizeScope(to), store.id, inherited, store.maxChunks);
+	}
+}
+
+export async function memoryClearStore(cwd: string, scope: MemoryScope, storeId: string): Promise<void> {
+	await clearStore(cwd, normalizeScope(scope), storeId);
 }
 
 /** 删除自定义库配置 + 文件；内置 narrative/external 仅清空当前作用域 */
-export function memoryRemoveStore(
+export async function memoryRemoveStore(
 	cwd: string,
 	scope: MemoryScope,
 	storeId: string,
-): MemoryConfig {
+): Promise<MemoryConfig> {
 	const cfg = loadMemoryConfig(cwd);
 	const store = cfg.stores.find((s) => s.id === storeId);
 	if (!store) return cfg;
 	const sc = normalizeScope(scope);
 	if (store.kind === "narrative" || store.kind === "external") {
-		clearStore(cwd, sc, storeId);
+		await clearStore(cwd, sc, storeId);
 		return cfg;
 	}
-	deleteStoreFiles(cwd, sc, storeId);
+	await deleteStoreFiles(cwd, sc, storeId);
 	return saveMemoryConfig(cwd, {
 		...cfg,
 		stores: cfg.stores.filter((s) => s.id !== storeId),
@@ -242,6 +362,7 @@ export async function onNarrativeTurnEnd(
 	error?: string;
 	noop?: boolean;
 }> {
+	return enqueueMemoryWrite(cwd, async () => {
 	const cfg = loadMemoryConfig(cwd);
 	if (!cfg.enabled) return { stored: false, counter: 0 };
 	const store = cfg.stores.find((s) => s.id === "narrative" && s.enabled);
@@ -266,7 +387,7 @@ export async function onNarrativeTurnEnd(
 			cwd,
 			sc,
 			summary,
-			{ source: "narrative", sessionId: sc.sessionId, card: sc.card },
+			{ source: "narrative", sessionId: sc.sessionId, card: sc.card, branchEntryId: sc.leafId },
 			store.maxChunks,
 			embedCtxFrom(cfg),
 		);
@@ -280,6 +401,7 @@ export async function onNarrativeTurnEnd(
 	} catch (e) {
 		return { stored: false, counter: next, error: e instanceof Error ? e.message : String(e) };
 	}
+	});
 }
 
 export function defaultMemoryConfig(): MemoryConfig {

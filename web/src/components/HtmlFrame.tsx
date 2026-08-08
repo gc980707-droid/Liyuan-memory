@@ -24,6 +24,7 @@ export function HtmlFrame({
 	seamless = false,
 	minHeight = 120,
 	maxHeight = 560,
+	expandToContent = false,
 }: {
 	html: string;
 	title?: string;
@@ -32,6 +33,8 @@ export function HtmlFrame({
 	seamless?: boolean;
 	minHeight?: number;
 	maxHeight?: number;
+	/** 侧栏状态栏：完整撑高 iframe，由外层面板统一滚动 */
+	expandToContent?: boolean;
 }) {
 	const frameId = useId();
 	const ref = useRef<HTMLIFrameElement>(null);
@@ -76,6 +79,7 @@ export function HtmlFrame({
 		}
 		const el = ref.current;
 		if (!el) return;
+		let observer: ResizeObserver | undefined;
 		const fit = () => {
 			try {
 				const doc = el.contentDocument;
@@ -98,11 +102,23 @@ export function HtmlFrame({
 				/* opaque origin(非 seamless 静态帧) */
 			}
 		};
-		el.addEventListener("load", fit);
+		const observe = () => {
+			try {
+				observer?.disconnect();
+				const body = el.contentDocument?.body;
+				if (!body || typeof ResizeObserver === "undefined") return;
+				observer = new ResizeObserver(fit);
+				observer.observe(body);
+				for (const child of Array.from(body.children)) observer.observe(child);
+			} catch { /* opaque origin */ }
+		};
+		const onLoad = () => { fit(); observe(); };
+		el.addEventListener("load", onLoad);
 		const t = window.setTimeout(fit, 50);
 		const t2 = window.setTimeout(fit, 200);
 		return () => {
-			el.removeEventListener("load", fit);
+			el.removeEventListener("load", onLoad);
+			observer?.disconnect();
 			window.clearTimeout(t);
 			window.clearTimeout(t2);
 		};
@@ -137,7 +153,7 @@ export function HtmlFrame({
 
 	return (
 		<figure
-			className={`msg-html ${scripts ? "msg-html-scripts" : ""} ${seamless ? "msg-html-seamless" : ""} ${programApp ? "msg-html-program" : ""}`}
+			className={`msg-html ${scripts ? "msg-html-scripts" : ""} ${seamless ? "msg-html-seamless" : ""} ${programApp ? "msg-html-program" : ""} ${expandToContent ? "msg-html-expand" : ""}`}
 		>
 			{!seamless && (
 				<div className="msg-html-bar">
@@ -157,15 +173,16 @@ export function HtmlFrame({
 					</button>
 				</div>
 			)}
-			<iframe
-				ref={ref}
-				name={frameId}
-				className="msg-html-frame"
-				title={title || (seamless ? "界面" : "HTML")}
-				sandbox={sandbox}
-				srcDoc={srcDoc}
-				style={{ height }}
-			/>
+		<iframe
+			ref={ref}
+			name={frameId}
+			className="msg-html-frame"
+			title={title || (seamless ? "界面" : "HTML")}
+			sandbox={sandbox}
+			srcDoc={srcDoc}
+			style={{ height }}
+			referrerPolicy="no-referrer"
+		/>
 			{showSource && <pre className="msg-html-source">{html}</pre>}
 			{!seamless && title?.trim() && !showSource && <figcaption className="msg-html-cap">{title}</figcaption>}
 		</figure>

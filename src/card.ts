@@ -10,6 +10,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import type { CharacterCard, LorebookEntry, MacroContext } from "./types.ts";
 import { normalizeEntries } from "./lorebook.ts";
+import { stripBom } from "./jsonio.ts";
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -49,7 +50,7 @@ export function readCardJsonFromPng(buf: Buffer): unknown {
 		throw new Error("PNG 中没有找到角色卡数据（无 ccv3/chara tEXt chunk）");
 	}
 	const json = Buffer.from(raw, "base64").toString("utf8");
-	return JSON.parse(json);
+	return JSON.parse(json.charCodeAt(0) === 0xfeff ? json.slice(1) : json);
 }
 
 function str(v: unknown): string {
@@ -107,7 +108,7 @@ export function loadCardFile(path: string): CharacterCard {
 	if (buf.length >= 8 && buf.subarray(0, 8).equals(PNG_SIGNATURE)) {
 		return normalizeCard(readCardJsonFromPng(buf));
 	}
-	return normalizeCard(JSON.parse(buf.toString("utf8")));
+	return normalizeCard(JSON.parse(stripBom(buf.toString("utf8"))));
 }
 
 /** {{char}} / {{user}} 宏替换（大小写不敏感） */
@@ -246,7 +247,7 @@ export function readCardRawJson(path: string): { isPng: boolean; raw: Record<str
 		if (!j || typeof j !== "object") throw new Error("角色卡 JSON 无效");
 		return { isPng: true, raw: j as Record<string, unknown> };
 	}
-	const j = JSON.parse(buf.toString("utf8")) as unknown;
+	const j = JSON.parse(stripBom(buf.toString("utf8"))) as unknown;
 	if (!j || typeof j !== "object") throw new Error("角色卡 JSON 无效");
 	return { isPng: false, raw: j as Record<string, unknown> };
 }

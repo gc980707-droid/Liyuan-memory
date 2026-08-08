@@ -16,6 +16,10 @@ export type MemoryStoreKind = "narrative" | "external" | "custom";
 export interface MemoryScope {
 	sessionId: string;
 	card?: string;
+	/** 当前会话树叶节点；用于回档/分支记忆可见性过滤 */
+	leafId?: string;
+	/** 当前叶节点的祖先 entry id（含当前叶）；旧记忆无 branchEntryId 时仍可见 */
+	branchEntryIds?: string[];
 }
 
 /** 嵌入模式：local=本机规则；cloud=OpenAI 兼容 embeddings 接口 */
@@ -78,6 +82,8 @@ export interface MemoryChunkMeta {
 	mergeCount?: number;
 	/** 最后更新时间 ISO */
 	updatedAt?: string;
+	/** 写入该记忆时的会话树叶节点；检索时仅当前分支祖先可见 */
+	branchEntryId?: string;
 }
 
 export interface MemoryChunk {

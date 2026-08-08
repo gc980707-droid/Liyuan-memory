@@ -18,7 +18,7 @@ export function normalizeStatusTag(tag: string): string {
 export function isPanelTagName(tag: string): boolean {
 	const raw = tag.trim();
 	const n = normalizeStatusTag(raw);
-	return /^(?:status(?:block|bar)?|normalstatus|specialstatus|char(?:acter)?status|状态|状态栏|人物状态|场景状态)$/i.test(
+	return /^(?:status(?:block|bar)?|normalstatus|specialstatus|char(?:acter)?status|state\s*\d+|状态|状态栏|人物状态|场景状态)$/i.test(
 		n,
 	) || /^(?:status(?:_?block|bar)?|normal_?status|special_?status)$/i.test(raw);
 }
@@ -36,20 +36,20 @@ const LABEL_BY_NORM: Record<string, string> = {
 
 /** 任意「像状态」的开标签 + 少量历史别名 */
 const OPEN_RE =
-	/<(StatusBlock|status_block|statusblock|status|statusbar|normal_status|special_status|NextCharacterPanel|[A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff.\-]*)(?:\s[^>]*)?>/gi;
+	/<(StatusBlock|status_block|statusblock|Status_block|status|statusbar|normal_status|special_status|NextCharacterPanel|[A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff.\-]*)(?:\s[^>]*)?>/gi;
 
 function isStatusOpen(tag: string): boolean {
 	const n = normalizeStatusTag(tag);
 	// 历史别名：曾当面板渲染的（descriptive_analysis 已改走思维链，此处不再画面板）
 	if (n === "nextcharacterpanel") return true;
-	return isPanelTagName(tag);
+	return isPanelTagName(tag) || /^state\d+$/i.test(tag);
 }
 
 /** plot 等不再当状态面板——后端已 unwrap 进正文；此处只处理 panel 族 */
 function closePattern(tag: string): RegExp {
 	const n = normalizeStatusTag(tag);
 	if (n === "statusblock" || n === "status" || n === "statusbar") {
-		return /<\/(?:StatusBlock|status_block|statusblock|status|statusbar)\s*>/i;
+		return /<\/(?:StatusBlock|status_block|statusblock|Status_block|status|statusbar)\s*>/i;
 	}
 	if (n === "normalstatus") return /<\/normal_status\s*>/i;
 	if (n === "specialstatus") return /<\/special_status\s*>/i;
@@ -128,10 +128,17 @@ export function splitStatusParts(text: string): StatusPart[] {
 export function stripOrphanStatusTags(text: string): string {
 	return text
 		.replace(
-			/<\/?(?:StatusBlock|status_block|statusblock|status|statusbar|normal_status|special_status)(?:\s[^>]*)?>/gi,
+			/<\/?(?:StatusBlock|status_block|statusblock|Status_block|status|statusbar|normal_status|special_status)(?:\s[^>]*)?>/gi,
 			"",
 		)
 		.replace(/^\s*$/gm, "")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+}
+
+export function stripStatusMarkup(text: string): string {
+	return text
+		.replace(/<(?:StatusBlock|status_block|Status_block|statusblock|status|statusbar|normal_status|special_status|state\s*\d+)\b[^>]*>[\s\S]*?<\/(?:StatusBlock|status_block|Status_block|statusblock|status|statusbar|normal_status|special_status|state\s*\d+)\s*>/gi, "")
 		.replace(/\n{3,}/g, "\n\n")
 		.trim();
 }

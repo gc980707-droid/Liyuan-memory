@@ -18,6 +18,8 @@ services:
     environment:
       HOST: "0.0.0.0"
       PORT: "7620"
+      # 调试扩展、预演、场记和工具流程；关闭时不输出详细调试信息
+      RP_DEBUG: "1"
       # 可选：把 TTS 等密钥用环境变量注入（见 src/tts.ts）
       # OPENAI_API_KEY: ""
       # DEEPSEEK_API_KEY: ""
@@ -31,11 +33,11 @@ services:
       - liyuan-artifacts:/app/.liyuan-artifacts
       - liyuan-codex:/app/.liyuan-codex
       - liyuan-lore:/app/.liyuan-lore
-      # 配置 + 用户导入的角色卡 / 世界书（重建镜像不丢）
-      # 无需任何手工准备：目录不存在时 Docker 自建，首启由 entrypoint 从 example 播种。
-      # 只挂目录、不挂单个文件——文件级 bind mount 在宿主机缺文件时会被 Docker
-      # 当成目录创建，撞上容器内的同名文件直接崩（issue #1）。
+      # 配置（重建镜像不丢）：目录不存在时 Docker 自建，首启由 entrypoint 从 example 播种
       - ./data/config:/app/config
+      # 角色卡清单 / 世界书（重建镜像不丢）
+      - liyuan-card-data:/app/.liyuan-card-data
+      # 用户导入的角色卡 / 世界书
       - ./data/cards:/app/assets/cards
       - ./data/lorebooks:/app/assets/lorebooks
     healthcheck:
@@ -60,3 +62,4 @@ volumes:
   liyuan-artifacts:
   liyuan-codex:
   liyuan-lore:
+  liyuan-card-data:

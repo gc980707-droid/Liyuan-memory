@@ -36,6 +36,11 @@ test("extractRegexScripts: data.extensions 与顶层 extensions 都认,缺失返
 	assert.equal(extractRegexScripts({ extensions: { regex_scripts: [skinScript] } }).length, 1);
 	assert.deepEqual(extractRegexScripts({ name: "x" }), []);
 	assert.deepEqual(extractRegexScripts({ data: { extensions: { regex_scripts: "bad" } } }), []);
+	assert.equal(extractRegexScripts({ data: { name: "x" }, extensions: { regex_scripts: [skinScript] } }).length, 1);
+});
+
+test("Manifest 统计实际可用显示规则而不是原始脚本数量", () => {
+	assert.equal(displayRules([{ ...skinScript, disabled: true }]).length, 0);
 });
 
 test("displayRules: 显示向保留,promptOnly/disabled/非AI输出排除", () => {

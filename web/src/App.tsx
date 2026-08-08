@@ -60,7 +60,11 @@ import {
 	IconStop,
 	IconUploads,
 	IconWorldline,
+	IconVariables,
 } from "./components/icons.tsx";
+import { StatusSidebarPanel, type SidebarStatus } from "./components/StatusSidebarPanel.tsx";
+import { splitRichContentParts } from "./richContentParts.ts";
+import { parseFallbackStatus } from "./statusFallback.ts";
 import { LorebookPanel } from "./components/LorebookPanel.tsx";
 import {
 	BackstageGroup,
@@ -152,7 +156,8 @@ type PanelId =
 	| "persona"
 	| "roster"
 	| "uploads"
-	| "assistant";
+	| "assistant"
+	| "statusview";
 
 /** agent 自建面板的右栏选择 id（柱 2）：`agent:` + 面板名，页签随 panels 帧动态长出 */
 type AgentPanelId = `agent:${string}`;
@@ -165,7 +170,7 @@ const agentId = (name: string): AgentPanelId => `agent:${name}`;
  * - 右 4：角色卡 / 世界书 / 知识库 / 用户角色
  * 会话在底栏。
  */
-const LEFT_PANELS: PanelId[] = ["connect", "preset", "powers", "uploads"];
+const LEFT_PANELS: PanelId[] = ["statusview", "connect", "preset", "powers", "uploads"];
 const RIGHT_PANELS: PanelId[] = ["card", "lorebook", "codex", "persona"];
 /** 右栏可开面板全集：顶栏 4 入口 + 助手（入口在输入框发送钮右侧，不占顶栏） */
 const RIGHT_OPENABLE: PanelId[] = [...RIGHT_PANELS, "assistant"];
@@ -187,6 +192,7 @@ const PANEL_LABEL: Record<PanelId, string> = {
 	roster: "登场名录",
 	uploads: "上传区",
 	assistant: "助手",
+	statusview: "状态栏",
 };
 
 /** 顶栏图标(收纳入口的关键:图标承载识别,文字进 tooltip/aria-label) */
@@ -204,6 +210,7 @@ const PANEL_ICON: Record<PanelId, (p: { size?: number }) => React.JSX.Element> =
 	roster: IconRoster,
 	uploads: IconUploads,
 	assistant: IconAssistant,
+	statusview: IconVariables,
 };
 
 type CenterMenu = "settings" | "panels" | null;
@@ -260,6 +267,8 @@ export default function App() {
 	const [sessions, setSessions] = useState<WireSessionInfo[] | null>(null);
 	// 右栏数据
 	const [worldState, setWorldState] = useState<WorldState | null>(null);
+	const [mvu, setMvu] = useState<Record<string, unknown>>({});
+	const [validatedStatus, setValidatedStatus] = useState<{ raw: string; rendered: string; validatedAt: number } | null>(null);
 	const [stats, setStats] = useState<WireStats | null>(null);
 	const [warnings, setWarnings] = useState<WarnEntry[]>([]);
 	const [bellOpen, setBellOpen] = useState(false);
@@ -571,6 +580,52 @@ export default function App() {
 
 	/** 一档卡皮肤：显示向规则（启用且有规则时注入对话流） */
 	const [cardSkin, setCardSkin] = useState<SkinProp | null>(null);
+	const latestStatus = useMemo<SidebarStatus | null>(() => {
+		if (validatedStatus) {
+			// validatedStatus 也必须走和正文相同的状态标签/HTML 拆分路径。
+			// 直接把 raw 当 pre 展示会绕过卡片正则，导致 <Status_block> 永远没有 UI。
+			const statusParts = splitRichContentParts(validatedStatus.rendered, cardSkin);
+			for (let j = statusParts.length - 1; j >= 0; j--) {
+				const part = statusParts[j];
+				if (part.kind === "html") {
+					const complete = /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>\s*$/i.test(part.html.trim());
+					if (complete) return { kind: "html", html: part.html, scripts: part.scripts };
+				}
+				if (part.kind === "status") return { kind: "status", body: part.body };
+			}
+			const renderedComplete = /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>\s*$/i.test(validatedStatus.rendered.trim());
+			if (renderedComplete) return { kind: "html", html: validatedStatus.rendered, scripts: false };
+			return { kind: "status", body: validatedStatus.raw };
+		}
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const message = messages[i];
+			if (message.channel !== "narrative" && message.channel !== "greeting") continue;
+			if (message.statusBlocks?.length) {
+				const block = message.statusBlocks.at(-1)!;
+				const rendered = block.rendered ?? block.body;
+				const renderedParts = splitRichContentParts(rendered, null);
+				for (let k = renderedParts.length - 1; k >= 0; k--) {
+					const part = renderedParts[k];
+					if (part.kind === "html") return { kind: "html", html: part.html, scripts: part.scripts };
+					if (part.kind === "status") return { kind: "status", body: part.body };
+				}
+				return { kind: "status", body: block.body };
+			}
+			const fallback = parseFallbackStatus(message.text);
+			const parts = splitRichContentParts(message.text, cardSkin);
+			// 这里仅用于提取左侧状态栏；正文 RichContent 会过滤 status part。
+			for (let j = parts.length - 1; j >= 0; j--) {
+				const part = parts[j];
+				if (part.kind === "html") {
+					const complete = /<(?:div|section|article)\b[\s\S]*<\/(?:div|section|article)>\s*$/i.test(part.html.trim());
+					if (complete) return { kind: "html", html: part.html, scripts: part.scripts };
+				}
+				if (part.kind === "status") return { kind: "status", body: part.body };
+			}
+			if (fallback) return { kind: "fallback", data: fallback };
+		}
+		return null;
+	}, [validatedStatus, messages, cardSkin]);
 	const refreshCardFront = useCallback(async () => {
 		try {
 			// 显式清缓存 + bypass:换卡/hello 后绝对不能吃上一张卡的 rules
@@ -630,6 +685,8 @@ export default function App() {
 					);
 					setMsgEdit(null); // 会话对齐后关闭内联编辑
 					setWorldState(frame.state);
+					setMvu(frame.mvu ?? {});
+				setValidatedStatus(frame.validatedStatus ?? null);
 					setStats(frame.stats);
 					// 一档皮肤:优先用 hello 同帧载荷(与消息同步),杜绝 REST 缓存/时序导致的漏皮
 					if (frame.cardfront) {
@@ -793,6 +850,12 @@ export default function App() {
 				case "state":
 					setWorldState(frame.state);
 					break;
+			case "mvu":
+				setMvu(frame.mvu);
+				break;
+			case "validatedStatus":
+				setValidatedStatus(frame.status);
+				break;
 				case "panels": {
 					// agent 自建面板（柱 2）：新面板自动展开到左栏（agent 持有前端，建了就给用户看）；
 					// 已开面板的更新自然重渲染；未开面板的更新只提示；被收起的面板若正开着则回落。
@@ -1437,6 +1500,8 @@ export default function App() {
 				);
 			case "connect":
 				return <ConnectPanel toast={pushToast} />;
+			case "statusview":
+				return <StatusSidebarPanel status={latestStatus} mvu={mvu} />;
 			case "preset":
 				return <PresetPanel toast={pushToast} />;
 			case "powers":

@@ -61,6 +61,9 @@ import {
 	takeAgentMergeLog,
 } from "../src/paths.ts";
 import { applyPatch, loadState, saveState } from "../src/state.ts";
+import { SessionStateService } from "../src/session-state-service.ts";
+import { loadMvuData } from "../src/mvu.ts";
+import { loadValidatedStatus } from "../src/status-submit.ts";
 import { DEFAULT_CONFIG, type RpConfig, type WorldState } from "../src/types.ts";
 import {
 	loadTtsConfig,
@@ -364,6 +367,37 @@ const currentState = (): WorldState => {
 	return loadState(join(stateDir, `${session.sessionId}.json`));
 };
 
+const mvuDir = dir(cwd, "mvu");
+mkdirSync(mvuDir, { recursive: true });
+const hostStateService = new SessionStateService({
+	stateFile: join(stateDir, `${session.sessionId}.json`),
+	mvuFile: join(mvuDir, `${session.sessionId}.json`),
+	snapshotState: () => syncStoryStateFromDisk(),
+});
+const currentMvu = () => loadMvuData(join(mvuDir, `${session.sessionId}.json`));
+
+const statusDir = dir(cwd, "status");
+mkdirSync(statusDir, { recursive: true });
+const currentValidatedStatus = () => loadValidatedStatus(join(statusDir, `${session.sessionId}.json`));
+
+let mvuDebounce: ReturnType<typeof setTimeout> | undefined;
+watch(mvuDir, (_evt, filename) => {
+	if (filename !== `${session.sessionId}.json`) return;
+	clearTimeout(mvuDebounce);
+	mvuDebounce = setTimeout(() => {
+		try { broadcast({ type: "mvu", mvu: currentMvu() }); } catch { /* next event retries */ }
+	}, 200);
+});
+
+let statusDebounce: ReturnType<typeof setTimeout> | undefined;
+watch(statusDir, (_evt, filename) => {
+	if (filename !== `${session.sessionId}.json`) return;
+	clearTimeout(statusDebounce);
+	statusDebounce = setTimeout(() => {
+		try { broadcast({ type: "validatedStatus", status: currentValidatedStatus() }); } catch { /* next event retries */ }
+	}, 200);
+});
+
 // 场记记账落盘即推送（PLAN-PHASE3 §4：fs.watch 目录级监听，零扩展改动；
 // Windows 下同一次写可能触发多次事件，200ms 去抖）
 let stateDebounce: ReturnType<typeof setTimeout> | undefined;
@@ -549,6 +583,8 @@ const helloFrame = (): ServerFrame => {
 		userName: names.userName,
 		messages: annotateSwipes(toWireHistory(branchMessages(), names, { skin })),
 		state: currentState(),
+		mvu: currentMvu(),
+		validatedStatus: currentValidatedStatus(),
 		stats: safeStats(),
 		panels: currentPanels(),
 		// 一档皮肤与消息同帧:首屏不得依赖二次 REST(缓存/竞态会让 StatusBlock 回落统一面板)
@@ -696,6 +732,8 @@ const hostSwitchGreeting = async (rawArg: string): Promise<void> => {
  * 不写 /store → 不产生世界线分叉。
  */
 const regenerateSwipe = async (): Promise<void> => {
+	// swipe/reroll 必须等待剧情扩展的在途记账，否则 session_tree 会丢掉当前轮快照。
+	await new Promise<void>((resolve) => setTimeout(resolve, 250));
 	const userId = lastStoryUserId();
 	if (!userId) {
 		broadcast({ type: "notify", level: "error", text: "没有可重新生成的剧情轮（需要先有一条用户输入）" });
@@ -889,6 +927,39 @@ const bindSession = async () => {
 				break;
 			case "agent_end":
 				if (!event.willRetry) {
+					const memoryLeafId = session.sessionManager.getLeafId() ?? undefined;
+					const memoryBranchEntryIds = session.sessionManager
+						.getBranch()
+						.map((entry) => entry.id);
+					const memorySessionId = session.sessionId;
+					const memoryBranchKey = `${memorySessionId}:${memoryLeafId ?? "root"}:${memoryBranchEntryIds.join(",")}`;
+					const memoryCardPath = cardPath || undefined;
+					const memoryMessages = event.messages as Array<{
+						role?: string;
+						content?: unknown;
+						stopReason?: string;
+					}>;
+					let lastUserIndex = -1;
+					for (let i = memoryMessages.length - 1; i >= 0; i--) {
+						if (memoryMessages[i]?.role === "user") {
+							lastUserIndex = i;
+							break;
+						}
+					}
+					const memoryText = memoryMessages
+						.slice(lastUserIndex + 1)
+						.filter((m) => m.role === "assistant" && m.stopReason !== "aborted" && m.stopReason !== "error")
+						.flatMap((m) => {
+							if (typeof m.content === "string") return [m.content];
+							if (!Array.isArray(m.content)) return [];
+							return m.content.map((part) =>
+								part && typeof part === "object" && (part as { type?: string }).type === "text"
+									? String((part as { text?: string }).text ?? "")
+									: "",
+							);
+						})
+						.filter(Boolean)
+						.join("\n");
 					broadcast({ type: "agent", state: "end" });
 					const stats = safeStats();
 					if (stats) broadcast({ type: "stats", stats });
@@ -917,9 +988,14 @@ const bindSession = async () => {
 							}
 							const mem = await onNarrativeTurnEnd(
 								cwd,
-								{ sessionId: session.sessionId, card: cardPath || undefined },
-								lastText,
-							);
+								{
+									sessionId: memorySessionId,
+									card: memoryCardPath,
+								leafId: memoryLeafId,
+								branchEntryIds: memoryBranchEntryIds,
+							},
+							lastText,
+						);
 							if (mem.error) {
 								broadcast({
 									type: "notify",
@@ -1255,10 +1331,7 @@ const restHost: RestHost = {
 	},
 	// ---- 世界状态编辑（PLAN-PANELS §2.11）：用户主权 applyPatch，落盘即广播，命令桥收编进树 ----
 	async applyStatePatch(patch) {
-		const file = join(stateDir, `${session.sessionId}.json`);
-		const r = applyPatch(loadState(file), patch);
-		saveState(file, r.state); // fs.watch 自动广播 state 帧
-		syncStoryStateFromDisk();
+		const r = await hostStateService.patchWorldState(patch, { source: "rest" });
 		return { applied: r.applied, warnings: r.warnings };
 	},
 	// ---- 世界线视图 / 软删除 / 线名 ----
@@ -1452,6 +1525,8 @@ const restHost: RestHost = {
 	memoryScope: () => ({
 		sessionId: session.sessionId,
 		card: cardPath || undefined,
+		leafId: session.sessionManager.getLeafId() ?? undefined,
+		branchEntryIds: session.sessionManager.getBranch().map((entry) => entry.id),
 	}),
 };
 

@@ -45,6 +45,13 @@ export const IconApi = (p: IconProps) => (
 	</Icon>
 );
 
+export const IconVariables = (p: IconProps) => (
+	<Icon {...p}>
+		<path d="M4 5h16" /><path d="M4 12h16" /><path d="M4 19h16" />
+		<circle cx="8" cy="5" r="2" /><circle cx="15" cy="12" r="2" /><circle cx="10" cy="19" r="2" />
+	</Icon>
+);
+
 /** 助手（右栏系统助手）：耳麦——找人办事/支援的意象 */
 export const IconAssistant = (p: IconProps) => (
 	<Icon {...p}>

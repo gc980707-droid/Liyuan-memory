@@ -64,6 +64,24 @@ ${charName}：${assistantText}`;
 	return { systemPrompt, userText: user };
 }
 
+export function buildScribeRetryPrompt(input: ScribePromptInput): { systemPrompt: string; userText: string } {
+	const prompt = buildScribeTurnPrompt(input);
+	return {
+		systemPrompt: `${prompt.systemPrompt}\n必须只输出一个可解析的 JSON 对象，格式严格为 {"patch":{}}；没有明确变化也输出 {"patch":{}}。不要输出 Markdown、解释或代码围栏。`,
+		userText: prompt.userText,
+	};
+}
+
+/** 从正文/状态栏中提取低风险的时间和地点兜底，避免场记模型空响应时账本完全不动。 */
+export function extractDeterministicLedgerPatch(text: string): Record<string, unknown> {
+	const patch: Record<string, unknown> = {};
+	const time = text.match(/(?:时间|时刻|⏰)\s*[：:]\s*([^\n|，,。]{2,40})/u)?.[1]?.trim();
+	const location = text.match(/(?:位置|地点|场所|📍)\s*[：:]\s*([^\n|，,。]{2,80})/u)?.[1]?.trim();
+	if (time) patch.time = time;
+	if (location) patch.location = location;
+	return patch;
+}
+
 /**
  * 宽容解析场记输出：剥代码围栏后，从头逐个候选尝试解析 JSON 对象
  * （模型常在最前写一句「以下是账本更新：」之类的前言——若前言里恰好有

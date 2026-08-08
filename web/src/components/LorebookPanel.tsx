@@ -609,6 +609,7 @@ export function LorebookPanel({ toast }: { toast: (level: "info" | "warning" | "
 			if (r.duplicate) toast("warning", "正文与本书已有条目重复，未重复写入");
 		}, "条目已添加");
 
+
 	const filtered = useMemo(() => {
 		const list = data?.entries ?? [];
 		const q = query.trim().toLowerCase();

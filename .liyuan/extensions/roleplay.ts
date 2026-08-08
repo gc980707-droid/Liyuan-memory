@@ -7,7 +7,7 @@
  * 剧情向压缩接管 → 每轮后场记记账 + 一致性审计（旁侧模型，D10：产出是数据与告警，绝不碰正文）。
  */
 
-import { existsSync, mkdirSync, writeFileSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, copyFileSync, unlinkSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { extname, isAbsolute, join } from "node:path";
@@ -27,14 +27,27 @@ import {
 	listCodexes,
 	loadCodexEntries,
 } from "../../src/codex.ts";
-import { buildGreeting } from "../../src/greeting.ts";
-import { memoryArchiveCompacted, memoryRecallForTurn, memorySearch } from "../../src/memory/index.ts";
-import { GATED_TOOLS, WRITE_REQUEST_RE } from "../../src/tools/gate.ts";
+import { buildRpSummaryPrompt, serializeForSummary } from "../../src/compaction.ts";
+import { buildGreeting, buildSystemPrompt, buildTurnInjection, detectsLanguageMismatch } from "../../src/director.ts";
+import { formatMemoryIndex, inheritMemoryScope, memoryRecallForTurn } from "../../src/memory/index.ts";
+import { applyMvuOperations, defaultMvuData, formatMvuData, loadMvuData, parseInitVar, parseMvuUpdates, saveMvuData, type MvuData } from "../../src/mvu.ts";
 import { createMacroEnv, evalPresetMacros } from "../../src/preset-macro.ts";
+import { buildStatusRecoveryPrompt, extractStatusSubmission, loadValidatedStatus, normalizeStatusSubmission, saveValidatedStatus, validateStatusSubmission, type ValidatedStatus } from "../../src/status-submit.ts";
+import { formatPreflightAdvice, hardenPreflightAdvice, parsePreflightAdvice } from "../../src/preflight.ts";
+import { coreCharacterNames } from "../../src/character-roster.ts";
+import { buildTurnPlan, formatTurnPlan } from "../../src/turn-orchestrator.ts";
+import { buildCharacterStatePrompt, parseCharacterStateAgent } from "../../src/character-state-agent.ts";
+import { buildCharacterIntentPrompt } from "../../src/character-intent-agent.ts";
+import { buildCharacterContinuityPrompt, parseCharacterContinuityAgent } from "../../src/character-continuity-agent.ts";
+import { buildSceneStatePrompt, formatSceneStateAdvice, parseSceneStateAdvice } from "../../src/scene-state-agent.ts";
+import { SessionStateService } from "../../src/session-state-service.ts";
+import { buildCardManifest, cardManifestFile, characterLoreProfiles, loadCardManifest, manifestAgentCharacters, manifestMatchesCard, saveCardManifest, syncCardManifestCharacters } from "../../src/card-manifest.ts";
+import { advanceTimeForKnownAction, alignStatusClock, extractClockTime, gateStatusTime, gateTimePatch } from "../../src/time-gate.ts";
+import { displayRules, extractRegexScripts } from "../../src/cardfront.ts";
 import {
 	constantEntries,
 	appendOverlayEntry,
-	applyDisabledLore,
+	applyLoreOverrides,
 	loadLorebookFile,
 	mergeEntries,
 	mountedLorebookPaths,
@@ -66,7 +79,8 @@ import { enabledBlocks, normalizeRpPreset, type RpPreset } from "../../src/prese
 import { applyProjectedSamplers } from "../../src/samplers.ts";
 import { registerStoryPanelSync, registerStoryStateSync } from "../../src/story-sync.ts";
 import { formatPruneStats, pruneClosedTurns } from "../../src/retention.ts";
-import { buildLoreAliasPrompt, buildRpSummaryPrompt, buildScribeTurnPrompt, parseLoreAliases, parseScribeResult } from "../../src/scribe.ts";
+import { buildLoreAliasPrompt, buildScribeRetryPrompt, buildScribeTurnPrompt, extractDeterministicLedgerPatch, parseLoreAliases, parseScribeResult } from "../../src/scribe.ts";
+import { shouldApplyStoryPreset } from "../../src/turn-intent.ts";
 import { listSkills } from "../../src/skills.ts";
 import { formatUploadIndex, listUploads } from "../../src/uploads.ts";
 import { isBackstageText } from "../../src/stance.ts";
@@ -74,7 +88,6 @@ import {
 	applyPatch,
 	canonicalizeCharacterKeys,
 	defaultState,
-	formatRosterIndex,
 	formatState,
 	loadState,
 	saveState,
@@ -120,6 +133,8 @@ const RP_TOOLS = [
 	"lorebook_search",
 	"world_state_get",
 	"world_state_update",
+	"mvu_get",
+	"mvu_patch",
 	"lorebook_write",
 	"codex_create",
 	"codex_mount",
@@ -153,10 +168,26 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	let config: RpConfig = { ...DEFAULT_CONFIG };
 	let card: CharacterCard | null = null;
 	let entries: LorebookEntry[] = [];
+	/** 剧情 system（含预设 system 块）；缺省与 ops 相同 */
+	let systemPromptStory = "";
+	/** 非剧情 system（不含预设块）——纯办事回合用 */
+	let systemPromptOps = "";
 	/** 卡作者状态栏格式（StatusBlock / state1…）；空=卡未设计，勿硬造 */
 	let statusBarFormats: string[] = [];
 	let state: WorldState = defaultState();
 	let stateFile = "";
+	let mvu: MvuData = defaultMvuData();
+	let mvuFile = "";
+	let stateService: SessionStateService | null = null;
+	let validatedStatus: ValidatedStatus | null = null;
+	let statusFile = "";
+	/** 每次树导航递增；所有旁路 Agent 写入前必须验证，防止旧回合污染新分支。 */
+	let branchGeneration = 0;
+	let turnGeneration = 0;
+	let preflightKey = "";
+	let preflightAdvice: string | null = null;
+	let sceneStateAdvice: string | null = null;
+	let cardManifest: import("../../src/card-manifest.ts").CardManifest | null = null;
 	// agent 自建面板（柱 2）：与 state 同一套「磁盘缓存 + 会话树快照」机制
 	let panels: PanelMap = {};
 	let panelsFile = "";
@@ -176,9 +207,10 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	let appCwd = process.cwd();
 	// 场记记账：进行中标志（防重入）；连续性审查已关闭
 	let scribeBusy = false;
-	// 固定楼层压缩：距上次压缩的叙事轮数 + 主动触发在途标志（防重复触发）
-	let narrativeTurnsSinceCompact = 0;
-	let proactiveCompactInFlight = false;
+	let scribePending = 0;
+	/** 状态栏和场记是两个独立数据管线，各自排队，互不阻断。 */
+	let statusRecoveryQueue: Promise<void> = Promise.resolve();
+	let scribeQueue: Promise<void> = Promise.resolve();
 	// 世界书中文别名：一次性生成 + 磁盘缓存的懒初始化
 	let aliasPromise: Promise<void> | null = null;
 	// MCP 外设（柱 4）：本会话启用集 + 已注册工具（agent 绑对话，新对话=新窗口）
@@ -334,6 +366,79 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		return false;
 	};
 
+	const snapshotMvu = () => {
+		try { pi.appendEntry("rp-mvu", mvu); } catch { /* session not writable yet */ }
+	};
+
+	const restoreMvuFromBranch = (sm: { getBranch: (fromId?: string) => unknown[] }): boolean => {
+		try {
+			const branch = sm.getBranch() as Array<Record<string, unknown>>;
+			for (let i = branch.length - 1; i >= 0; i--) {
+				const entry = branch[i];
+				if (entry.type === "custom" && entry.customType === "rp-mvu" && entry.data && typeof entry.data === "object") {
+					mvu = structuredClone(entry.data as MvuData);
+					return true;
+				}
+			}
+		} catch { /* no snapshot */ }
+		return false;
+	};
+
+	const snapshotValidatedStatus = () => {
+		if (!validatedStatus) return;
+		try { pi.appendEntry("rp-status", validatedStatus); } catch { /* session not writable yet */ }
+	};
+
+	const restoreValidatedStatusFromBranch = (sm: { getBranch: (fromId?: string) => unknown[] }): boolean => {
+		try {
+			const branch = sm.getBranch() as Array<Record<string, unknown>>;
+			for (let i = branch.length - 1; i >= 0; i--) {
+				const entry = branch[i];
+				if (entry.type === "custom" && entry.customType === "rp-status" && entry.data && typeof entry.data === "object") {
+					const data = entry.data as Partial<ValidatedStatus>;
+					if (typeof data.raw === "string" && typeof data.rendered === "string") {
+						validatedStatus = { raw: data.raw, rendered: data.rendered, validatedAt: Number(data.validatedAt) || 0 };
+						return true;
+					}
+				}
+			}
+		} catch { /* no snapshot */ }
+		return false;
+	};
+
+	const isCurrentGeneration = (generation: number): boolean => generation === branchGeneration;
+	const isCurrentTurn = (turn: number, branch: number): boolean => turn === turnGeneration && branch === branchGeneration;
+
+	const initialMvuFromCard = (): MvuData => {
+		try {
+			const cardPath = resolvePath(appCwd, config.card);
+			const raw = readCardRawJson(cardPath).raw;
+			const data = (raw.data && typeof raw.data === "object" ? raw.data : raw) as Record<string, unknown>;
+			const extensions = data.extensions && typeof data.extensions === "object" ? data.extensions as Record<string, unknown> : {};
+			const helper = extensions.tavern_helper && typeof extensions.tavern_helper === "object"
+				? extensions.tavern_helper as Record<string, unknown>
+				: {};
+			if (helper.variables && typeof helper.variables === "object" && !Array.isArray(helper.variables) && Object.keys(helper.variables as object).length) {
+				return structuredClone(helper.variables as MvuData);
+			}
+			const initEntry = card.book.find((entry) => /\[?InitVar\]?/i.test(entry.comment));
+			return initEntry ? parseInitVar(initEntry.content) ?? {} : {};
+		} catch { return {}; }
+	};
+
+	const sessionMatchesCurrentCard = (sm: { getEntries: () => unknown[] }): boolean => {
+		try {
+			const entries = sm.getEntries() as Array<Record<string, unknown>>;
+			for (let i = entries.length - 1; i >= 0; i--) {
+				const entry = entries[i];
+				if (entry.type !== "custom" || entry.customType !== "rp-card") continue;
+				const bound = entry.data && typeof entry.data === "object" ? (entry.data as { card?: string }).card : undefined;
+				return !bound || bound === config.card;
+			}
+		} catch { /* no binding */ }
+		return true;
+	};
+
 	/** 面板快照写入会话树（同 snapshotState）：面板随剧情分支走，rewind 后地图同步回退 */
 	const snapshotPanels = () => {
 		try {
@@ -368,8 +473,10 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	};
 
 	/** 同 syncPanelsFromDisk：世界状态经助手/面板编辑后，剧情侧须从盘对齐 */
-	const syncStateFromDisk = () => {
+	const syncStateFromDisk = (force = false) => {
 		if (!stateFile) return;
+		// 普通 context 只信当前分支快照；只有 REST/助手明确写盘后才收编磁盘状态。
+		if (!force) return;
 		try {
 			const disk = { ...defaultState(), ...loadState(stateFile) };
 			if (JSON.stringify(disk) !== JSON.stringify(state)) {
@@ -383,7 +490,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 
 	// 供 server importPanels / applyStatePatch 直调（不经 slash 命令桥）
 	registerStoryPanelSync(syncPanelsFromDisk);
-	registerStoryStateSync(syncStateFromDisk);
+	registerStoryStateSync(() => syncStateFromDisk(true));
 
 	/** 从当前剧情分支上最近的面板快照恢复；无快照返回 false */
 	const restorePanelsFromBranch = (sm: { getBranch: (fromId?: string) => unknown[] }): boolean => {
@@ -463,9 +570,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			},
 			{ apiKey, headers, signal, maxTokens },
 		);
-		if (response.stopReason === "error") {
-			throw new Error(response.errorMessage || "side model error");
-		}
+		if (response.stopReason === "error") throw new Error(response.errorMessage || "side model error");
 		const text = response.content
 			.filter((c): c is { type: "text"; text: string } => c.type === "text")
 			.map((c) => c.text)
@@ -593,7 +698,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			parameters: Type.Object({
 				query: Type.String({ description: "Keywords in the lorebook's own language" }),
 			}),
-			async execute(_id, params) {
+			async execute(_id, params, _signal, _onUpdate, toolCtx) {
 				const hits = searchEntries(allEntries(), params.query, 3);
 				if (hits.length === 0) {
 					return { content: [{ type: "text", text: "No matching lore entries. The detail is unwritten — invent it consistently with established facts, then record important inventions via world_state_update (plot_threads or flags)." }] };
@@ -615,44 +720,51 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			},
 		});
 
-		// 索引→检索闭环：【登场名录】/【设定集索引】告诉模型「存在什么」,这个工具负责「取细节」。
-		// 检索范围 = 剧情库(滚动摘要 + 压缩归档的早期正文) + 额外库(导入资料)。
 		pi.registerTool({
-			name: "memory_search",
-			label: "检索剧情记忆",
-			description:
-				"Search archived story memory (early narrative compressed out of context, rolling summaries, imported documents) by keyword or question. Call BEFORE re-introducing a character/item/plot thread listed in 【登场名录】 whose details you no longer have — do not invent facts about things that were established earlier. Query in the story's language.",
+			name: "mvu_get",
+			label: "查看 MVU 变量",
+			description: "Read the current MVU-compatible variable tree. Use when a card's custom stats or status UI depends on exact values.",
+			parameters: Type.Object({}),
+			async execute() {
+				return { content: [{ type: "text", text: formatMvuData(mvu) }] };
+			},
+		});
+
+		pi.registerTool({
+			name: "mvu_patch",
+			label: "更新 MVU 变量",
+			description: "Apply deterministic updates to card variables. Operations: replace, insert, remove, delta, move. Prefer this when exact numeric/state changes must persist.",
 			parameters: Type.Object({
-				query: Type.String({ description: "Keywords or a short question about past events" }),
+				operations: Type.Array(Type.Object({
+					op: Type.Union([Type.Literal("replace"), Type.Literal("insert"), Type.Literal("remove"), Type.Literal("delta"), Type.Literal("move")]),
+					path: Type.Optional(Type.String()),
+					from: Type.Optional(Type.String()),
+					to: Type.Optional(Type.String()),
+					value: Type.Optional(Type.Any()),
+				}), { maxItems: 100 }),
 			}),
-			async execute(_id, params, _signal, _onUpdate, ctx) {
-				const scope = {
-					sessionId:
-						typeof ctx.sessionManager?.getSessionId === "function" ? ctx.sessionManager.getSessionId() : "_default",
-					card: config.card || undefined,
+			async execute(_id, params, _signal, _onUpdate, toolCtx) {
+				const result = stateService
+					? await stateService.patchMvu(params.operations, { source: "roleplay-tool", turn: turnGeneration })
+					: applyMvuOperations(mvu, params.operations);
+				mvu = result.data;
+				return {
+					content: [{ type: "text", text: `已更新 ${result.applied.length} 项。${result.warnings.length ? `警告：${result.warnings.join("；")}` : ""}\n${formatMvuData(mvu)}` }],
+					...(result.applied.length === 0 && result.warnings.length ? { isError: true } : {}),
 				};
-				const [narrative, external] = await Promise.all([
-					memorySearch(appCwd, scope, "narrative", params.query).catch(() => []),
-					memorySearch(appCwd, scope, "external", params.query).catch(() => []),
-				]);
-				const hits = [...narrative, ...external].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 6);
-				if (hits.length === 0) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: "记忆库无命中（可能未启用向量记忆，或该内容未被归档）。不要臆造当年的具体细节——正文里模糊化处理（角色可以「记不太清」），或沿用【世界状态】【登场名录】里已有的事实。",
-							},
-						],
-					};
-				}
-				const text = hits
-					.map((h, i) => {
-						const tag = h.meta?.title || h.meta?.fileName || h.meta?.source || "记忆";
-						return `${i + 1}. 〔${tag}〕${h.text}`;
-					})
-					.join("\n\n");
-				return { content: [{ type: "text", text }], details: { count: hits.length } };
+			},
+		});
+
+		pi.registerTool({
+			name: "status_submit",
+			label: "提交状态栏",
+			description: "Legacy compatibility tool. Status UI is generated by the Harness from World State and MVU after the turn; do not call this tool during normal RP.",
+			parameters: Type.Object({ status: Type.String({ description: "Complete raw status markup only, including required opening/closing tags" }) }),
+			async execute(_id, params, _signal, _onUpdate, toolCtx) {
+				return {
+					content: [{ type: "text", text: "状态栏由 Harness 根据 World State/MVU 自动生成；本次兼容调用不需要提交文本。" }],
+					terminate: true,
+				};
 			},
 		});
 
@@ -660,7 +772,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			name: "lorebook_write",
 			label: "写入补充设定集",
 			description:
-				"Record world canon the user explicitly asked to keep (a setting/rule/character profile) into the supplementary lorebook, so it persists across sessions and becomes searchable. Call ONLY when the user asks to record/save a setting — never on your own initiative, and never ask the user 'shall I write this'. Use for worldbuilding facts only — plot progress belongs to world_state_update. Never duplicates: identical content is rejected.",
+				"Record a NEW piece of world canon (a setting/rule/character profile you invented or agreed on with the user) into the supplementary lorebook, so it persists across sessions and becomes searchable. Use for worldbuilding facts only — plot progress belongs to world_state_update. Never duplicates: identical content is rejected.",
 			parameters: Type.Object({
 				title: Type.String({ description: "Short entry title, e.g. '北境骨誓风俗'" }),
 				keys: Type.Array(Type.String(), {
@@ -800,7 +912,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			name: "codex_write",
 			label: "写入知识库",
 			description:
-				"Record a piece of knowledge into a MOUNTED codex so it persists across ALL conversations that mount it. Call ONLY when the user asks to record/save something — never on your own initiative, and never ask the user about it. Card-specific canon belongs to lorebook_write instead. Never duplicates: identical content is rejected.",
+				"Record a piece of knowledge into a MOUNTED codex so it persists across ALL conversations that mount it. Use PROACTIVELY when the story produces novel knowledge/items/beings/places worth keeping beyond this story — and when the user asks to record something. Card-specific canon belongs to lorebook_write instead. Never duplicates: identical content is rejected.",
 			parameters: Type.Object({
 				codex: Type.String({ description: "Mounted codex name to write into" }),
 				title: Type.String({ description: "Short entry title, e.g. '赤髓·蚀骨兰'" }),
@@ -850,6 +962,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			description:
 				"Record persistent changes to the world state. Call IMMEDIATELY when: time/location changes, items gained/lost, injuries/recovery, affinity or relationship shifts, promises made, new plot threads opened or resolved. Semantics: time/location = replace; characters/flags = per-key merge (null deletes); inventory/plot_threads = pass the COMPLETE new array (full replace).",
 			parameters: Type.Object({
+				action: Type.Optional(Type.String({ description: "本轮动作及耗时理由，例如‘往返车厢尽头使用卫生间’" })),
+				durationMin: Type.Optional(Type.Number({ description: "预计最短耗时（分钟）" })),
+				durationMax: Type.Optional(Type.Number({ description: "预计最长耗时（分钟）" })),
 				time: Type.Optional(Type.String({ description: "In-story time, e.g. '第二天清晨'" })),
 				location: Type.Optional(Type.String()),
 				characters: Type.Optional(
@@ -872,17 +987,33 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				flags: Type.Optional(Type.Record(Type.String(), Type.Union([Type.String(), Type.Null()]))),
 				plot_threads: Type.Optional(Type.Array(Type.String(), { description: "COMPLETE list of open plot threads" })),
 			}),
-			async execute(_id, params) {
+			async execute(_id, params, _signal, _onUpdate, toolCtx) {
 				const knownNames = [
 					...(card ? [card.name] : []),
 					config.userName,
 					...Object.keys(state.characters),
 				];
-				const patch = canonicalizeCharacterKeys(params as Record<string, unknown>, knownNames);
-				const result = applyPatch(state, patch);
-				state = result.state;
-				if (stateFile) saveState(stateFile, state);
-				snapshotState();
+			const patch = canonicalizeCharacterKeys(params as Record<string, unknown>, knownNames);
+			const gateUserText = (() => {
+				const branch = toolCtx.sessionManager.getBranch() as Array<Record<string, unknown>>;
+				for (let i = branch.length - 1; i >= 0; i--) {
+					const message = branch[i]?.message as { role?: string; content?: unknown } | undefined;
+					if (message?.role === "user") return extractText(message);
+				}
+				return "";
+			})();
+			const timeGate = gateTimePatch(gateUserText, state.time, patch.time, params as { action?: unknown; durationMin?: unknown; durationMax?: unknown });
+			delete patch.action;
+			delete patch.durationMin;
+			delete patch.durationMax;
+			if (!timeGate.allowed) {
+				delete patch.time;
+				return { content: [{ type: "text", text: `⚠ ${timeGate.reason}\n时间保持不变；如果确实要推进时间，请在用户输入或正文中明确说明经过了多久。` }], details: { state, timeRejected: true } };
+			}
+			const result = stateService
+				? await stateService.patchWorldState(patch, { source: "roleplay-tool", turn: turnGeneration })
+				: applyPatch(state, patch);
+			state = result.state;
 				const lines = [...result.applied.map((a) => `✓ ${a}`), ...result.warnings.map((w) => `⚠ ${w}`)];
 				return {
 					content: [{ type: "text", text: lines.length ? lines.join("\n") : "（无变更）" }],
@@ -1231,7 +1362,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			name: ASK_TOOL,
 			label: "请用户定夺",
 			description:
-				"IN-STORY co-creation gate (not OOC assistant chat). Pause narrative and show a choice card so the user picks the next beat. MUST call FIRST when: (1) user seeks direction — 该做什么/怎么办/怎么走/下一步/给选项, even inside IC prose; (2) user asks to generate/define identity or persona — 生成身份/开始生成身份/建档/捏角色/人设 — do NOT write a full identity dossier yourself, split key choices into options; (3) scene has 2+ clear forks that change the next turns; (4) new important character, major irreversible plot turn, or locking world-canon. Do NOT write option lists in narrative prose — only this tool shows clickable cards. Provide 2-4 concrete IC options in the story language; user may type custom or stop. After answer, continue as the character/world, never as a system assistant. Skip only pure atmosphere with no real fork. Do NOT use this tool to ask whether to save/write something into the lorebook or knowledge database — those writes execute directly when the user requests them (lorebook_write / codex_write), never through this choice card.",
+				"IN-STORY co-creation gate (not OOC assistant chat). Pause narrative and show a choice card so the user picks the next beat. MUST call FIRST when: (1) user seeks direction — 该做什么/怎么办/怎么走/下一步/给选项, even inside IC prose; (2) user asks to generate/define identity or persona — 生成身份/开始生成身份/建档/捏角色/人设 — do NOT write a full identity dossier yourself, split key choices into options; (3) scene has 2+ clear forks that change the next turns; (4) new important character, major irreversible plot turn, or locking world-canon. Do NOT write option lists in narrative prose — only this tool shows clickable cards. Provide 2-4 concrete IC options in the story language; user may type custom or stop. After answer, continue as the character/world, never as a system assistant. Skip only pure atmosphere with no real fork.",
 			parameters: Type.Object({
 				question: Type.String({
 					description: "Question on the choice card, in story language, e.g. '御书房里文舒婉请试墨——你想这一步怎么走？'",
@@ -1273,6 +1404,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	// ---------- 会话生命周期 ----------
 
 	pi.on("session_start", async (event, ctx) => {
+		branchGeneration += 1;
 		if (process.env.RP_DEBUG) console.error(`[rp-debug] session_start fired（v-f1）`);
 		try {
 			const configPath = resolveConfigPath(ctx.cwd);
@@ -1302,7 +1434,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			const fileEntries = mergeEntries(...fileGroups);
 			overlayFile = overlayPathFor(ctx.cwd, card.name);
 			const overlayEntries = existsSync(overlayFile) ? loadLorebookFile(overlayFile) : [];
-			entries = applyDisabledLore(mergeEntries(fileEntries, overlayEntries), config.disabledLore);
+			entries = applyLoreOverrides(mergeEntries(fileEntries, overlayEntries), config.disabledLore, config.enabledLore);
 
 			// 转换后的预设（可选）：system 块进 system prompt，postHistory 块进末端注入
 			// 工作草稿（preset-override.json）优先，与 hotReload 一致
@@ -1323,16 +1455,78 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			}
 
 			stateFile = join(dir(ctx.cwd, "state"), `${ctx.sessionManager.getSessionId()}.json`);
-			state = loadState(stateFile);
+			const restoredState = restoreStateFromBranch(ctx.sessionManager);
+			state = restoredState ? state : loadState(stateFile);
+			if (!state.time) {
+				const cardText = `${card?.firstMes ?? ""}\n${card?.scenario ?? ""}`;
+				const initialClock = extractClockTime(cardText);
+				if (initialClock) {
+					state = { ...state, time: initialClock };
+					saveState(stateFile, state);
+					snapshotState();
+				}
+			}
 			// fork 出的新会话文件没有状态缓存：从复制过来的剧情分支快照恢复
-			if (JSON.stringify(state) === JSON.stringify(defaultState()) && restoreStateFromBranch(ctx.sessionManager)) {
+			if (!restoredState && JSON.stringify(state) === JSON.stringify(defaultState())) {
 				saveState(stateFile, state);
 			}
+			mvuFile = join(dir(ctx.cwd, "mvu"), `${ctx.sessionManager.getSessionId()}.json`);
+			stateService = new SessionStateService({
+				stateFile,
+				mvuFile,
+				knownCharacterNames: () => [card?.name ?? "", config.userName, ...Object.keys(state.characters)].filter(Boolean),
+				snapshotState,
+				snapshotMvu,
+			});
+			const restoredMvu = restoreMvuFromBranch(ctx.sessionManager);
+			mvu = restoredMvu ? mvu : loadMvuData(mvuFile);
+			if (!restoredMvu && Object.keys(mvu).length === 0 && sessionMatchesCurrentCard(ctx.sessionManager)) {
+				mvu = initialMvuFromCard();
+				if (Object.keys(mvu).length) snapshotMvu();
+			}
+			if (Object.keys(mvu).length) saveMvuData(mvuFile, mvu);
+			try {
+				const manifestCardPath = resolvePath(ctx.cwd, config.card);
+				const rawCard = readCardRawJson(manifestCardPath).raw;
+				const manifestFile = cardManifestFile(ctx.cwd, config.card);
+				const cachedManifest = loadCardManifest(manifestFile);
+				cardManifest = manifestMatchesCard(cachedManifest, rawCard, config.card) ? cachedManifest : buildCardManifest({ raw: rawCard, card, cardPath: config.card, lore: entries, initialMvu: initialMvuFromCard(), userName: config.userName });
+				cardManifest = syncCardManifestCharacters(cardManifest, { card, lore: entries, userName: config.userName });
+				saveCardManifest(manifestFile, cardManifest);
+				if (process.env.RP_DEBUG) console.error(`[rp-manifest] saved ${manifestFile} characters=${cardManifest.characters.length} mvu=${cardManifest.capabilities.mvu} regex=${cardManifest.capabilities.displayRegex}`);
+			} catch (error) {
+				if (process.env.RP_DEBUG) console.error(`[rp-manifest] skipped: ${error instanceof Error ? error.message : String(error)}`);
+			}
+			statusFile = join(dir(ctx.cwd, "status"), `${ctx.sessionManager.getSessionId()}.json`);
+			const restoredStatus = restoreValidatedStatusFromBranch(ctx.sessionManager);
+			validatedStatus = restoredStatus ? validatedStatus : loadValidatedStatus(statusFile);
+			if (restoredStatus && validatedStatus) saveValidatedStatus(statusFile, validatedStatus);
 			// 面板同款装载：缓存缺失（fork/新拉起）时从剧情分支快照恢复
 			panelsFile = join(dir(ctx.cwd, "artifacts"), `${ctx.sessionManager.getSessionId()}.json`);
 			panels = loadPanels(panelsFile);
 			if (Object.keys(panels).length === 0 && restorePanelsFromBranch(ctx.sessionManager)) {
 				savePanels(panelsFile, panels);
+			}
+			if (event.reason === "fork" && event.previousSessionFile && existsSync(event.previousSessionFile)) {
+				try {
+					const firstLine = readFileSync(event.previousSessionFile, "utf8").split(/\r?\n/, 1)[0];
+					const parentId = firstLine ? (JSON.parse(firstLine) as { id?: string }).id : undefined;
+					const branchIds = (ctx.sessionManager.getBranch() as Array<{ id?: string }>)
+						.map((entry) => entry.id)
+						.filter((id): id is string => !!id);
+					if (parentId) await inheritMemoryScope(
+						ctx.cwd,
+						{ sessionId: parentId, card: config.card || undefined },
+						{
+							sessionId: ctx.sessionManager.getSessionId(),
+							card: config.card || undefined,
+							leafId: ctx.sessionManager.getLeafId() ?? undefined,
+							branchEntryIds: branchIds,
+						},
+					);
+				} catch (err) {
+					console.warn("[memory] fork inherit failed", err);
+				}
 			}
 			// 知识库挂载恢复：挂载关系只存会话树（无磁盘缓存），从剧情分支快照恢复
 			mountedCodexes = [];
@@ -1411,6 +1605,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			if (process.env.RP_DEBUG) {
 				console.error(`[rp-debug] session_start 装载失败：`, err);
 			}
+			systemPromptStory = `你在进行角色扮演，但素材装载失败（${err instanceof Error ? err.message : String(err)}）。请向用户说明该错误。`;
+			systemPromptOps = systemPromptStory;
 			notify(ctx, `RP 素材装载失败：${err instanceof Error ? err.message : String(err)}`, "error");
 		}
 	});
@@ -1434,9 +1630,6 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	/** system 块求值后的变量表快照：postHistory 每轮求值时以此为初值（前块 setvar、后块 getvar） */
 	let presetVarSnapshot = new Map<string, string>();
 
-	/** system 块按序求值后的文本（新流水线装配时取用；旧 buildSystemPrompt 已删） */
-	let presetSystemBlocksEvaled: Array<{ content: string }> = [];
-
 	/** postHistory 块每轮求值：变量继承 system 块，lastusermessage 用本轮原文；全空块过滤 */
 	const evalPostHistoryBlocks = (userText: string) => {
 		if (!preset || !card) return undefined;
@@ -1449,16 +1642,19 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		return out.filter((b) => b.content.trim().length > 0);
 	};
 
-	/**
-	 * 预设宏求值 + 变量表快照。
-	 *
-	 * 原先还负责拼两套 system prompt（buildSystemPrompt）——那部分随 director.ts
-	 * 整体删除（harness 重做 2026-08-02）。这里只保留预设侧能力：按序求值 system 块、
-	 * 留下 setvar 变量表、预演 postHistory 的宏支持度告警。
-	 */
-	const rebuildSystemPrompts = (_cwd: string) => {
+	/** 重装剧情/非剧情两套 system（预设 system 块只进 story） */
+	const rebuildSystemPrompts = (cwd: string) => {
 		if (!card) return;
 		refreshDisplayTagExtras();
+		const base = {
+			card,
+			config,
+			constantLore: constantEntries(entries),
+			skills: listSkills(cwd),
+			mcpIndex: mcpIndexCache,
+			statusBarFormats,
+		};
+		systemPromptOps = buildSystemPrompt({ ...base, presetSystemBlocks: undefined });
 		// 预设宏求值：system 块按序求值并留下变量表；顺带预演 postHistory 汇总清单外宏（显式降级告警）
 		const macroEnv = createMacroEnv({ charName: card.name, userName: config.userName });
 		const unsupported = new Set<string>();
@@ -1481,49 +1677,526 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			);
 		}
 		const nonEmptySystemBlocks = evaledSystemBlocks.filter((b) => b.content.trim().length > 0);
-		// 求值后的 system 块留给新流水线取用（旧的 buildSystemPrompt 装配已删）
-		presetSystemBlocksEvaled = nonEmptySystemBlocks;
+		systemPromptStory = buildSystemPrompt({
+			...base,
+			presetSystemBlocks: nonEmptySystemBlocks.length > 0 ? nonEmptySystemBlocks : undefined,
+			presetActive: presetHasEnabledBlocks(),
+		});
 	};
 
-	// ============================================================
-	// harness 生成流程已整体移除（2026-08-02 重做）：
-	//   before_agent_start / context / before_provider_request /
-	//   agent_end×2（场记记账·固定楼层压缩）/ session_before_compact
-	// 新的固定流水线将在此处重建。
-	// ============================================================
+	pi.on("before_agent_start", async (event, ctx) => {
+		// 助手/REST 可能已改磁盘；进剧情回合前先对齐，避免回档
+		if (rpMode) {
+			syncPanelsFromDisk();
+			syncStateFromDisk();
+		}
+		if (!rpMode) return undefined;
+		// 一轮的账本/状态栏必须在下一轮开始前落位；否则下一轮会递增 turn
+		// generation，把上一轮仍在途的状态栏结果当成过期结果丢掉。
+		await Promise.allSettled([statusRecoveryQueue, scribeQueue]);
+		turnGeneration += 1;
+		const generation = branchGeneration;
+		const turn = turnGeneration;
+		preflightAdvice = null;
+		sceneStateAdvice = null;
+		// 预设只服务剧情生成：按本轮用户原文判定，整段 agent 循环（含 tool 轮）沿用
+		const prompt = typeof event?.prompt === "string" ? event.prompt : "";
+		const preflightId = `${ctx.sessionManager.getSessionId()}::${ctx.sessionManager.getLeafId() ?? "root"}::${prompt}`;
+		if (config.multiAgentPreflight === true && prompt.trim() && !isBackstageText(prompt) && preflightId !== preflightKey) {
+			preflightKey = preflightId;
+			preflightAdvice = null;
+			try {
+				if (process.env.RP_DEBUG) console.error(`[rp-preflight] start session=${ctx.sessionManager.getSessionId().slice(0, 12)} prompt=${prompt.slice(0, 80)}`);
+				const current = `用户输入：${prompt}\n\n世界状态：${formatState(state)}\n\nMVU：${formatMvuData(mvu).slice(0, 12000)}`;
+				const roster = cardManifest ? manifestAgentCharacters(cardManifest, prompt) : coreCharacterNames(card ?? ({ name: "" } as CharacterCard), allEntries(), { userName: config.userName, sceneText: prompt });
+				const turnPlan = buildTurnPlan(prompt, roster, false);
+				const scenePrompt = buildSceneStatePrompt({ text: prompt, characterNames: roster, worldState: formatState(state), characterProfiles: characterLoreProfiles(allEntries(), roster) });
+				const sceneOutput = await sideComplete(ctx, scenePrompt.systemPrompt, scenePrompt.userText, 700);
+				const sceneAdvice = sceneOutput ? parseSceneStateAdvice(sceneOutput) : null;
+				if (!isCurrentTurn(turn, generation)) return undefined;
+				sceneStateAdvice = sceneAdvice ? formatSceneStateAdvice(sceneAdvice, roster) : null;
+				const proposals = await Promise.all(roster.map(async (name) => {
+					const intent = buildCharacterIntentPrompt({ name, profile: characterLoreProfiles(allEntries(), [name])[name], turnPlan: formatTurnPlan(turnPlan) });
+					return {
+						name,
+						proposal: await sideComplete(ctx, intent.systemPrompt, `${current}\n\n${intent.userText}`, 900),
+					};
+				}));
+				const proposalText = proposals.map((item) => `角色 ${item.name}：${item.proposal ?? "无"}`).join("\n");
+				const director = await sideComplete(ctx, "你是剧情导演。只输出 JSON：{\"focus\":\"\",\"characterIntents\":[],\"constraints\":[],\"avoid\":[]}。整合多个角色提案为隐藏创作指导，不写正文。", `${current}\n\n角色提案：\n${proposalText}`, 1400);
+				const fallbackProposal = proposals.map((item) => `${item.name}：${item.proposal ?? ""}`).filter(Boolean).join("\n");
+				const parsed = parsePreflightAdvice(director || fallbackProposal);
+				if (generation !== branchGeneration) return undefined;
+				preflightAdvice = parsed ? formatPreflightAdvice(hardenPreflightAdvice(parsed, `${formatState(state)}\n\n${sceneStateAdvice ?? ""}\n\n编排计划：${formatTurnPlan(turnPlan)}`)) : null;
+				if (process.env.RP_DEBUG) console.error(`[rp-preflight] ${preflightAdvice ? `ready (${preflightAdvice.length} chars)` : "empty; normal story path"}`);
+			} catch (error) {
+				if (process.env.RP_DEBUG) console.error(`[rp-preflight] 跳过：${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+		applyStoryPresetThisTurn = shouldApplyStoryPreset(prompt);
+		const sp = applyStoryPresetThisTurn ? systemPromptStory : systemPromptOps;
+		if (!sp) return undefined;
+		return { systemPrompt: sp };
+	});
 
+	// 每轮 LLM 调用前：D9 减法裁剪 → 清理助手历史文本 → 末端注入世界状态与触发设定
+	pi.on("context", async (event, ctx) => {
+		if (!rpMode || !card) return undefined;
 
-	/** 取本拍最后一条用户原文（写入门禁判定用）。从会话 entries 倒序找第一条 user 消息。 */
-	const lastUserText = (ctx: { sessionManager?: { getEntries?: () => Array<Record<string, unknown>> } }): string => {
-		const entries = ctx.sessionManager?.getEntries?.() ?? [];
-		for (let i = entries.length - 1; i >= 0; i--) {
-			const e = entries[i];
-			if (e.type === "message") {
-				const msg = e.message as { role?: string; content?: unknown } | undefined;
-				if (msg?.role === "user") {
-					if (typeof msg.content === "string") return msg.content;
-					if (Array.isArray(msg.content)) {
-						const texts = (msg.content as Array<{ type?: string; text?: string }>)
-							.filter((b) => b?.type === "text")
-							.map((b) => b.text ?? "");
-						return texts.join("");
+		// 工具轮之间也会再进 context：助手在本轮 assistant_run 里改的面板/账本必须立刻可见
+		syncPanelsFromDisk();
+		syncStateFromDisk();
+
+		// 世界书中文别名懒初始化（首次会话一次旁侧调用，此后走磁盘缓存）
+		await ensureAliases(ctx);
+
+		// D9：裁剪已闭合轮次的工具残渣与思考块（只影响本次 LLM 调用，会话文件完整保留）
+		const pruned = pruneClosedTurns(event.messages as Array<Record<string, unknown>>);
+		const messages = pruned.messages;
+		if (process.env.RP_DEBUG && pruned.stats.charsBefore > 0) {
+			console.error(`[rp-prune] ${formatPruneStats(pruned.stats)}`);
+		}
+
+		// 用户手改的角色回复：custom → assistant，避免 convertToLlm 把它当成 user
+		for (let i = 0; i < messages.length; i++) {
+			const m = messages[i] as Record<string, unknown>;
+			if (m.role === "custom" && m.customType === "rp-edited-reply") {
+				const raw = m.content;
+				const content = typeof raw === "string" ? [{ type: "text", text: raw }] : raw;
+				messages[i] = {
+					role: "assistant",
+					content,
+					api: "openai-completions",
+					provider: "edited",
+					model: "edited",
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+					stopReason: "stop",
+					timestamp: typeof m.timestamp === "number" ? m.timestamp : Date.now(),
+				};
+			}
+		}
+
+		for (const m of messages) {
+			if (m.role === "assistant" && Array.isArray(m.content)) {
+				for (const part of m.content as Array<Record<string, unknown>>) {
+					if (part.type === "text" && typeof part.text === "string") {
+						part.text = cleanAssistantText(part.text);
 					}
-					return "";
 				}
 			}
 		}
-		return "";
-	};
+
+		const windowText = messages
+			.filter((m) => m.role === "user" || m.role === "assistant" || m.role === "custom")
+			.slice(-config.scanDepth)
+			.map(extractText)
+			.join("\n");
+		const activated = scanEntries(allEntries(), windowText, config.maxLoreInjections);
+
+		// 语言自愈：上一条**台上**叙事文本（助手正文，首轮回退到开场白）语言与配置不符时注入显式纠正。
+		// 首轮盲区实证（smoke 多次复现）：英文开场白锚定第一轮输出英文，必须把开场白纳入检测源。
+		// 幕后轮的助手回复不是叙事，不作为检测源（英文命令输出会误报）。
+		const lastNarrative = (() => {
+			let inBackstageTurn = false;
+			let found: unknown;
+			for (const m of messages) {
+				if (m.role === "user") {
+					inBackstageTurn = isBackstageText(extractText(m));
+				} else if (
+					(m.role === "assistant" || (m.role === "custom" && (m as { customType?: string }).customType === "rp-greeting")) &&
+					!inBackstageTurn
+				) {
+					found = m;
+				}
+			}
+			return found;
+		})();
+		const languageMismatch = lastNarrative
+			? detectsLanguageMismatch(extractText(lastNarrative), config.language)
+			: false;
+
+		// 本轮用户原文（求方向检测用）。场外标记消息已在 server 层改道助手会话，
+		// 正常不会出现在这里；旧会话续接时若最后一条恰是遗留戏外轮，不做求方向升格即可。
+		const lastUser = [...messages].reverse().find((m) => m.role === "user");
+		const lastUserText = lastUser ? extractText(lastUser) : "";
+		const legacyBackstage = !!lastUserText && isBackstageText(lastUserText);
+		const sessionId =
+			typeof ctx.sessionManager?.getSessionId === "function"
+				? ctx.sessionManager.getSessionId()
+				: "_default";
+		const branch = typeof ctx.sessionManager?.getBranch === "function"
+			? (ctx.sessionManager.getBranch() as Array<{ id?: string }>)
+			: [];
+		const memoryScope = {
+			sessionId,
+			card: config.card || undefined,
+			leafId: typeof ctx.sessionManager?.getLeafId === "function" ? ctx.sessionManager.getLeafId() ?? undefined : undefined,
+			branchEntryIds: branch.map((entry) => entry.id).filter((id): id is string => !!id),
+		};
+		let memoryIndex: string | undefined;
+		try {
+			memoryIndex = (await formatMemoryIndex(appCwd, memoryScope, legacyBackstage ? "" : lastUserText)) ?? undefined;
+		} catch (e) {
+			console.warn("[memory] index failed", e);
+		}
+
+		// 向量记忆：仅检索「当前角色卡 + 当前对话」的库，注入【剧情记忆】（失败则跳过，不挡剧情）
+		let memoryHits: Array<{ text: string; score?: number; source?: string }> | undefined;
+		if (!legacyBackstage && lastUserText.trim().length >= 2) {
+			try {
+				const hits = await memoryRecallForTurn(
+					appCwd,
+					memoryScope,
+					lastUserText,
+				);
+				if (hits.length) {
+					memoryHits = hits.map((h) => ({
+						text: h.text.slice(0, 500),
+						score: h.score,
+						source: h.meta.title || h.meta.fileName || h.meta.source,
+					}));
+				}
+			} catch (e) {
+				console.warn("[memory] recall failed", e);
+			}
+		}
+
+		// 工具轮 context 复用 before_agent_start 的判定；若本轮尚未跑过 start（极少），再按 last user 估一次
+		const applyPreset = applyStoryPresetThisTurn;
+		// 工具续轮判定：最后一条是 toolResult ⇒ 本次请求是同一回合的继续。
+		// 续轮不得重注预设 postHistory / 「工具前短旁白」——否则每个工具回执后模板重现于末端，
+		// 模型当成新回合重新起笔 → 旁白→world_state_update→旁白 死循环（2026-07-24 实测）。
+		const isToolContinuation = messages.length > 0 && messages[messages.length - 1]?.role === "toolResult";
+		messages.push({
+			role: "custom",
+			customType: "rp-inject",
+			content: buildTurnInjection({
+				state,
+				activatedLore: activated,
+				card,
+				config,
+				languageMismatch,
+				applyStoryPreset: applyPreset,
+				// 剧情预设 postHistory（字数/思维链等）仅剧情回合首次请求注入；宏已求值
+				presetPostHistoryBlocks:
+					applyPreset && !isToolContinuation && preset
+						? evalPostHistoryBlocks(legacyBackstage ? "" : lastUserText)
+						: undefined,
+				toolContinuation: isToolContinuation,
+				presetActive: applyPreset && presetHasEnabledBlocks(),
+				// 全文快照（sync 之后）：用户手改后模型续写可见；超长截断仍可用 panel_read
+				panelIndex: formatPanelSnapshot(panels) ?? formatPanelIndex(panels) ?? undefined,
+				codexIndex: codexIndexCache ?? undefined,
+				uploadIndex: formatUploadIndex(listUploads(appCwd)) ?? undefined,
+				userText: legacyBackstage ? undefined : lastUserText,
+				memoryIndex,
+				memoryHits,
+				mvuSnapshot: Object.keys(mvu).length ? formatMvuData(mvu) : undefined,
+				preflightAdvice: preflightAdvice ?? undefined,
+				statusBarFormats,
+			}),
+			display: false,
+			timestamp: Date.now(),
+		});
+
+		return { messages };
+	});
+
+	// 预设采样参数：UI/预设常驻全套，发送时按渠道/模型投影（ST + Kimi 官方固定采样约束）。
+	// 自定义中转默认只发核心 4 键；kimi-k3/k2.5+ 等固定采样模型 profile=none 全剥。
+	pi.on("before_provider_request", async (event, ctx) => {
+		if (!rpMode || !preset || Object.keys(preset.samplers).length === 0) return undefined;
+		const payload = event.payload;
+		if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+		const model = ctx.model;
+		return applyProjectedSamplers(payload as Record<string, unknown>, preset.samplers, {
+			provider: model?.provider,
+			modelId: model?.id,
+			baseUrl: model?.baseUrl,
+			api: typeof model?.api === "string" ? model.api : undefined,
+		});
+	});
+
+	// 场记记账（每用户轮结束后一次旁侧调用；只写状态补丁，不做连续性/先斩后奏审查）
+	// 注意：不 await 长调用——agent_end 监听器会卡住 waitForIdle / 停止按钮收尾。
+	pi.on("agent_end", (event, ctx) => {
+		if (!rpMode || !card) return;
+		const generation = branchGeneration;
+		const turn = turnGeneration;
+		const msgs = event.messages as Array<{
+			role?: string;
+			content?: unknown;
+			customType?: string;
+			stopReason?: string;
+		}>;
+		// 用户强制停止的回合：不记账（半截正文、中止噪声）
+		const lastAsst = [...msgs].reverse().find((m) => m.role === "assistant");
+		if (lastAsst?.stopReason === "aborted") return;
+
+		let lastUserIdx = -1;
+		for (let i = msgs.length - 1; i >= 0; i--) {
+			if (msgs[i].role === "user") {
+				lastUserIdx = i;
+				break;
+			}
+		}
+		if (lastUserIdx === -1) return;
+		const userText = extractText(msgs[lastUserIdx]);
+		// 戏外轮不是剧情：不记账
+		if (isBackstageText(userText)) return;
+		const assistantText = msgs
+			.slice(lastUserIdx + 1)
+			.filter((m) => m.role === "assistant")
+			.map(extractText)
+			.filter(Boolean)
+			.join("\n");
+		if (!assistantText.trim()) return;
+		// 状态栏可能是数万字符的 HTML，不能把它原样喂给场记；否则旁路模型
+		// 容易被 UI 模板淹没而不返回账本 JSON。正文与状态栏是两条独立数据链。
+		const ledgerText = cleanAssistantText(assistantText).slice(0, 24000);
+		let resolveCurrentTurnScribe!: () => void;
+		const currentTurnScribeDone = new Promise<void>((resolve) => { resolveCurrentTurnScribe = resolve; });
+		const runStatusProjection = async () => {
+			await currentTurnScribeDone;
+			if (!isCurrentTurn(turn, generation)) return;
+			const harnessStatus = buildDeterministicStatusHtml({ state: formatState(state), mvu: formatMvuData(mvu), charName: card?.name ?? "角色" });
+			const result = validateStatusSubmission(harnessStatus, { rules: [], charName: card?.name ?? "", userName: config.userName }, { agentControlled: true });
+			if (!result.ok) return;
+			validatedStatus = result.status;
+			if (statusFile) saveValidatedStatus(statusFile, validatedStatus);
+			snapshotValidatedStatus();
+			if (process.env.RP_DEBUG) console.error(`[rp-status-recovery] harness projection saved stateTime=${state.time || "<empty>"}`);
+		};
+		statusRecoveryQueue = statusRecoveryQueue.then(runStatusProjection, runStatusProjection);
+		if (config.multiAgentPreflight === true && card) {
+			void (async () => {
+				try {
+					if (!isCurrentTurn(turn, generation)) return;
+					const roster = cardManifest ? manifestAgentCharacters(cardManifest, assistantText) : coreCharacterNames(card, allEntries(), { userName: config.userName, sceneText: assistantText });
+					const characterProfiles = characterLoreProfiles(allEntries(), roster);
+					if (process.env.RP_DEBUG) console.error(`[rp-character-state] start characters=${roster.join(",") || "none"}`);
+					const prompt = buildCharacterStatePrompt({ userText, narrative: assistantText, currentMvu: formatMvuData(mvu), characterNames: roster, characterProfiles });
+					let output = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1400);
+					let operations = output ? parseCharacterStateAgent(output) : null;
+					if (!operations) {
+						output = await sideComplete(
+							ctx,
+							`${prompt.systemPrompt}\n必须输出完整且有效的一行 JSON；没有变化时输出 {"operations":[]}。不要输出任何解释。`,
+							prompt.userText,
+							700,
+						);
+						operations = output ? parseCharacterStateAgent(output) : null;
+					}
+					if (operations?.length && isCurrentTurn(turn, generation)) {
+						// 卡片没有 MVU 初始树时，角色状态 Agent 的 replace 也应能创建对象字段。
+						const stateOperations = operations.map((operation) =>
+							operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
+						);
+						const applied = stateService
+							? await stateService.patchMvu(stateOperations, { source: "side-agent", turn })
+							: applyMvuOperations(mvu, stateOperations, { atomic: true });
+						mvu = applied.data;
+						if (applied.applied.length) {
+							mvu = applied.data;
+						}
+						if (process.env.RP_DEBUG) console.error(`[rp-character-state] applied=${applied.applied.length} warnings=${applied.warnings.length}${applied.warnings.length ? ` details=${applied.warnings.join(" | ")}` : ""}`);
+					} else {
+						if (output?.trim() === '{"operations":[]}' || output?.trim() === "{\"operations\":[]}") {
+							if (process.env.RP_DEBUG) console.error("[rp-character-state] no changes");
+						} else if (process.env.RP_DEBUG) console.error(`[rp-character-state] empty/unparseable output raw=${(output ?? "<empty>").slice(0, 500).replace(/\s+/g, " ")}`);
+					}
+					const continuityPrompt = buildCharacterContinuityPrompt({ userText, narrative: assistantText, currentMvu: formatMvuData(mvu), characterNames: roster, characterProfiles });
+					const continuityOutput = await sideComplete(ctx, continuityPrompt.systemPrompt, continuityPrompt.userText, 1100);
+					const continuityOperations = continuityOutput ? parseCharacterContinuityAgent(continuityOutput) : null;
+					if (continuityOperations?.length && isCurrentTurn(turn, generation)) {
+						const continuityApplied = stateService
+							? await stateService.patchMvu(continuityOperations.map((operation) =>
+								operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
+							), { source: "side-agent", turn })
+							: applyMvuOperations(mvu, continuityOperations.map((operation) =>
+							operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
+						), { atomic: true });
+						mvu = continuityApplied.data;
+						if (continuityApplied.applied.length) {
+							mvu = continuityApplied.data;
+						}
+						if (process.env.RP_DEBUG) console.error(`[rp-character-continuity] applied=${continuityApplied.applied.length} warnings=${continuityApplied.warnings.length}`);
+					}
+				} catch (error) {
+					if (process.env.RP_DEBUG) console.error(`[rp-character-state] skipped: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			})();
+		}
+		const mvuOperations = parseMvuUpdates(assistantText);
+		if (mvuOperations.length && isCurrentTurn(turn, generation)) {
+			const applied = stateService
+				? await stateService.patchMvu(mvuOperations, { source: "mvu-parser", turn })
+				: applyMvuOperations(mvu, mvuOperations);
+			mvu = applied.data;
+			if (applied.applied.length) {
+				mvu = applied.data;
+			}
+			if (process.env.RP_DEBUG && applied.warnings.length) console.error(`[rp-mvu] ${applied.warnings.join("；")}`);
+		}
+
+		scribePending += 1;
+		scribeBusy = true;
+		const runScribe = async () => {
+			try {
+				// 场记只绑定世界线，不绑定回合：上一轮慢一点也必须完成记账。
+				if (!isCurrentGeneration(generation)) return;
+				if (process.env.RP_DEBUG) console.error(`[rp-scribe] start turn=${turn}`);
+				const prompt = buildScribeTurnPrompt({
+					state,
+					userText,
+					assistantText: ledgerText,
+					charName: card.name,
+					userName: config.userName,
+				});
+				// 只抽 patch，输出短，token 上限收紧
+				let text = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1024);
+				let result = text ? parseScribeResult(text) : null;
+				for (let retryNo = 1; !result && retryNo <= 2 && isCurrentGeneration(generation); retryNo++) {
+					const retry = buildScribeRetryPrompt({ state, userText, assistantText: ledgerText, charName: card.name, userName: config.userName });
+					text = await sideComplete(ctx, retry.systemPrompt, `${retry.userText}\n重试编号：${retryNo}`, 700);
+					result = text ? parseScribeResult(text) : null;
+					if (process.env.RP_DEBUG) console.error(`[rp-scribe] retry=${retryNo} parsed=${!!result} raw=${(text ?? "<empty>").slice(0, 180).replace(/\s+/g, " ")}`);
+				}
+				if (!result) {
+					const fallbackPatch = extractDeterministicLedgerPatch(ledgerText);
+					if (Object.keys(fallbackPatch).length === 0) {
+						if (process.env.RP_DEBUG) console.error(`[rp-scribe] 输出不可解析且无确定性字段，跳过 raw=${(text ?? "<empty>").slice(0, 300).replace(/\s+/g, " ")}`);
+						return;
+					}
+					result = { patch: fallbackPatch, warnings: [], unaskedTurn: null };
+					if (process.env.RP_DEBUG) console.error(`[rp-scribe] deterministic fallback fields=${Object.keys(fallbackPatch).join(",")}`);
+				}
+				if (isCurrentGeneration(generation)) {
+					const knownNames = [card.name, config.userName, ...Object.keys(state.characters)];
+					const scribePatch = canonicalizeCharacterKeys(result.patch, knownNames);
+					const timeGate = gateTimePatch(userText, state.time, scribePatch.time);
+					if (!timeGate.allowed) {
+						delete scribePatch.time;
+						if (process.env.RP_DEBUG) console.error(`[rp-scribe] ${timeGate.reason}`);
+					}
+					const applied = stateService
+						? await stateService.patchWorldState(scribePatch, { source: "scribe", turn })
+						: applyPatch(state, scribePatch);
+					state = applied.state;
+					if (!scribePatch.time) {
+						const inferredTime = advanceTimeForKnownAction(state.time, userText);
+						if (inferredTime) {
+							state = { ...state, time: inferredTime };
+							if (process.env.RP_DEBUG) console.error(`[rp-scribe] inferred action time → ${inferredTime}`);
+						}
+					}
+					if (!stateService) {
+						if (stateFile) saveState(stateFile, state);
+						snapshotState();
+					}
+					if (process.env.RP_DEBUG) {
+						console.error(`[rp-scribe] ${applied.applied.join("；") || "（无变更）"} stateTime=${state.time || "<empty>"}`);
+					}
+				} else if (process.env.RP_DEBUG) {
+					console.error(`[rp-scribe] stale generation discarded turn=${turn}`);
+				}
+				if (process.env.RP_DEBUG) console.error(`[rp-scribe] complete turn=${turn}`);
+			} catch (err) {
+				if (process.env.RP_DEBUG) {
+					console.error(`[rp-scribe] 失败（本轮跳过）：${err instanceof Error ? err.message : String(err)}`);
+				}
+			}
+		};
+		scribeQueue = scribeQueue.then(runScribe, runScribe).finally(() => {
+			scribePending -= 1;
+			scribeBusy = scribePending > 0;
+			resolveCurrentTurnScribe();
+		});
+	});
+
+	// 剧情向压缩接管：用场记提示词替代 pi 默认的 coding 摘要模板
+	// （agent-run-02 P9：默认模板把陈旧场景写成 Critical Context，压缩后剧情倒退）。
+	// 注意：completeSimple 来自本项目自装的 pi-ai 副本，与 pi 内部实例的 provider
+	// 注册表相互独立——内置渠道（deepseek 等）两边都有，运行期注册的自定义 provider
+	// 则只在 pi 侧可见；本项目不使用运行期注册，风险可控。
+	pi.on("session_before_compact", async (event, ctx) => {
+		if (!rpMode || !card || !ctx.model) return undefined;
+		try {
+			const prep = event.preparation;
+			const msgs = [...prep.messagesToSummarize, ...(prep.isSplitTurn ? prep.turnPrefixMessages : [])];
+			if (msgs.length === 0) return undefined;
+
+			const { systemPrompt, userText } = buildRpSummaryPrompt({
+				conversationText: serializeForSummary(msgs, config.userName, card.name),
+				stateSnapshot: formatState(state),
+				mvuSnapshot: formatMvuData(mvu),
+				statusSnapshot: validatedStatus?.raw,
+				previousSummary: prep.previousSummary,
+				language: config.language,
+				userName: config.userName,
+			});
+			const summary = await sideComplete(ctx, systemPrompt, userText, 4096, event.signal);
+			if (!summary) return undefined;
+			const previous = prep.previousSummary?.trim();
+			if (previous && summary.trim() === previous) {
+				if (process.env.RP_DEBUG) console.error("[rp-compaction] summary unchanged; retaining generated summary");
+			}
+			return {
+				compaction: {
+					summary,
+					firstKeptEntryId: prep.firstKeptEntryId,
+					tokensBefore: prep.tokensBefore,
+				},
+			};
+		} catch (err) {
+			// 接管失败回落 pi 默认压缩：coding 模板的摘要也比压缩失败强
+			if (process.env.RP_DEBUG) {
+				console.error(`[rp-compaction] 接管失败，回落默认摘要：${err instanceof Error ? err.message : String(err)}`);
+			}
+			return undefined;
+		}
+	});
+
+	// ---------- 正典落盘门禁（PLAN-PHASE4 柱 1 第一层，harness 级） ----------
+	//
+	// 与提示词层的 ask_director（模型自觉调用）不同，这里是真门禁：tool_call 钩子是
+	// pi 的工具执行咽喉点，落盘类工具的每次调用必然经过——ask 档下先弹批准卡，
+	// 用户不点头就 block，模型物理上写不进正典。与 coding agent 拦 Edit/Write 同构。
+	// 门禁清单只收「不可逆剧情资产落盘」；world_state_update 是每轮记账（有场记兜底），拦了会问烦。
+	const GATED_TOOLS = ["lorebook_write", "codex_write"]; // 柱 3 的 card_write 出生即入列
 
 	pi.on("tool_call", async (event, ctx) => {
 		if (!rpMode || config.creationMode !== "ask") return undefined;
 		if (!GATED_TOOLS.includes(event.toolName)) return undefined;
-		// 用户本轮主动要求写入 → 放行（不再弹确认卡）
-		if (WRITE_REQUEST_RE.test(lastUserText(ctx))) return undefined;
+
+		// 卡面摘要由 harness 生成（元信息层，非正文，D10 合规）
+		const input = event.input as { codex?: unknown; title?: unknown; keys?: unknown; content?: unknown; constant?: unknown };
+		const title = typeof input.title === "string" ? input.title : "（无标题）";
+		const content = typeof input.content === "string" ? input.content : "";
+		const excerpt = content.length > 300 ? `${content.slice(0, 300)}…` : content;
+		const question =
+			event.toolName === "codex_write"
+				? `是否把这条新知识写入知识库「${typeof input.codex === "string" ? input.codex : "？"}」（跨对话共享，永久保留）？\n【${title}】\n${excerpt}`
+				: `是否把这条新设定写入设定集（跨会话保留，成为正式设定）？\n【${title}】\n${excerpt}`;
+
+		let answer: string | undefined;
+		try {
+			answer = await ctx.ui.select(question, ["写入", "不写入"]);
+		} catch {
+			// 无交互通道（print 模式等）：无法征得同意，宁拦勿写
+			return { block: true, reason: "当前无法向用户确认，设定未写入。稍后用户在场时再试。" };
+		}
+		if (answer === "写入") return undefined; // 放行，工具正常执行
+		if (answer === undefined) {
+			return { block: true, reason: "用户停止了本回合，设定未写入。" };
+		}
+		if (answer === "不写入") {
+			return { block: true, reason: "用户否决了这次写入：不要写入设定集，也不要在后续正文中把它当作已定事实。" };
+		}
+		// 自由输入 = 否决 + 修改意见
 		return {
 			block: true,
-			reason:
-				"写入设定集/知识库需用户明确要求：本轮用户并未要求记录，本次写入已拒绝。不要写、也不要用 ask_director 询问「是否写入」；若用户后续明确要求再执行。",
+			reason: `用户未同意原样写入，并给出意见：「${answer}」。请按意见调整后重新提交，或放弃写入。`,
 		};
 	});
 
@@ -1538,9 +2211,19 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	// 树导航后：账本与面板随剧情位置回退（快照存在树里，导航到哪就恢复到哪）
 	pi.on("session_tree", async (_event, ctx) => {
 		if (!rpMode) return;
+		branchGeneration += 1;
 		const restored = restoreStateFromBranch(ctx.sessionManager);
 		if (!restored) state = defaultState();
 		if (stateFile) saveState(stateFile, state);
+		if (!restoreMvuFromBranch(ctx.sessionManager)) mvu = initialMvuFromCard();
+		if (mvuFile) saveMvuData(mvuFile, mvu);
+		if (!restoreValidatedStatusFromBranch(ctx.sessionManager)) {
+			validatedStatus = null;
+			if (statusFile && existsSync(statusFile)) {
+				try { unlinkSync(statusFile); } catch { /* ignore cache cleanup failure */ }
+			}
+		}
+		if (validatedStatus && statusFile) saveValidatedStatus(statusFile, validatedStatus);
 		// 面板同步回退：无快照 = 该剧情点尚无面板，清空（落盘触发前端页签同步）
 		if (!restorePanelsFromBranch(ctx.sessionManager)) panels = {};
 		if (panelsFile) savePanels(panelsFile, panels);
@@ -1699,10 +2382,8 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			}
 			await waitForScribe();
 			if (lastUserIdx >= 0) {
-				// 退到最后一条用户消息本身（不是 parent），丢弃其后的角色回复（旧回复进旁支）
-				// 用 branch() 而非 navigateTree()：后者会退到 user 的 parent 并把 user 本身也丢掉
-				ctx.sessionManager.branch(branch[lastUserIdx].id);
-				// 注入改写后的角色回复（显示为叙事通道）
+				const result = await ctx.navigateTree(branch[lastUserIdx].id, { summarize: false });
+				if (result.cancelled) return;
 				pi.sendMessage({ customType: "rp-edited-reply", content: text, display: true });
 				notify(ctx, "已采用你改写的角色回复（原回复保留在会话树）。");
 				return;
@@ -1864,7 +2545,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			});
 			// 钉档前再刷一次账本/面板快照，保证 /back 到此点时状态对齐
 			snapshotState();
-			snapshotPanels();
+			 snapshotPanels();
+			 snapshotMvu();
+			 snapshotValidatedStatus();
 			snapshotCodexMounts();
 			pi.appendEntry(RP_SAVE_TYPE, data);
 			const lineNote =
@@ -2005,9 +2688,17 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			const cardAbs = resolvePath(cwd, config.card);
 			card = loadCardFile(cardAbs);
 			try {
-				statusBarFormats = cardStatusBarFormats(readCardRawJson(cardAbs).raw);
+				const rawCard = readCardRawJson(cardAbs).raw;
+				statusBarFormats = cardStatusBarFormats(rawCard);
+				const manifestFile = cardManifestFile(cwd, config.card);
+				const cachedManifest = loadCardManifest(manifestFile);
+				cardManifest = manifestMatchesCard(cachedManifest, rawCard, config.card)
+					? syncCardManifestCharacters(cachedManifest, { card, lore: entries, userName: config.userName })
+					: buildCardManifest({ raw: rawCard, card, cardPath: config.card, lore: entries, initialMvu: initialMvuFromCard(), userName: config.userName });
+				saveCardManifest(manifestFile, cardManifest);
 			} catch {
 				statusBarFormats = [];
+				cardManifest = null;
 			}
 		}
 		const fileGroups: LorebookEntry[][] = [];
@@ -2018,7 +2709,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		const fileEntries = mergeEntries(...fileGroups);
 		overlayFile = overlayPathFor(cwd, card.name);
 		const overlayEntries = existsSync(overlayFile) ? loadLorebookFile(overlayFile) : [];
-		entries = applyDisabledLore(mergeEntries(fileEntries, overlayEntries), config.disabledLore);
+		entries = applyLoreOverrides(mergeEntries(fileEntries, overlayEntries), config.disabledLore, config.enabledLore);
 		preset = null;
 		if (config.preset) {
 			// 工作草稿优先（面板改开关/正文立即生效但不写盘）；无草稿才读预设文件

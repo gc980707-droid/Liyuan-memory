@@ -14,6 +14,10 @@ packages/**/node_modules/
 .liyuan-codex/
 .liyuan-lore/
 .liyuan-media/
+.liyuan-memory/
+.liyuan-mvu/
+.liyuan-status/
+.liyuan-card-data/
 .liyuan-skills/
 .liyuan-state/
 .liyuan-uploads/

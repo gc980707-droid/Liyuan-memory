@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { memoryScopeId } from "../src/memory/config.ts";
+import { memoryScopeId, memoryScopeRoot } from "../src/memory/config.ts";
 import { cosine, embedTextLocal } from "../src/memory/embed.ts";
 import {
 	getMemoryStatus,
+	formatMemoryIndex,
+	inheritMemoryScope,
 	memoryDeleteChunk,
 	memoryImportText,
 	memoryListChunks,
@@ -18,7 +20,7 @@ import {
 	updateMemoryConfig,
 	updateStoreConfig,
 } from "../src/memory/service.ts";
-import { loadChunks, splitTextChunks } from "../src/memory/store.ts";
+import { loadChunks, loadStoreIndex, splitTextChunks, upsertTexts } from "../src/memory/store.ts";
 
 const scopeA = { sessionId: "sess-a", card: "assets/cards/hero.png" };
 const scopeB = { sessionId: "sess-b", card: "assets/cards/hero.png" };
@@ -138,10 +140,203 @@ test("memory: 手动写入额外库 + 列表 + 删除单条", async () => {
 		const list = memoryListChunks(cwd, scopeA, "external");
 		assert.ok(list.length >= 2);
 		const id = list[0]!.id;
-		assert.equal(memoryDeleteChunk(cwd, scopeA, "external", id), true);
+		assert.equal(await memoryDeleteChunk(cwd, scopeA, "external", id), true);
 		const list2 = memoryListChunks(cwd, scopeA, "external");
 		assert.equal(list2.length, list.length - 1);
 		assert.ok(!list2.some((c) => c.id === id));
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("memory: 常驻目录覆盖所有启用库且作用域隔离", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "liyuan-mem-index-"));
+	try {
+		updateMemoryConfig(cwd, { enabled: true, embedMode: "local" });
+		updateStoreConfig(cwd, "narrative", { enabled: true, everyNTurns: 1 });
+		await onNarrativeTurnEnd(cwd, scopeA, "青梧在月下把玉佩交给旅人，约定三年后于谷口再见。旅人郑重收下。 ");
+		await memoryManualAdd(cwd, scopeA, "黑渊底层封印着魔尊残魂，封印不可在月蚀之夜开启。", { title: "黑渊封印" });
+
+		const index = await formatMemoryIndex(cwd, scopeA, "青梧 黑渊");
+		assert.ok(index?.includes("剧情数据库"));
+		assert.ok(index?.includes("青梧"));
+		assert.ok(index?.includes("额外数据库"));
+		assert.ok(index?.includes("黑渊封印"));
+		assert.equal(await formatMemoryIndex(cwd, scopeB), null);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("memory: 万条目录的最早与最晚分段均可发现", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "liyuan-mem-large-index-"));
+	try {
+		updateMemoryConfig(cwd, { enabled: true, embedMode: "local" });
+		updateStoreConfig(cwd, "external", { enabled: true, maxChunks: 20_000 });
+		const texts = Array.from({ length: 10_000 }, (_, i) => `第${i + 1}楼记忆：编号 ${i + 1} 的长期事件与人物记录。`);
+		await upsertTexts(
+			cwd,
+			scopeA,
+			"external",
+			texts,
+			{ source: "import" },
+			20_000,
+			{ mode: "local", cloud: { baseUrl: "", apiKey: "", model: "" } },
+		);
+		const index = await formatMemoryIndex(cwd, scopeA, "第3楼", {
+			maxChars: 20_000,
+			segmentSize: 100,
+			relevantItems: 5,
+		});
+		assert.ok(index?.includes("1-100/10000"), "最早分段必须常驻可发现");
+		assert.ok(index?.includes("9901-10000/10000"), "最晚分段必须常驻可发现");
+		assert.ok(index?.includes("第3楼"), "早期相关条目应能从全库展开");
+		const started = performance.now();
+		const second = await formatMemoryIndex(cwd, scopeA, "第9999楼", { maxChars: 7000 });
+		assert.ok(second?.includes("第9999楼"));
+		assert.ok(performance.now() - started < 1000, "持久化索引的热读取不应退化为全 JSONL 扫描");
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("memory: 持久化索引随合并和删除保持一致", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "liyuan-mem-index-sync-"));
+	try {
+		updateMemoryConfig(cwd, { enabled: true, embedMode: "local" });
+		await memoryManualAdd(cwd, scopeA, "旧约定：在白塔顶层会面。", { title: "白塔之约" });
+		await memoryManualAdd(cwd, scopeA, "黑渊入口由银钥匙开启。", { title: "银钥匙" });
+		let index = loadStoreIndex(cwd, scopeA, "external");
+		assert.equal(index?.count, 2);
+		const firstId = index!.items[0]!.id;
+		assert.equal(await memoryDeleteChunk(cwd, scopeA, "external", firstId), true);
+		index = loadStoreIndex(cwd, scopeA, "external");
+		assert.equal(index?.count, 1);
+		assert.ok(!index?.items.some((item) => item.id === firstId));
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("memory: 回档分支不会看到废弃分支记忆", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "liyuan-mem-branch-"));
+	try {
+		updateMemoryConfig(cwd, { enabled: true, embedMode: "local" });
+		const oldBranch = { ...scopeA, leafId: "old-leaf", branchEntryIds: ["root", "old-leaf"] };
+		const newBranch = { ...scopeA, leafId: "new-leaf", branchEntryIds: ["root", "new-leaf"] };
+		await memoryManualAdd(cwd, oldBranch, "旧分支里青梧已经离开了山谷。", { title: "旧线离谷" });
+		await memoryManualAdd(cwd, newBranch, "新分支里青梧仍留在山谷守候。", { title: "新线守候" });
+		const index = await formatMemoryIndex(cwd, newBranch, "青梧 山谷");
+		assert.ok(index?.includes("新线守候"));
+		assert.ok(!index?.includes("旧线离谷"));
+		const hits = await memoryRecallForTurn(cwd, newBranch, "青梧 山谷 守候");
+		assert.ok(hits.some((hit) => hit.text.includes("仍留")));
+		assert.ok(!hits.some((hit) => hit.text.includes("已经离开")));
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("memory: 剧情合并不会跨分支污染", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "liyuan-mem-narrative-branch-"));
+	try {
+		updateMemoryConfig(cwd, { enabled: true, embedMode: "local" });
+		updateStoreConfig(cwd, "narrative", { enabled: true, everyNTurns: 1 });
+		const oldBranch = { ...scopeA, leafId: "old-leaf", branchEntryIds: ["root", "old-leaf"] };
+		const newBranch = { ...scopeA, leafId: "new-leaf", branchEntryIds: ["root", "new-leaf"] };
+		await onNarrativeTurnEnd(cwd, oldBranch, "旧分支里青梧离开山谷，独自去了北境，此事已经发生。 ");
+		await onNarrativeTurnEnd(cwd, newBranch, "新分支里青梧留在山谷，决定继续陪伴旅人。 ");
+		const chunks = loadChunks(cwd, scopeA, "narrative");
+		assert.equal(chunks.length, 2);
+		assert.equal(chunks[0]!.meta.branchEntryId, "old-leaf");
+		assert.equal(chunks[1]!.meta.branchEntryId, "new-leaf");
+		const hits = await memoryRecallForTurn(cwd, newBranch, "青梧 山谷 陪伴");
+		assert.ok(!hits.some((hit) => hit.text.includes("北境")));
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("memory: fork 继承当前祖先记忆并排除废弃分支", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "liyuan-mem-fork-"));
+	try {
+		updateMemoryConfig(cwd, { enabled: true, embedMode: "local" });
+		const parentVisible = { sessionId: "parent", card: scopeA.card, leafId: "kept", branchEntryIds: ["root", "kept"] };
+		const parentDiscarded = { sessionId: "parent", card: scopeA.card, leafId: "discarded", branchEntryIds: ["root", "discarded"] };
+		await memoryManualAdd(cwd, parentVisible, "祖先记忆：白塔中保存着星盘。", { title: "白塔星盘" });
+		await memoryManualAdd(cwd, parentDiscarded, "废弃记忆：银钥匙已经被摧毁。", { title: "钥匙摧毁" });
+		const child = { sessionId: "child", card: scopeA.card, leafId: "kept", branchEntryIds: ["root", "kept"] };
+		await inheritMemoryScope(cwd, { sessionId: "parent", card: scopeA.card }, child);
+		const index = await formatMemoryIndex(cwd, child, "白塔 银钥匙");
+		assert.ok(index?.includes("白塔星盘"));
+		assert.ok(!index?.includes("钥匙摧毁"));
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("memory: 并发写入串行且同批重复去重", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "liyuan-mem-concurrent-"));
+	try {
+		updateMemoryConfig(cwd, { enabled: true, embedMode: "local" });
+		await Promise.all([
+			memoryManualAdd(cwd, scopeA, "并发记忆甲：白塔顶层藏有星盘。", { title: "白塔星盘" }),
+			memoryManualAdd(cwd, scopeA, "并发记忆乙：黑渊入口需要银钥匙。", { title: "黑渊银钥" }),
+		]);
+		await upsertTexts(
+			cwd,
+			scopeA,
+			"external",
+			["重复条目：月蚀之夜封印减弱。", "重复条目：月蚀之夜封印减弱。"],
+			{ source: "manual" },
+			100,
+			{ mode: "local", cloud: { baseUrl: "", apiKey: "", model: "" } },
+		);
+		const chunks = memoryListChunks(cwd, scopeA, "external");
+		assert.equal(chunks.filter((chunk) => chunk.text.includes("重复条目")).length, 1);
+		assert.ok(chunks.some((chunk) => chunk.text.includes("白塔")));
+		assert.ok(chunks.some((chunk) => chunk.text.includes("黑渊")));
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("memory: 分片追加不重写历史分片", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "liyuan-mem-shards-"));
+	try {
+		updateMemoryConfig(cwd, { enabled: true, embedMode: "local" });
+		const texts = Array.from({ length: 600 }, (_, i) => `分片测试第${i + 1}条：长期事件记录。`);
+		await upsertTexts(cwd, scopeA, "external", texts, { source: "import" }, 1000, {
+			mode: "local",
+			cloud: { baseUrl: "", apiKey: "", model: "" },
+		});
+		const dir = join(memoryScopeRoot(cwd, scopeA), "stores", "external");
+		const first = join(dir, "chunks-000000.jsonl");
+		const second = join(dir, "chunks-000001.jsonl");
+		const before = [statSync(first).mtimeMs, statSync(second).mtimeMs];
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		await memoryManualAdd(cwd, scopeA, "新增第601条：只应改写最后一个分片。", { title: "增量追加" });
+		assert.deepEqual([statSync(first).mtimeMs, statSync(second).mtimeMs], before);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("memory: 旧单文件自动迁移并保留备份", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "liyuan-mem-migrate-"));
+	try {
+		updateMemoryConfig(cwd, { enabled: true, embedMode: "local" });
+		await memoryManualAdd(cwd, scopeA, "迁移来源记忆：青梧保管玉佩。", { title: "迁移测试" });
+		const dir = join(memoryScopeRoot(cwd, scopeA), "stores", "external");
+		const manifest = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")) as { shards: Array<{ file: string }> };
+		const legacy = join(dir, "chunks.jsonl");
+		writeFileSync(legacy, readFileSync(join(dir, manifest.shards[0]!.file), "utf8"), "utf8");
+		rmSync(join(dir, "manifest.json"));
+		rmSync(join(dir, manifest.shards[0]!.file));
+		const chunks = memoryListChunks(cwd, scopeA, "external");
+		assert.equal(chunks.length, 1);
+		assert.ok(existsSync(`${legacy}.legacy.bak`));
+		assert.ok(existsSync(join(dir, "manifest.json")));
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}

@@ -62,6 +62,10 @@ export const DIRS = {
 	worldline: ".liyuan-worldline",
 	/** 内置向量记忆（正文库 / 外部资料库） */
 	memory: ".liyuan-memory",
+	/** 兼容 Tavern Helper MVU 的通用变量快照 */
+	mvu: ".liyuan-mvu",
+	status: ".liyuan-status",
+	manifests: ".liyuan-card-data",
 } as const;
 
 const LEGACY_DIRS: Record<keyof typeof DIRS, string> = {
@@ -77,6 +81,9 @@ const LEGACY_DIRS: Record<keyof typeof DIRS, string> = {
 	uploads: ".rp-uploads",
 	worldline: ".rp-worldline",
 	memory: ".rp-memory", // 未使用过；占位
+	mvu: ".rp-mvu",
+	status: ".rp-status",
+	manifests: ".rp-card-data",
 };
 
 export const PERSONAS_FILE = ".liyuan-personas.json";

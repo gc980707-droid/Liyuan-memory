@@ -298,8 +298,9 @@ export interface RpConfigView {
 	disabledLore?: string[];
 	backendControl?: boolean;
 	creationMode?: "ask" | "silent";
-	/** 固定楼层压缩：每 N 个叙事轮主动压缩早期正文；0=仅被动压缩 */
+	/** 固定楼层压缩：每 N 个叙事轮主动压缩早期正文（=仅被动压缩） */
 	compactEveryNTurns?: number;
+	multiAgentPreflight?: boolean;
 }
 
 export interface CardResponse {
@@ -356,6 +357,22 @@ export interface LorebookResponse {
 	viewName?: string | null;
 	total: number;
 	entries: LoreEntryView[];
+}
+
+export interface CardManifestCharacter {
+	name: string;
+	kind: "core" | "recurring" | "background";
+	agentEnabled: boolean;
+	loreFingerprint?: string;
+	aliases?: string[];
+	promotedAt?: string;
+}
+
+export interface CardManifestResponse {
+	manifest: {
+		cardName: string;
+		characters: CardManifestCharacter[];
+	};
 }
 
 export interface LoreSearchHit {

@@ -82,7 +82,7 @@ import { resolveConfigPath } from "../src/paths.ts";
 import type { WorldlineView } from "../src/worldline.ts";
 import {
 	appendLorebookFileEntry,
-	applyDisabledLore,
+	applyLoreOverrides,
 	deleteLorebookFileEntry,
 	exportStLorebook,
 	loadLorebookFile,
@@ -124,7 +124,19 @@ import {
 import { listSkills, saveSkill } from "../src/skills.ts";
 import { DEFAULT_CONFIG, type LorebookEntry, type RpConfig } from "../src/types.ts";
 import { readJsonFile } from "../src/jsonio.ts";
+import { parseInitVar, type MvuData } from "../src/mvu.ts";
 import { formatBytes, listMedia, listUploads, saveUpload } from "../src/uploads.ts";
+import {
+	addManifestCharacterToLore,
+	buildCardManifest,
+	cardManifestFile,
+	loadCardManifest,
+	manifestMatchesCard,
+	promoteManifestCharacter,
+	saveCardManifest,
+	syncCardManifestCharacters,
+	type CardManifest,
+} from "../src/card-manifest.ts";
 
 // ---------- 宿主接口（由 main.ts 实现；纯平面类型，pi 止步于 main） ----------
 
@@ -264,6 +276,17 @@ export interface RestHost {
 	updateRestart(): void;
 }
 
+function initialMvuFromRaw(raw: Record<string, unknown>): MvuData {
+	const data = raw.data && typeof raw.data === "object" ? raw.data as Record<string, unknown> : raw;
+	const ext = data.extensions && typeof data.extensions === "object" ? data.extensions as Record<string, unknown> : {};
+	const helper = ext.tavern_helper && typeof ext.tavern_helper === "object" ? ext.tavern_helper as Record<string, unknown> : {};
+	const variables = helper.variables && typeof helper.variables === "object" ? helper.variables as Record<string, unknown> : null;
+	if (variables) return variables as MvuData;
+	const texts = [data.description, data.scenario, data.first_mes, data.mes_example, data.system_prompt, data.post_history_instructions].filter((x): x is string => typeof x === "string").join("\n");
+	const match = texts.match(/\[InitVar\]([\s\S]*?)(?:\[\/InitVar\]|$)/i);
+	return match ? parseInitVar(match[1]) ?? {} : {};
+}
+
 export interface SessionInfoLite {
 	path: string;
 	id: string;
@@ -375,9 +398,11 @@ const CONFIG_EDITABLE = new Set([
 	"lorebooks",
 	"preset",
 	"disabledLore",
+	"enabledLore",
 	"backendControl",
 	"creationMode",
 	"assistantModel",
+	"multiAgentPreflight",
 ]);
 
 export function applyConfigPatch(config: RpConfig, patch: Record<string, unknown>): RpConfig {
@@ -458,7 +483,7 @@ function loadMergedLoreWithSource(
 	const overlayPath = overlayPathFor(cwd, card.name);
 	const overlayEntries = existsSync(overlayPath) ? loadLorebookFile(overlayPath) : [];
 	const fileSet = new Set(fileEntries.map((e) => e.content.trim()));
-	const entries = applyDisabledLore(mergeEntries(fileEntries, overlayEntries), config.disabledLore);
+	const entries = applyLoreOverrides(mergeEntries(fileEntries, overlayEntries), config.disabledLore, config.enabledLore);
 	const sourceOf = (e: LorebookEntry): LoreSource => (fileSet.has(e.content.trim()) ? "file" : "agent");
 	return { entries, sourceOf, cardName: card.name, paths };
 }
@@ -474,7 +499,7 @@ export function loadMergedLore(cwd: string, config: RpConfig): LorebookEntry[] {
 function collectActiveLoreForExport(cwd: string, config: RpConfig): LorebookEntry[] {
 	const card = loadCardFile(resolvePath(cwd, config.card));
 	const { entries: active } = loadMergedLoreWithSource(cwd, config);
-	return applyDisabledLore(mergeEntries(active, card.book), config.disabledLore);
+	return applyLoreOverrides(mergeEntries(active, card.book), config.disabledLore, config.enabledLore);
 }
 
 const previewText = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
@@ -1238,8 +1263,11 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 			case "GET /api/memory/chunks": {
 				const storeId = (query.get("storeId") ?? "external").trim() || "external";
 				const sc = host.memoryScope();
-				const chunks = memoryListChunks(host.cwd, sc, storeId);
-				sendJson(res, 200, { storeId, chunks });
+				const all = memoryListChunks(host.cwd, sc, storeId);
+				const offset = Math.max(0, Number.parseInt(query.get("offset") ?? "0", 10) || 0);
+				const limit = Math.min(200, Math.max(1, Number.parseInt(query.get("limit") ?? "100", 10) || 100));
+				const chunks = all.slice(offset, offset + limit);
+				sendJson(res, 200, { storeId, chunks, total: all.length, offset, hasMore: offset + chunks.length < all.length });
 				return true;
 			}
 			case "DELETE /api/memory/chunk": {
@@ -1248,7 +1276,7 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 				if (!storeId) throw new Error("缺少 storeId");
 				if (!id) throw new Error("缺少 id");
 				const sc = host.memoryScope();
-				const ok = memoryDeleteChunk(host.cwd, sc, storeId, id);
+				const ok = await memoryDeleteChunk(host.cwd, sc, storeId, id);
 				if (!ok) throw new Error("条目不存在或已删除");
 				host.notify("info", "向量记忆：已删除 1 条");
 				sendJson(res, 200, { ok: true, ...getMemoryStatus(host.cwd, sc) });
@@ -1262,7 +1290,7 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 				if (!storeId) throw new Error("缺少 storeId");
 				if (!id) throw new Error("缺少 id");
 				const sc = host.memoryScope();
-				const ok = memoryDeleteChunk(host.cwd, sc, storeId, id);
+				const ok = await memoryDeleteChunk(host.cwd, sc, storeId, id);
 				if (!ok) throw new Error("条目不存在或已删除");
 				host.notify("info", "向量记忆：已删除 1 条");
 				sendJson(res, 200, { ok: true, ...getMemoryStatus(host.cwd, sc) });
@@ -1297,7 +1325,7 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 				const storeId = (body.storeId ?? "").trim();
 				if (!storeId) throw new Error("缺少 storeId");
 				const sc = host.memoryScope();
-				memoryClearStore(host.cwd, sc, storeId);
+				await memoryClearStore(host.cwd, sc, storeId);
 				sendJson(res, 200, { ok: true, ...getMemoryStatus(host.cwd, sc) });
 				return true;
 			}
@@ -1305,7 +1333,7 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 				const storeId = (query.get("id") ?? "").trim();
 				if (!storeId) throw new Error("缺少 id");
 				const sc = host.memoryScope();
-				memoryRemoveStore(host.cwd, sc, storeId);
+				await memoryRemoveStore(host.cwd, sc, storeId);
 				sendJson(res, 200, { ok: true, ...getMemoryStatus(host.cwd, sc) });
 				return true;
 			}
@@ -1776,12 +1804,26 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 				try {
 					const card = loadCardFile(dest);
 					if (!card.name.trim()) throw new Error("卡名为空");
+					const raw = readCardRawJson(dest).raw;
+					const manifest = buildCardManifest({
+						raw,
+						card,
+						cardPath: `assets/cards/${safe}`,
+						lore: card.book,
+						initialMvu: initialMvuFromRaw(raw),
+					});
+					saveCardManifest(cardManifestFile(host.cwd, `assets/cards/${safe}`), manifest);
 					host.notify("info", `已导入角色卡「${card.name}」`);
 					sendJson(res, 200, {
 						ok: true,
 						path: `assets/cards/${safe}`,
 						name: card.name,
 						embeddedLoreCount: card.book.length,
+						manifest: {
+							status: manifest.status,
+							capabilities: manifest.capabilities,
+							characterCount: manifest.characters.length,
+						},
 					});
 				} catch (e) {
 					unlinkSync(dest); // 坏卡不留盘
@@ -2848,6 +2890,64 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 				});
 				return true;
 			}
+			case "GET /api/card/manifest": {
+				const config = loadConfig(host.cwd);
+				const cardPath = config.card;
+				const card = loadCardFile(resolvePath(host.cwd, cardPath));
+				const manifestPath = cardManifestFile(host.cwd, cardPath);
+				const rawCard = readCardRawJson(resolvePath(host.cwd, cardPath)).raw;
+				const cached = loadCardManifest(manifestPath);
+				const manifest = manifestMatchesCard(cached, rawCard, cardPath) ? cached : buildCardManifest({
+					raw: rawCard,
+					card,
+					cardPath,
+					lore: card.book,
+				});
+				const overlay = overlayPathFor(host.cwd, card.name);
+				const files = mountedLorebookPaths(config).map((p) => resolvePath(host.cwd, p)).filter(existsSync).map(loadLorebookFile);
+				const runtimeLore = applyLoreOverrides(mergeEntries(card.book, ...files, existsSync(overlay) ? loadLorebookFile(overlay) : []), config.disabledLore, config.enabledLore);
+				const synced = syncCardManifestCharacters(manifest, { card, lore: runtimeLore });
+				saveCardManifest(manifestPath, synced);
+				sendJson(res, 200, { manifest: synced });
+				return true;
+			}
+			case "POST /api/card/characters/promote": {
+				if (refuseWhileStreaming()) return true;
+				const body = JSON.parse(await readBody(req)) as {
+					name?: string;
+					description?: string;
+					aliases?: string[];
+					kind?: "background" | "recurring" | "core";
+				};
+				const name = (body.name ?? "").trim();
+				const description = (body.description ?? "").trim();
+				if (!name || name === "{{user}}") throw new Error("无效的角色名");
+				if (!description) throw new Error("角色档案不能为空");
+				if (body.kind !== "background" && body.kind !== "recurring" && body.kind !== "core") throw new Error("角色类型无效");
+				const config = loadConfig(host.cwd);
+				const cardPath = config.card;
+				const card = loadCardFile(resolvePath(host.cwd, cardPath));
+				if (name === card.name.trim()) throw new Error("不能把角色卡标题作为角色");
+				const manifestPath = cardManifestFile(host.cwd, cardPath);
+				const manifest = loadCardManifest(manifestPath) ?? buildCardManifest({ raw: readCardRawJson(resolvePath(host.cwd, cardPath)).raw, card, cardPath, lore: card.book });
+				const current = manifest.characters.find((character) => character.name === name);
+				let next: CardManifest;
+				if (current?.loreFingerprint) {
+					next = promoteManifestCharacter(manifest, name, body.kind);
+					saveCardManifest(manifestPath, next);
+				} else {
+					next = addManifestCharacterToLore(manifest, manifestPath, overlayPathFor(host.cwd, card.name), {
+						name,
+						description,
+						aliases: body.aliases,
+						kind: body.kind,
+					});
+				}
+				await host.softRefreshConfig();
+				host.notify("info", `已收编角色「${name}」为${body.kind === "core" ? "核心" : body.kind === "recurring" ? "常驻" : "背景"}角色`);
+				sendJson(res, 200, { ok: true, manifest: next, duplicate: !!current?.loreFingerprint });
+				return true;
+			}
 			case "POST /api/greeting": {
 				const body = JSON.parse(await readBody(req)) as { index?: number; apply?: boolean };
 				const config = loadConfig(host.cwd);
@@ -2962,7 +3062,7 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 					const card = loadCardFile(resolvePath(host.cwd, config.card));
 					const overlayPath = overlayPathFor(host.cwd, card.name);
 					const raw = existsSync(overlayPath) ? loadLorebookFile(overlayPath) : [];
-					const entries = applyDisabledLore(raw, config.disabledLore);
+					const entries = applyLoreOverrides(raw, config.disabledLore, config.enabledLore);
 					sendJson(res, 200, {
 						lorebookPath: null,
 						lorebookPaths: mounted,
@@ -2980,7 +3080,7 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 					if (!existsSync(abs)) throw new Error("世界书文件不存在");
 					const raw = loadLorebookFile(abs);
 					if (raw.length === 0) throw new Error("不是有效的世界书文件");
-					const entries = applyDisabledLore(raw, config.disabledLore);
+					const entries = applyLoreOverrides(raw, config.disabledLore, config.enabledLore);
 					const name =
 						(() => {
 							try {
@@ -3028,7 +3128,7 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 				let source: LoreSource = "file";
 				for (const c of candidates) {
 					if (!existsSync(c.abs)) continue;
-					const hit = applyDisabledLore(loadLorebookFile(c.abs), config.disabledLore).find(
+					const hit = applyLoreOverrides(loadLorebookFile(c.abs), config.disabledLore, config.enabledLore).find(
 						(e) => loreFingerprint(e.content) === fp,
 					);
 					if (hit) {
@@ -3236,6 +3336,13 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 					else delete next.disabledLore;
 					writeJsonWithBackup(configPath(host.cwd), next);
 				}
+				if (config.enabledLore?.includes(fp)) {
+					const enabled = config.enabledLore.filter((entry) => entry !== fp);
+					const next = { ...loadConfig(host.cwd) } as Record<string, unknown>;
+					if (enabled.length > 0) next.enabledLore = enabled;
+					else delete next.enabledLore;
+					writeJsonWithBackup(configPath(host.cwd), next);
+				}
 				await host.softRefreshConfig();
 				host.notify("info", `已删除条目「${removed.comment || removed.keys[0] || fp}」`);
 				sendJson(res, 200, {
@@ -3274,12 +3381,19 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 				if (fps.length === 0) throw new Error("缺少 fingerprint(s)");
 				const config = loadConfig(host.cwd);
 				const disabled = new Set(config.disabledLore ?? []);
+				const enabled = new Set(config.enabledLore ?? []);
 				for (const fp of fps) {
-					if (body.enabled) disabled.delete(fp);
-					else disabled.add(fp);
+					if (body.enabled) {
+						disabled.delete(fp);
+						enabled.add(fp);
+					} else {
+						enabled.delete(fp);
+						disabled.add(fp);
+					}
 				}
-				const next = { ...config, disabledLore: [...disabled] } as Record<string, unknown>;
+				const next = { ...config, disabledLore: [...disabled], enabledLore: [...enabled] } as Record<string, unknown>;
 				if ((next.disabledLore as string[]).length === 0) delete next.disabledLore;
+				if ((next.enabledLore as string[]).length === 0) delete next.enabledLore;
 				writeJsonWithBackup(configPath(host.cwd), next);
 				await host.softRefreshConfig(); // constant 条目影响 system prompt，必须重装
 				sendJson(res, 200, { ok: true, count: fps.length });

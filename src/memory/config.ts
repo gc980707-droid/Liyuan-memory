@@ -4,7 +4,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DIRS } from "../paths.ts";
 import {
@@ -148,7 +148,11 @@ export function saveMemoryConfig(cwd: string, cfg: MemoryConfig): MemoryConfig {
 	ensureDir(cwd);
 	const next = normalizeMemoryConfig(cfg);
 	// 落盘时保留 apiKey；对外 GET 可脱敏
-	writeFileSync(memoryConfigPath(cwd), JSON.stringify(next, null, 2), "utf8");
+	const target = memoryConfigPath(cwd);
+	const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
+	if (existsSync(target)) copyFileSync(target, `${target}.bak`);
+	writeFileSync(temp, JSON.stringify(next, null, 2), "utf8");
+	renameSync(temp, target);
 	return next;
 }
 

@@ -87,6 +87,8 @@ export async function embedTextsCloud(
 	if (!model) throw new Error("云端 embedding：请填写模型名");
 
 	const url = `${base}/embeddings`;
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), 30_000);
 	const res = await fetch(url, {
 		method: "POST",
 		headers: {
@@ -97,7 +99,8 @@ export async function embedTextsCloud(
 			model,
 			input: inputs.length === 1 ? inputs[0] : inputs,
 		}),
-	});
+		signal: controller.signal,
+	}).finally(() => clearTimeout(timer));
 	const raw = await res.text();
 	if (!res.ok) {
 		throw new Error(`云端 embedding HTTP ${res.status}：${raw.slice(0, 240)}`);
@@ -146,6 +149,24 @@ export async function embedOne(text: string, ctx: EmbedContext): Promise<number[
 export async function embedMany(texts: string[], ctx: EmbedContext): Promise<number[][]> {
 	const cleaned = texts.map((t) => t.trim()).filter(Boolean);
 	if (!cleaned.length) return [];
-	if (ctx.mode === "cloud") return embedTextsCloud(cleaned, ctx.cloud);
+	if (ctx.mode === "cloud") {
+		const out: number[][] = [];
+		for (let i = 0; i < cleaned.length; i += 32) {
+			const batch = cleaned.slice(i, i + 32);
+			let lastError: unknown;
+			for (let attempt = 0; attempt < 3; attempt++) {
+				try {
+					out.push(...await embedTextsCloud(batch, ctx.cloud));
+					lastError = undefined;
+					break;
+				} catch (error) {
+					lastError = error;
+					if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+				}
+			}
+			if (lastError) throw lastError;
+		}
+		return out;
+	}
 	return cleaned.map((t) => embedTextLocal(t));
 }

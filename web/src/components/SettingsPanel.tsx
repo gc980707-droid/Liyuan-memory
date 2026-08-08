@@ -62,15 +62,18 @@ function MemoryChunkManager({
 }) {
 	const [open, setOpen] = useState(false);
 	const [chunks, setChunks] = useState<MemoryChunkRow[]>([]);
+	const [total, setTotal] = useState(0);
 	const [loading, setLoading] = useState(false);
 
-	const refresh = async () => {
+	const refresh = async (append = false) => {
 		setLoading(true);
 		try {
-			const r = await apiGet<{ chunks: MemoryChunkRow[] }>(
-				`/api/memory/chunks?storeId=${encodeURIComponent(storeId)}`,
+			const offset = append ? chunks.length : 0;
+			const r = await apiGet<{ chunks: MemoryChunkRow[]; total: number }>(
+				`/api/memory/chunks?storeId=${encodeURIComponent(storeId)}&offset=${offset}&limit=100`,
 			);
-			setChunks(r.chunks ?? []);
+			setChunks((current) => append ? [...current, ...(r.chunks ?? [])] : (r.chunks ?? []));
+			setTotal(r.total ?? 0);
 		} catch (e) {
 			toast("error", e instanceof Error ? e.message : String(e));
 		} finally {
@@ -104,7 +107,7 @@ function MemoryChunkManager({
 					{open ? "收起条目" : `管理「${label}」条目`}
 				</button>
 				{open ? (
-					<button type="button" className="drawer-btn" disabled={busy || loading} onClick={() => void refresh()}>
+					<button type="button" className="drawer-btn" disabled={busy || loading} onClick={() => void refresh(false)}>
 						刷新列表
 					</button>
 				) : null}
@@ -151,6 +154,11 @@ function MemoryChunkManager({
 							);
 						})}
 					</ul>
+					{chunks.length < total ? (
+						<button type="button" className="drawer-btn" disabled={loading || busy} onClick={() => void refresh(true)}>
+							加载更多（{chunks.length}/{total}）
+						</button>
+					) : null}
 				</div>
 			)}
 		</div>
@@ -652,6 +660,7 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 	const [compactEvery, setCompactEvery] = useState(30);
 	const [backendControl, setBackendControl] = useState(true);
 	const [askMode, setAskMode] = useState(false);
+	const [multiAgentPreflight, setMultiAgentPreflight] = useState(false);
 	const [dirty, setDirty] = useState(false);
 	const [dark, setDark] = useState(() => getTheme() === "dark");
 
@@ -662,6 +671,7 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 			setCompactEvery(data.config.compactEveryNTurns ?? 30);
 			setBackendControl(data.config.backendControl !== false);
 			setAskMode(data.config.creationMode === "ask");
+			setMultiAgentPreflight(data.config.multiAgentPreflight === true);
 			setDirty(false);
 		}
 	}, [data]);
@@ -684,7 +694,8 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 				maxLoreInjections: maxLore,
 				compactEveryNTurns: compactEvery,
 				backendControl,
-				creationMode: askMode ? "ask" : "silent",
+					creationMode: askMode ? "ask" : "silent",
+					multiAgentPreflight,
 			});
 			reload();
 		}, "已保存并重载会话");
@@ -773,6 +784,11 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 						<div className="field-hint">
 							开=询问档：剧情相关（含「我该怎么办」）一律戏内，用选择卡共创；关=静默档自行推进。戏外只办系统事，不处理剧情。
 						</div>
+						<div className="toggle-row">
+							<span>多智能体剧情预演</span>
+							<Toggle checked={multiAgentPreflight} onChange={(v) => { setMultiAgentPreflight(v); touch(); }} />
+						</div>
+						<div className="field-hint">开启后，每轮先由旁路角色顾问和导演 Agent 提供隐藏建议，再交给主 Agent 写正文。不会重写正文或直接修改正典。</div>
 					</section>
 
 					<div className="sticky-save">

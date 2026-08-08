@@ -38,7 +38,7 @@ const FOLD_NAME_RE =
 	/^(?:thinking|think|thoughts?|draft(?:_?notes)?|reasoning|reason(?:ing)?|analysis|analy[sz]e|descriptive_?analysis|cot|chain_?of_?thought|scaffold|memo|notes?|推演|思考|思维|草稿|分析|笔记|备忘|内心推演)$/i;
 /** 状态栏 → 面板 */
 const PANEL_NAME_RE =
-	/^(?:status(?:_?block|bar)?|normal_?status|special_?status|char(?:acter)?_?status|状态|状态栏|人物状态|场景状态)$/i;
+	/^(?:status(?:_?block|bar)?|normal_?status|special_?status|char(?:acter)?_?status|state\s*\d+|状态|状态栏|人物状态|场景状态)$/i;
 /** 仪式/越狱回显 → 整块扔掉 */
 const STRIP_NAME_RE = /^(?:haurki|haurki准则|jailbreak|system_?prompt|oai_?system|anti_?reject)$/i;
 
@@ -277,7 +277,8 @@ function applyPolicies(
 
 /** 历史送模：fold/panel/strip 整块扔；unwrap 拆包留内容；格式栈标签（catsay 等）另行整块剥 */
 export function cleanAssistantText(text: string): string {
-	let t = applyPolicies(text, { keepPanel: false, collectFold: false, stripHistoryOnly: true }).text;
+	let t = text.replace(/<UpdateVariable>[\s\S]*?<\/UpdateVariable>/gi, "").replace(/<StatusPlaceHolderImpl\s*\/>/gi, "");
+	t = applyPolicies(t, { keepPanel: false, collectFold: false, stripHistoryOnly: true }).text;
 	// HTML 注释（导演旁注）
 	t = t.replace(/<!--[\s\S]*?-->/g, "");
 	return tidyWhitespace(t);
@@ -294,7 +295,8 @@ export function cleanAssistantText(text: string): string {
  * （见 prepareDisplayText），否则 unwrap 会先拆掉正则要匹配的标记。
  */
 export function displayAssistantText(text: string): string {
-	let t = applyPolicies(text, { keepPanel: true, collectFold: false }).text;
+	let t = text.replace(/<UpdateVariable>[\s\S]*?<\/UpdateVariable>/gi, "").replace(/<StatusPlaceHolderImpl\s*\/>/gi, "");
+	t = applyPolicies(t, { keepPanel: true, collectFold: false }).text;
 	t = t.replace(/<!--[\s\S]*?-->/g, "");
 	t = t.replace(/^\s*#{1,6}\s*正文\s*$/gim, "");
 	t = t.replace(/^\s*#{1,6}\s*(thinking|draft|notes?|思维|草稿)\s*$/gim, "");
@@ -303,6 +305,17 @@ export function displayAssistantText(text: string): string {
 		return classifyTag(tag) === "panel" ? line : "";
 	});
 	return tidyWhitespace(t);
+}
+
+/** 从叙事气泡移除状态面板原文；状态栏由 validatedStatus 单独展示。 */
+export function stripPanelBlocks(text: string): string {
+	return applyPolicies(text, { keepPanel: false, collectFold: false }).text;
+}
+
+export function extractPanelBlocks(text: string): Array<{ tag: string; body: string; raw: string }> {
+	return scanTaggedBlocks(text)
+		.filter((block) => block.policy === "panel")
+		.map((block) => ({ tag: block.tag, body: block.body.trim(), raw: block.raw }));
 }
 
 /** wire / 显示管线注入的一档皮肤 */
@@ -319,7 +332,7 @@ export function isHtmlDisplayPayload(text: string): boolean {
 	if (!text) return false;
 	if (isFullPageHtmlPayload(text)) return true;
 	// 皮肤包的大块 styled div（淫宫状态栏等）
-	if (/<div\b[^>]*\bstyle\s*=/i.test(text) && /<\/div>/i.test(text) && text.length > 60) return true;
+	if (/<div\b[^>]*(?:\bstyle\s*=|\bclass\s*=)/i.test(text) && /<\/div>/i.test(text) && text.length > 60) return true;
 	return false;
 }
 
@@ -330,7 +343,6 @@ function isFullPageHtmlPayload(text: string): boolean {
 	// 围栏整页（可带开场前缀）
 	if (/(?:^|\n)```[^\n`]*\r?\n\s*<!doctype\s+html/i.test(text) && /<\/html\s*>/i.test(text)) return true;
 	if (/(?:^|\n)```[^\n`]*\r?\n\s*<html[\s>]/i.test(text) && /<\/html\s*>/i.test(text)) return true;
-	if (/(?:^|\n)```html\b/i.test(text) && text.length > 80) return true;
 	// 裸整页
 	const head = t.slice(0, 80).toLowerCase();
 	if (head.startsWith("<!doctype html") || head.startsWith("<html")) return true;
@@ -346,7 +358,7 @@ const skinDivToken = (i: number) => `${i}`;
  */
 function protectSkinDivs(text: string): { text: string; stash: string[] } {
 	const stash: string[] = [];
-	const startRe = /<div\b[^>]*\bstyle\s*=/gi;
+	const startRe = /<div\b[^>]*(?:\bstyle\s*=|\bclass\s*=)[^>]*>/gi;
 	let out = "";
 	let i = 0;
 	for (;;) {
@@ -377,8 +389,17 @@ function protectSkinDivs(text: string): { text: string; stash: string[] } {
 			out += text.slice(m.index);
 			break;
 		}
+		const before = text.slice(i, m.index);
+		const style = /<style(?:\s[^>]*)?>[\s\S]*?<\/style>\s*$/i.exec(before);
+		if (!/\bstyle\s*=/i.test(m[0]) && !style) {
+			out += text.slice(m.index, m.index + m[0].length);
+			i = m.index + m[0].length;
+			continue;
+		}
+		if (style) out = out.slice(0, Math.max(0, out.length - style[0].length));
 		out += skinDivToken(stash.length);
-		stash.push(text.slice(m.index, end));
+		const fragment = `${style?.[0] ?? ""}${text.slice(m.index, end)}`;
+		stash.push(style ? `\n\`\`\`html\n${fragment}\n\`\`\`\n` : fragment);
 		i = end;
 	}
 	return { text: out, stash };
@@ -413,7 +434,7 @@ export function prepareDisplayText(text: string, skin?: DisplaySkin | null): str
 		}
 		return cleaned;
 	}
-	if (/<div\b[^>]*\bstyle\s*=/i.test(t) && /<\/div>/i.test(t)) {
+	if (/<div\b[^>]*(?:\bstyle\s*=|\bclass\s*=)/i.test(t) && /<\/div>/i.test(t)) {
 		const { text: protectedText, stash } = protectSkinDivs(t);
 		let cleaned = displayAssistantText(protectedText);
 		for (let i = 0; i < stash.length; i++) {
