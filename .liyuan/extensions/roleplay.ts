@@ -1971,9 +1971,16 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		// 状态栏可能是数万字符的 HTML，不能把它原样喂给场记；否则旁路模型
 		// 容易被 UI 模板淹没而不返回账本 JSON。正文与状态栏是两条独立数据链。
 		const ledgerText = cleanAssistantText(assistantText).slice(0, 24000);
-		if (!statusSubmittedThisTurn && statusBarFormats.length > 0) {
+		if (statusBarFormats.length > 0) {
 			const runStatusRecovery = async () => {
 				try {
+					// 状态栏的时间是 world state 的渲染投影，必须等本轮场记提交后再校准。
+					await scribeQueue;
+					if (!isCurrentTurn(turn, generation)) return;
+					const statusIsCurrent = statusSubmittedThisTurn && validatedStatus
+						? gateStatusTime("", state.time, validatedStatus.raw).allowed
+						: false;
+					if (statusIsCurrent) return;
 					const raw = readCardRawJson(resolvePath(appCwd, config.card)).raw;
 					const rules = displayRules(extractRegexScripts(raw));
 					let error = "";

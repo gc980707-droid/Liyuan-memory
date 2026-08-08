@@ -67,3 +67,12 @@ export function gateStatusTime(userText: string, currentTime: string, statusText
 	}
 	return { allowed: false, reason: `状态栏时间「${requested[0]}」与当前世界状态「${current[0]}」不一致；本轮没有明确时间推进，必须按世界状态填写。` };
 }
+
+export function extractClockPair(text: string): { value: number; raw: string } | null {
+	const match = text.match(/(?:上午|下午|晚上|夜里|深夜|凌晨)?\s*(\d{1,2})\s*[:：点时]\s*(\d{2})?/u);
+	if (!match) return null;
+	const hour = Number(match[1]);
+	const minute = Number(match[2] || 0);
+	if (hour > 23 || minute > 59) return null;
+	return { value: hour * 60 + minute, raw: match[0] };
+}
