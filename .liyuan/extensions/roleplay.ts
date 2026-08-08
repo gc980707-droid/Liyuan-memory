@@ -2079,7 +2079,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						delete scribePatch.time;
 						if (process.env.RP_DEBUG) console.error(`[rp-scribe] ${timeGate.reason}`);
 					}
-					const applied = applyPatch(state, scribePatch);
+					const applied = stateService
+						? await stateService.patchWorldState(scribePatch, { source: "scribe", turn })
+						: applyPatch(state, scribePatch);
 					state = applied.state;
 					if (!scribePatch.time) {
 						const inferredTime = advanceTimeForKnownAction(state.time, userText);
@@ -2088,8 +2090,10 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 							if (process.env.RP_DEBUG) console.error(`[rp-scribe] inferred action time → ${inferredTime}`);
 						}
 					}
-					if (stateFile) saveState(stateFile, state);
-					snapshotState();
+					if (!stateService) {
+						if (stateFile) saveState(stateFile, state);
+						snapshotState();
+					}
 					if (process.env.RP_DEBUG) {
 						console.error(`[rp-scribe] ${applied.applied.join("；") || "（无变更）"} stateTime=${state.time || "<empty>"}`);
 					}
