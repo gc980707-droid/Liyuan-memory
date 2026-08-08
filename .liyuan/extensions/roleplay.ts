@@ -184,6 +184,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	let statusSubmittedThisTurn = false;
 	/** 每次树导航递增；所有旁路 Agent 写入前必须验证，防止旧回合污染新分支。 */
 	let branchGeneration = 0;
+	let turnGeneration = 0;
 	let preflightKey = "";
 	let preflightAdvice: string | null = null;
 	let sceneStateAdvice: string | null = null;
@@ -405,6 +406,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	};
 
 	const isCurrentGeneration = (generation: number): boolean => generation === branchGeneration;
+	const isCurrentTurn = (turn: number, branch: number): boolean => turn === turnGeneration && branch === branchGeneration;
 
 	const initialMvuFromCard = (): MvuData => {
 		try {
@@ -1707,8 +1709,9 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			syncStateFromDisk();
 		}
 		if (!rpMode) return undefined;
-		branchGeneration += 1;
+		turnGeneration += 1;
 		const generation = branchGeneration;
+		const turn = turnGeneration;
 		preflightAdvice = null;
 		sceneStateAdvice = null;
 		statusSubmitAttempts = 0;
@@ -1727,7 +1730,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 				const scenePrompt = buildSceneStatePrompt({ text: prompt, characterNames: roster, worldState: formatState(state), characterProfiles: characterLoreProfiles(allEntries(), roster) });
 				const sceneOutput = await sideComplete(ctx, scenePrompt.systemPrompt, scenePrompt.userText, 700);
 				const sceneAdvice = sceneOutput ? parseSceneStateAdvice(sceneOutput) : null;
-				if (generation !== branchGeneration) return undefined;
+				if (!isCurrentTurn(turn, generation)) return undefined;
 				sceneStateAdvice = sceneAdvice ? formatSceneStateAdvice(sceneAdvice, roster) : null;
 				const proposals = await Promise.all(roster.map(async (name) => {
 					const intent = buildCharacterIntentPrompt({ name, profile: characterLoreProfiles(allEntries(), [name])[name], turnPlan: formatTurnPlan(turnPlan) });
@@ -1936,6 +1939,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 	pi.on("agent_end", (event, ctx) => {
 		if (!rpMode || !card) return;
 		const generation = branchGeneration;
+		const turn = turnGeneration;
 		const msgs = event.messages as Array<{
 			role?: string;
 			content?: unknown;
@@ -1971,7 +1975,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					const rules = displayRules(extractRegexScripts(raw));
 					let error = "";
 					for (let attempt = 1; attempt <= 3; attempt++) {
-						if (!isCurrentGeneration(generation)) return;
+						if (!isCurrentTurn(turn, generation)) return;
 						if (statusSubmitAttempts >= 3) return;
 						statusSubmitAttempts += 1;
 						const recovery = buildStatusRecoveryPrompt({
@@ -1989,7 +1993,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						const recovered = await sideComplete(ctx, recovery.systemPrompt, recovery.userText, 1800);
 						if (!recovered) { error = "状态栏为空"; continue; }
 						const result = validateStatusSubmission(recovered, { rules, charName: card?.name ?? "", userName: config.userName });
-						if (result.ok && isCurrentGeneration(generation)) {
+						if (result.ok && isCurrentTurn(turn, generation)) {
 							const statusTime = gateStatusTime(userText, state.time, recovered);
 							if (!statusTime.allowed) { error = statusTime.reason; continue; }
 							validatedStatus = result.status;
@@ -2011,7 +2015,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		if (config.multiAgentPreflight === true && card) {
 			void (async () => {
 				try {
-					if (!isCurrentGeneration(generation)) return;
+					if (!isCurrentTurn(turn, generation)) return;
 					const roster = cardManifest ? manifestAgentCharacters(cardManifest, assistantText) : coreCharacterNames(card, allEntries(), { userName: config.userName, sceneText: assistantText });
 					const characterProfiles = characterLoreProfiles(allEntries(), roster);
 					if (process.env.RP_DEBUG) console.error(`[rp-character-state] start characters=${roster.join(",") || "none"}`);
@@ -2027,7 +2031,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 						);
 						operations = output ? parseCharacterStateAgent(output) : null;
 					}
-					if (operations?.length && isCurrentGeneration(generation)) {
+					if (operations?.length && isCurrentTurn(turn, generation)) {
 						// 卡片没有 MVU 初始树时，角色状态 Agent 的 replace 也应能创建对象字段。
 						const stateOperations = operations.map((operation) =>
 							operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
@@ -2047,7 +2051,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					const continuityPrompt = buildCharacterContinuityPrompt({ userText, narrative: assistantText, currentMvu: formatMvuData(mvu), characterNames: roster, characterProfiles });
 					const continuityOutput = await sideComplete(ctx, continuityPrompt.systemPrompt, continuityPrompt.userText, 1100);
 					const continuityOperations = continuityOutput ? parseCharacterContinuityAgent(continuityOutput) : null;
-					if (continuityOperations?.length && isCurrentGeneration(generation)) {
+					if (continuityOperations?.length && isCurrentTurn(turn, generation)) {
 						const continuityApplied = applyMvuOperations(mvu, continuityOperations.map((operation) =>
 							operation.op === "replace" ? { ...operation, op: "insert" as const } : operation,
 						), { atomic: true });
@@ -2064,7 +2068,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 			})();
 		}
 		const mvuOperations = parseMvuUpdates(assistantText);
-		if (mvuOperations.length && isCurrentGeneration(generation)) {
+		if (mvuOperations.length && isCurrentTurn(turn, generation)) {
 			const applied = applyMvuOperations(mvu, mvuOperations);
 			if (applied.applied.length) {
 				mvu = applied.data;
@@ -2078,6 +2082,7 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 		scribeBusy = true;
 		const runScribe = async () => {
 			try {
+				// 场记只绑定世界线，不绑定回合：上一轮慢一点也必须完成记账。
 				if (!isCurrentGeneration(generation)) return;
 				const prompt = buildScribeTurnPrompt({
 					state,
@@ -2087,7 +2092,10 @@ export default function roleplayExtension(pi: ExtensionAPI) {
 					userName: config.userName,
 				});
 				// 只抽 patch，输出短，token 上限收紧
-				const text = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1024);
+				let text = await sideComplete(ctx, prompt.systemPrompt, prompt.userText, 1024);
+				if (!text && isCurrentGeneration(generation)) {
+					text = await sideComplete(ctx, `${prompt.systemPrompt}\n必须只输出有效 JSON；无变化输出 {"patch":{}}。`, prompt.userText, 700);
+				}
 				if (!text) return;
 				const result = parseScribeResult(text);
 				if (!result) {
