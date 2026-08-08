@@ -58,6 +58,7 @@ import {
 	takeAgentMergeLog,
 } from "../src/paths.ts";
 import { applyPatch, loadState, saveState } from "../src/state.ts";
+import { SessionStateService } from "../src/session-state-service.ts";
 import { loadMvuData } from "../src/mvu.ts";
 import { loadValidatedStatus } from "../src/status-submit.ts";
 import { DEFAULT_CONFIG, type RpConfig } from "../src/types.ts";
@@ -336,6 +337,11 @@ const currentState = () => loadState(join(stateDir, `${session.sessionId}.json`)
 
 const mvuDir = dir(cwd, "mvu");
 mkdirSync(mvuDir, { recursive: true });
+const hostStateService = new SessionStateService({
+	stateFile: join(stateDir, `${session.sessionId}.json`),
+	mvuFile: join(mvuDir, `${session.sessionId}.json`),
+	snapshotState: () => syncStoryStateFromDisk(),
+});
 const currentMvu = () => loadMvuData(join(mvuDir, `${session.sessionId}.json`));
 
 const statusDir = dir(cwd, "status");
@@ -1257,10 +1263,7 @@ const restHost: RestHost = {
 	},
 	// ---- 世界状态编辑（PLAN-PANELS §2.11）：用户主权 applyPatch，落盘即广播，命令桥收编进树 ----
 	async applyStatePatch(patch) {
-		const file = join(stateDir, `${session.sessionId}.json`);
-		const r = applyPatch(loadState(file), patch);
-		saveState(file, r.state); // fs.watch 自动广播 state 帧
-		syncStoryStateFromDisk();
+		const r = await hostStateService.patchWorldState(patch, { source: "rest" });
 		return { applied: r.applied, warnings: r.warnings };
 	},
 	// ---- 世界线视图 / 软删除 / 线名 ----
