@@ -57,6 +57,7 @@ import {
 	IconSend,
 	IconSessions,
 	IconSettings,
+	IconStatus,
 	IconStop,
 	IconUploads,
 	IconWorldline,
@@ -147,7 +148,8 @@ type PanelId =
 	| "persona"
 	| "roster"
 	| "uploads"
-	| "assistant";
+	| "assistant"
+	| "status";
 
 /** agent 自建面板的右栏选择 id（柱 2）：`agent:` + 面板名，页签随 panels 帧动态长出 */
 type AgentPanelId = `agent:${string}`;
@@ -160,7 +162,7 @@ const agentId = (name: string): AgentPanelId => `agent:${name}`;
  * - 右 4：角色卡 / 世界书 / 知识库 / 用户角色
  * 会话在底栏。
  */
-const LEFT_PANELS: PanelId[] = ["connect", "preset", "powers", "uploads"];
+const LEFT_PANELS: PanelId[] = ["connect", "preset", "powers", "uploads", "status"];
 const RIGHT_PANELS: PanelId[] = ["card", "lorebook", "codex", "persona"];
 /** 右栏可开面板全集：顶栏 4 入口 + 助手（入口在输入框发送钮右侧，不占顶栏） */
 const RIGHT_OPENABLE: PanelId[] = [...RIGHT_PANELS, "assistant"];
@@ -182,6 +184,7 @@ const PANEL_LABEL: Record<PanelId, string> = {
 	roster: "登场名录",
 	uploads: "上传区",
 	assistant: "助手",
+	status: "状态",
 };
 
 /** 顶栏图标(收纳入口的关键:图标承载识别,文字进 tooltip/aria-label) */
@@ -199,6 +202,7 @@ const PANEL_ICON: Record<PanelId, (p: { size?: number }) => React.JSX.Element> =
 	roster: IconRoster,
 	uploads: IconUploads,
 	assistant: IconAssistant,
+	status: IconStatus,
 };
 
 type CenterMenu = "settings" | "panels" | null;
@@ -1481,6 +1485,8 @@ export default function App() {
 						}}
 					/>
 				);
+			case "status":
+				return <StatusRail snapshot={statusBar} panel />;
 			case "assistant":
 				return (
 					<AssistantPanel
@@ -1552,7 +1558,7 @@ export default function App() {
 		const agent = headId.startsWith("agent:") ? agentPanels.find((p) => agentId(p.name) === headId) : undefined;
 		if (headId.startsWith("agent:") && !agent && open) return null;
 		const HeadIcon = agent ? IconDock : PANEL_ICON[headId as PanelId];
-		const refreshable = !agent;
+		const refreshable = !agent && id !== "status";
 		const doRefresh = () => {
 			if (id === "sessions") {
 				ws.send({ type: "sessions" });
@@ -1866,7 +1872,6 @@ export default function App() {
 			)}
 
 			<div className="layout">
-				<StatusRail snapshot={statusBar} />
 				{sidePanel(leftPanel, "left")}
 
 				<main className="center">
