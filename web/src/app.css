@@ -714,6 +714,66 @@ html[data-theme="dark"] [data-tip]:focus-visible::after {
 	display: none !important;
 	animation: none;
 }
+/* 左栏「当前状态」常驻窄条（状态栏工具管道；有快照才渲染）。
+   与 .side-left 同定位层；左面板打开时让位（:has 现代浏览器 OK）。 */
+.status-rail {
+	position: absolute;
+	top: 12px;
+	bottom: 16px;
+	left: 14px;
+	z-index: 9;
+	width: 290px;
+	background: color-mix(in srgb, var(--surface) 96%, #fff);
+	border: 1px solid var(--hairline);
+	border-radius: var(--radius-l);
+	box-shadow: var(--shadow-3);
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	overflow: hidden;
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
+}
+.layout:has(.side-left:not(.side-collapsed)) .status-rail {
+	display: none;
+}
+.status-rail-head {
+	flex: none;
+	padding: 12px 14px;
+	font-size: 12.5px;
+	font-weight: 600;
+	color: var(--text-strong);
+	border-bottom: 1px solid var(--hairline);
+	line-height: 1.5;
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+.status-rail-body {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 10px 12px 14px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+.status-rail-field {
+	font-size: 12.5px;
+	line-height: 1.55;
+	color: var(--text);
+}
+.status-rail-label {
+	display: block;
+	font-weight: 600;
+	color: var(--text-strong);
+	margin-bottom: 2px;
+	word-break: break-all;
+}
+.status-rail-value {
+	white-space: pre-wrap;
+	word-break: break-all;
+	color: var(--text-soft);
+}
 /* 顶栏下拉保活：关闭时整层不占事件 */
 .tb-drop-root.tb-drop-collapsed {
 	pointer-events: none;
@@ -3590,6 +3650,10 @@ input.panel-search.num {
 	.app {
 		/* 给 JS 写入键盘顶起量：--kb-inset */
 		padding-bottom: var(--kb-inset, 0px);
+	}
+	/* 手机：左栏状态窄条隐藏（状态栏改走消息内嵌的 StatusPanel 兜底） */
+	.status-rail {
+		display: none !important;
 	}
 
 	/* 顶栏：只要 10 个入口（左4 + 设置/面板 + 右4），去掉品牌/角色名/铃铛/状态点 */

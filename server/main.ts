@@ -102,6 +102,7 @@ import {
 	assistantMediaOfToolResult,
 	isBackstageText,
 	parseCardFromSessionHead,
+	statusBarSnapshotOf,
 	summarizeToolResult,
 	toAssistantHistory,
 	toWireHistory,
@@ -532,6 +533,15 @@ const branchMessages = (): unknown[] => {
 	}
 };
 
+/** 从分支消息逆序取最新一条含状态栏的原始消息 → 快照（会话级，天然随树正确） */
+const statusBarSnapshotOfLatest = (): import("./wire.ts").StatusBarSnapshot | null => {
+	for (const m of [...branchMessages()].reverse()) {
+		const snap = statusBarSnapshotOf(m);
+		if (snap) return snap;
+	}
+	return null;
+};
+
 const helloFrame = (): ServerFrame => {
 	const cardfront = loadCardFrontSnapshot(cwd);
 	const skin =
@@ -553,6 +563,7 @@ const helloFrame = (): ServerFrame => {
 		panels: currentPanels(),
 		// 一档皮肤与消息同帧:首屏不得依赖二次 REST(缓存/竞态会让 StatusBlock 回落统一面板)
 		cardfront,
+		statusbar: statusBarSnapshotOfLatest(),
 	};
 };
 
@@ -955,6 +966,9 @@ const bindSession = async () => {
 					// 中间 tool 轮 / 纯工具轮被过滤：清掉前端流式半成品，整轮只保留一个角色气泡
 					broadcast({ type: "stream", state: "clear" });
 				}
+				// 状态栏快照：本拍（或重放）含状态栏则推送最新一份到左栏
+				const snap = statusBarSnapshotOf(event.message);
+				if (snap) broadcast({ type: "statusbar", snapshot: snap });
 				break;
 			}
 			case "tool_execution_start": {

@@ -93,6 +93,7 @@ import { SettingsPanel } from "./components/SettingsPanel.tsx";
 import { SessionStatsBar, StatusStrip } from "./components/StatusStrip.tsx";
 import { UploadsPanel } from "./components/UploadsPanel.tsx";
 import { StoreModal, WorldlinePanel } from "./components/WorldlinePanel.tsx";
+import { StatusRail } from "./components/StatusRail.tsx";
 import { useWire, type ConnState } from "./ws.ts";
 import type {
 	AssistantModelInfo,
@@ -257,6 +258,8 @@ export default function App() {
 	const [stats, setStats] = useState<WireStats | null>(null);
 	const [warnings, setWarnings] = useState<WarnEntry[]>([]);
 	const [bellOpen, setBellOpen] = useState(false);
+	/** 左栏「当前状态」快照（hello / statusbar 帧驱动；无状态栏的卡为 null） */
+	const [statusBar, setStatusBar] = useState<import("./wire.ts").StatusBarSnapshot | null>(null);
 	// 决策门禁（Phase 4 柱 1）：当前挂起的选择卡（live 交互；应答后收敛，留痕由重放消息渲染）
 	const [activeChoice, setActiveChoice] = useState<{ id: string; question: string; options: string[]; placeholder?: string } | null>(null);
 	// agent 自建面板（柱 2）：server 推送的活跃面板全量（页签序）；入口在面板坞，展开到左栏
@@ -626,6 +629,7 @@ export default function App() {
 					);
 					setMsgEdit(null); // 会话对齐后关闭内联编辑
 					setWorldState(frame.state);
+					setStatusBar(frame.statusbar ?? null);
 					setStats(frame.stats);
 					// 一档皮肤:优先用 hello 同帧载荷(与消息同步),杜绝 REST 缓存/时序导致的漏皮
 					if (frame.cardfront) {
@@ -793,6 +797,9 @@ export default function App() {
 					break;
 				case "state":
 					setWorldState(frame.state);
+					break;
+				case "statusbar":
+					setStatusBar(frame.snapshot ?? null);
 					break;
 				case "panels": {
 					// agent 自建面板（柱 2）：新面板自动展开到左栏（agent 持有前端，建了就给用户看）；
@@ -1859,6 +1866,7 @@ export default function App() {
 			)}
 
 			<div className="layout">
+				<StatusRail snapshot={statusBar} />
 				{sidePanel(leftPanel, "left")}
 
 				<main className="center">

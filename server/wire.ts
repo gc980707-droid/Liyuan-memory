@@ -17,10 +17,15 @@ import { isBackstageText } from "../src/stance.ts";
 import { applyDraftOps, type DraftMsgLike } from "../src/draft.ts";
 import type { RpPanel } from "../src/panels.ts";
 import type { WorldState } from "../src/types.ts";
+import {
+	latestStatusBarSnapshot,
+	stripStatusBarText,
+	type StatusBarSnapshot,
+} from "../src/statusbar.ts";
 
 export type { DisplaySkin };
 
-export type { WorldState, RpPanel };
+export type { WorldState, RpPanel, StatusBarSnapshot };
 export { isBackstageText };
 
 export type WireChannel =
@@ -235,8 +240,12 @@ export type ServerFrame =
 				charName: string;
 				userName: string;
 			};
+			/** 最新状态栏快照（左栏「当前状态」面板数据源；无则 null） */
+			statusbar: StatusBarSnapshot | null;
 	  }
 	| { type: "message"; message: WireMsg }
+	/** 状态栏快照更新（新拍定稿后推送最新一份） */
+	| { type: "statusbar"; snapshot: StatusBarSnapshot | null }
 	/** draft=true：该 text 增量是 draft_write 参数的转发（替换语义——重交原地更新，不叠加）；reset=true：本次调用的首个分片 */
 	| { type: "delta"; kind: "text" | "thinking"; delta: string; draft?: boolean; reset?: boolean }
 	/** 稿件分段重同步（修复/重交后）：前端把屏上全部稿段原位替换为 segments（按空行切段） */
@@ -428,6 +437,13 @@ function textOf(content: unknown): string {
 		.join("\n");
 }
 
+/** 从原始消息（MsgLike）提取最新状态栏快照；无状态栏返回 null */
+export function statusBarSnapshotOf(m: unknown): StatusBarSnapshot | null {
+	if (!m || typeof m !== "object") return null;
+	const text = textOf((m as { content?: unknown }).content);
+	return text ? latestStatusBarSnapshot(text) : null;
+}
+
 /** 提取 thinking 块文本（主演思考过程，UI 折叠显示） */
 function thinkingOf(content: unknown): string {
 	if (!Array.isArray(content)) return "";
@@ -480,11 +496,13 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 
 		const scaffoldThinking = text ? extractScaffoldThinking(text) : "";
 		const thinking = [modelThinking, scaffoldThinking].filter(Boolean).join("\n\n").trim();
+		// 状态栏块先剥离（正文只留叙事；状态栏另走快照通道 → 左栏面板）
+		const proseText = text ? stripStatusBarText(text) : "";
 		// narrative：先卡显示正则再策略；backstage 仍纯文本策略（不套角色卡皮肤）
-		const display = text
+		const display = proseText
 			? channel === "narrative"
-				? prepareDisplayText(text, skin)
-				: prepareDisplayText(text, null)
+				? prepareDisplayText(proseText, skin)
+				: prepareDisplayText(proseText, null)
 			: "";
 
 		if (!display && !thinking) {
@@ -515,7 +533,7 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 			Array.isArray(rpTimeline) && rpTimeline.length > 0
 				? (rpTimeline as WireSegment[]).map((seg) =>
 						seg.kind === "text"
-							? { ...seg, text: prepareDisplayText(seg.text, tlSkin) }
+							? { ...seg, text: prepareDisplayText(stripStatusBarText(seg.text), tlSkin) }
 							: seg,
 					)
 				: undefined;
@@ -543,7 +561,7 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 			return {
 				channel: "greeting",
 				name: names.charName,
-				text: prepareDisplayText(text, skin),
+				text: prepareDisplayText(stripStatusBarText(text), skin),
 				...(index !== undefined && total !== undefined && total > 0
 					? { greetingPick: { index, total } }
 					: {}),
@@ -551,10 +569,12 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 		}
 		/** 用户手改后的角色回复：显示同叙事通道 */
 		if (msg.customType === "rp-edited-reply") {
-			return text ? { channel: "narrative", name: names.charName, text: prepareDisplayText(text, skin) } : null;
+			return text
+				? { channel: "narrative", name: names.charName, text: prepareDisplayText(stripStatusBarText(text), skin) }
+				: null;
 		}
 		if (msg.customType === "rp-import") {
-			return text ? { channel: "import", text: prepareDisplayText(text, skin) } : null;
+			return text ? { channel: "import", text: prepareDisplayText(stripStatusBarText(text), skin) } : null;
 		}
 		// 用户气泡「配音」写入的可展示音频（details.rpAudio；正文尽量不进 LLM 注意力，见 convert 侧仍可能带短标记）
 		if (msg.customType === "rp-audio") {

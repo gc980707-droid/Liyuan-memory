@@ -6,6 +6,7 @@ export type {
 	ClientFrame,
 	RpPanel,
 	ServerFrame,
+	StatusBarSnapshot,
 	UpdateWire,
 	WireActivity,
 	WireChannel,
