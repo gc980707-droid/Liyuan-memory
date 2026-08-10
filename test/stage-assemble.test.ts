@@ -139,10 +139,10 @@ test("system prompt：状态栏提示词分型——占位符型不引导展开�
 	assert.ok(placeholder.includes("不要往里填内容"), "明确禁止填内容");
 	assert.ok(!placeholder.includes("包住整块写出"), "占位符型不得沿用面板型措辞");
 
-	// 面板型（成对 <state1>…</state1>）：主演记账、系统渲染（不输出格式块）
+	// 面板型（成对 <state1>…</state1>）：主演零负担——系统读正文自动生成
 	const panel = buildStageSystemPrompt({ card, config, constantLore: [], statusBarFormats: ["`<state1>…</state1>`"] });
-	assert.ok(panel.includes("不需要输出任何状态栏标签或格式块"), "面板型：模型不再输出格式块");
-	assert.ok(panel.includes("status_fields"), "面板型：记账入口在场（主演记账）");
+	assert.ok(panel.includes("不需要输出任何状态栏格式块"), "面板型：模型不再输出格式块");
+	assert.ok(panel.includes("自动生成"), "面板型：读正文自动生成语义在场");
 
 	// 有字段清单时提示字段名（记账 key 依据）
 	const withFields = buildStageSystemPrompt({
@@ -171,7 +171,7 @@ test("system prompt：字节稳定、宏替换、主权红线随预设让位", (
 	assert.equal(a, b, "同素材两次装配必须逐字节一致");
 	assert.ok(a.includes("沈舟的同门师姐"), "{{user}} 宏应替换");
 	assert.ok(a.includes("绝不替 沈舟 说话、行动"), "无预设：harness 兜底纪律在场（叙事与文风节）");
-	assert.ok(a.includes("status_fields"), "状态栏记账入口在场（主演记账语义）");
+	assert.ok(a.includes("状态栏由剧场读你的正文自动生成"), "状态栏读正文自动生成语义在场");
 	assert.ok(a.includes("停在 沈舟 可以接话"), "演完即停是 harness 缺省（正面祈使句）");
 	assert.ok(a.includes("一场长篇沉浸式角色扮演"), "舞台只声明角色扮演（不抢预设身份工作）");
 
