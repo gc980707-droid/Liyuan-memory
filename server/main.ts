@@ -381,7 +381,12 @@ watch(stateDir, (_evt, filename) => {
 	clearTimeout(stateDebounce);
 	stateDebounce = setTimeout(() => {
 		try {
-			broadcast({ type: "state", state: currentState() });
+			const st = currentState();
+			broadcast({ type: "state", state: st });
+			// 状态栏快照随账本更新推送（场记生成后账本落盘即触发——message_end
+			// 先于场记完成，只有这里能保证「场记更新 → 左栏立即刷新」）
+			const snap = attachSkinHtml(renderStatusBarSnapshot());
+			if (snap) broadcast({ type: "statusbar", snapshot: snap });
 		} catch {
 			// 读取竞态（写入未完成）：下次事件再推
 		}
