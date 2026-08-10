@@ -797,6 +797,20 @@ html[data-theme="dark"] [data-tip]:focus-visible::after {
 	word-break: break-all;
 	color: var(--text-soft);
 }
+.status-panel-img {
+	display: block;
+	max-width: 100%;
+	max-height: 260px;
+	margin: 4px 0;
+	border-radius: var(--radius-m);
+	border: 1px solid var(--hairline);
+	object-fit: contain;
+	background: var(--surface-dim);
+}
+.status-panel-skin {
+	flex: 1 1 auto;
+	min-height: 0;
+}
 /* 非面板模式（内嵌兜底）：沿用面板视觉 */
 .status-rail {
 	background: color-mix(in srgb, var(--surface) 96%, #fff);

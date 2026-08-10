@@ -635,9 +635,36 @@ const renderStatusBarSnapshot = (): import("./wire.ts").StatusBarSnapshot | null
 	return { characters, raw: characters.map((c) => c.name).join("、") };
 };
 
+/** 快照统一补皮肤 HTML：无论来源（账本渲染 / 历史回退），有皮肤模板就生成 html */
+const attachSkinHtml = (snap: import("./wire.ts").StatusBarSnapshot | null): import("./wire.ts").StatusBarSnapshot | null => {
+	if (!snap) return snap;
+	const template = statusBarTemplateFor();
+	const skin = statusSkinFor();
+	if (!template || !skin) return snap;
+	const state = currentState();
+	for (const ch of snap.characters) {
+		const values: Record<string, string> = {};
+		// head 段（📅 日期：x | ⏰ 时间：y…）解析成值
+		for (const seg of ch.head.split("|")) {
+			const s = seg.trim();
+			const ci = s.indexOf("：");
+			const ci2 = s.indexOf(":");
+			const idx = ci < 0 ? ci2 : ci2 < 0 ? ci : Math.min(ci, ci2);
+			if (idx <= 0) continue;
+			const label = s.slice(0, idx).trim();
+			const val = s.slice(idx + 1).replace(/[』」」\]]+$/, "").trim();
+			if (label && val) values[label] = val;
+		}
+		for (const f of ch.fields) values[f.label] = f.value;
+		const slots = buildStatusBarValueSlots(template, state ?? {}, values);
+		ch.html = renderStatusBarHtml(skin, slots);
+	}
+	return snap;
+};
+
 /** hello / message_end 共用的快照来源：渲染优先（工具化），无则回退历史扫描（老格式兼容） */
 const statusBarSnapshotFor = (): import("./wire.ts").StatusBarSnapshot | null =>
-	renderStatusBarSnapshot() ?? statusBarSnapshotOfLatest();
+	attachSkinHtml(renderStatusBarSnapshot() ?? statusBarSnapshotOfLatest());
 
 const helloFrame = (): ServerFrame => {
 	const cardfront = loadCardFrontSnapshot(cwd);
