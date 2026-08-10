@@ -307,21 +307,17 @@ test("finalTimeline：无稿（直出路径）回退单段全文", () => {
 	assert.equal((textSegs[0] as { text: string }).text, "你好。");
 });
 
-test("draft_seal：回执谢幕导向——卡定义状态栏时点名「最后一步」（8/09 输出形式）", () => {
+test("draft_seal：回执不再催状态栏输出（8/10 工具化——系统自动生成）", () => {
+	// 卡定义状态栏：seal 回执也不催模型输出格式块（状态栏由 harness 生成）
 	const ws = createWorkspace();
 	const d = deps();
 	d.rules.statusBarTagGroup = ["StatusBlock"];
 	runWriteTool(ws, d, "draft_append", { segment: "他推门进屋，炉火将熄。" });
 	const r = runWriteTool(ws, d, "draft_seal", {});
-	assert.match(r.text, /最后一步/, "封笔回执点名谢幕");
-	assert.match(r.text, /StatusBlock/, "点名状态栏标签");
-	assert.match(r.text, /本拍结束/, "状态栏 = 结束标志");
-	// 卡没定义状态栏：不加谢幕导向（没有就不硬造）
-	const ws2 = createWorkspace();
-	const d2 = deps();
-	runWriteTool(ws2, d2, "draft_append", { segment: "他推门进屋，炉火将熄。" });
-	const r2 = runWriteTool(ws2, d2, "draft_seal", {});
-	assert.doesNotMatch(r2.text, /最后一步/, "无状态栏卡不催谢幕");
+	assert.ok(r.ok, "封笔成功");
+	assert.doesNotMatch(r.text, /最后一步/, "不催「最后一步输出格式块」");
+	assert.doesNotMatch(r.text, /StatusBlock/, "不点名状态栏标签");
+	assert.match(r.text, /已封笔/, "封笔回执在场");
 });
 
 test("修复死循环安全阀：同批违规连修 3 轮未消 → 放行推进（8/09 实弹误报保护）", () => {

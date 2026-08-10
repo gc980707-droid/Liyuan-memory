@@ -481,16 +481,10 @@ export function runWriteTool(
 		if (!ws.draft.trim()) return { text: "工作区还没有稿件——先用 draft_write / draft_append 写正文。", ok: false };
 		ws.sealed = true;
 		const c = runCheck(ws, deps);
-		// 谢幕导向（8/09 输出形式）：状态栏 = 本拍结束的标志。只点名这一步——
-		// seal 发生即收笔评估已做完，回执不再复述「含 ask/续写」条件（8/09 实弹：
-		// 条件从句会让模型在谢幕轮把续写评估再翻一遍）。
-		const sb = deps.rules.statusBarTagGroup;
-		const tail =
-			c.green && sb.length > 0
-				? `\n剩最后一步：在正文之外直接输出状态栏（${sb.map((t) => `<${t}>`).join(" 或 ")}）等格式块——输出完本拍结束。`
-				: "";
+		// 谢幕导向（8/09 输出形式 → 8/10 工具化修正）：状态栏由系统在拍末自动生成，
+		// seal 回执不再催模型输出任何格式块（模型只记账世界事实）。
 		return {
-			text: `已封笔。按完整稿验收：\n${c.text}${tail}`,
+			text: `已封笔。按完整稿验收：\n${c.text}`,
 			activity: c.green ? "封笔 · 验收通过" : "封笔 · 需修改",
 			ok: true,
 		};
