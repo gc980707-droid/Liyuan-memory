@@ -530,6 +530,19 @@ export function renderStatusBarHtml(skin: StatusBarSkin, valueSlots: string[]): 
 		parts.push(fillTemplate(script.template, slotValues.map(escapeHtml)));
 	}
 	let out = parts.join("");
+	// 配图回填：字段值里的 [IMG:url|desc] → 填充卡的配图模板（flj-md 等）；
+	// 模板不可用时用通用 img。占位符整段替换。
+	const imgSlot = valueSlots.find((v) => v && v.includes("[IMG:"));
+	if (imgSlot) {
+		const m = /\[IMG:([^\s|]+)\|([^\]]*)\]/.exec(imgSlot);
+		if (m) {
+			const figTemplate = skin.scripts.find((s) => /<img[^>]*src="\$1"/.test(s.template))?.template;
+			const figHtml = figTemplate
+				? fillTemplate(figTemplate, [m[1], m[2]].map(escapeHtml))
+				: `<img src="${escapeHtml(m[1])}" alt="${escapeHtml(m[2])}" style="max-width:100%;border-radius:10px;margin:6px 0;display:block">`;
+			out = out.replace(/§§IMG_START§§[\s\S]*?§§IMG_END§§/g, figHtml);
+		}
+	}
 	// 配图占位符残渣（无配图数据时链式模板未消费）：整段清理，不露文本
 	out = out.replace(/§§IMG_START§§[\s\S]*?§§IMG_END§§/g, "");
 	// 空的无图说明标签（无图模板填了空值）：删掉
