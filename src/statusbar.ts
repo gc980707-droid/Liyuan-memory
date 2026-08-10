@@ -343,6 +343,11 @@ export interface StatusBarSkinScript {
 	template: string;
 	/** 该模板的捕获组数（组序 = 状态栏内容书写序，用于 $1..$n 填充） */
 	groupCount: number;
+	/**
+	 * 组 → 值槽映射（导入时用卡示例块学习；-1 = 该组在示例块中未捕获/未匹配）。
+	 * 卡作者正则常做细粒度捕获（昵称/账号/数值单独抓），组序≠字段序——学习后按映射取槽。
+	 */
+	mapping: number[];
 }
 
 export interface StatusBarSkin {
@@ -400,8 +405,14 @@ export function parseGroupCount(findRegex: string): number {
  * - 筛出「状态栏相关」脚本（scriptName 或内容提到 状态栏/status/Status_block），
  *   且至少一个脚本的模板是 HTML（<style> / <div / <article 等）——避免误抓普通 status 脚本
  * - 保持卡内脚本原顺序（链式：容器头 → 内容 → 配图 → 容器尾）
+ * - sampleText 给卡状态栏示例块时：逐脚本学习「组 → 字段值槽」映射（跑一次 findRegex，
+ *   组值与示例字段值匹配）——卡作者正则常做细粒度捕获，组序≠字段序。
  */
-export function extractStatusBarSkin(raw: Record<string, unknown> | null | undefined): StatusBarSkin | null {
+export function extractStatusBarSkin(
+	raw: Record<string, unknown> | null | undefined,
+	sampleText?: string,
+	sampleFieldValues?: string[],
+): StatusBarSkin | null {
 	if (!raw || typeof raw !== "object") return null;
 	const data = raw.data && typeof raw.data === "object" ? (raw.data as Record<string, unknown>) : raw;
 	const ext = data.extensions && typeof data.extensions === "object" ? (data.extensions as Record<string, unknown>) : {};
@@ -426,7 +437,32 @@ export function extractStatusBarSkin(raw: Record<string, unknown> | null | undef
 			continue;
 		const groupCount = parseGroupCount(find);
 		if (groupCount < 0) continue;
-		picked.push({ template: replace, groupCount });
+		// 学习映射：跑一次 findRegex 于示例块，组值 ↔ 示例字段值匹配
+		const mapping: number[] = new Array(groupCount).fill(-1);
+		if (sampleText && sampleFieldValues && sampleFieldValues.length > 0 && groupCount > 0) {
+			try {
+				const body = /^\/([\s\S]*)\/[a-z]*$/.exec(find.trim());
+				const re = new RegExp(body ? body[1] : find.trim(), "s");
+				const m = re.exec(sampleText);
+				if (m) {
+					for (let g = 1; g <= groupCount; g++) {
+						const gv = (m[g] ?? "").trim();
+						if (!gv) continue;
+						// 精确相等优先，其次包含关系
+						const exact = sampleFieldValues.findIndex((fv) => fv === gv);
+						if (exact >= 0) {
+							mapping[g - 1] = exact;
+							continue;
+						}
+						const idx = sampleFieldValues.findIndex((fv) => fv && (fv.includes(gv) || gv.includes(fv)));
+						if (idx >= 0) mapping[g - 1] = idx;
+					}
+				}
+			} catch {
+				/* 学习失败：退化为顺序填充（组序=字段序假设） */
+			}
+		}
+		picked.push({ template: replace, groupCount, mapping });
 	}
 	if (picked.length === 0 || !sawStatusBlock) return null;
 	return { scripts: picked, valueSlots: [] };
@@ -474,16 +510,31 @@ export function fillTemplate(template: string, values: string[]): string {
 /**
  * 渲染状态栏 HTML（卡皮肤模板链填充）。
  * valueSlots 已按 head 段值 + 字段值（账本优先、卡示例兜底）铺好；
- * 各脚本模板按序取对应槽位填充后拼接（链式脚本的最终产物 ≈ 模板依次拼接）。
+ * 各脚本模板按序取槽位填充后拼接（链式脚本的最终产物 ≈ 模板依次拼接）。
+ * 有学习映射时按映射取槽（细粒度捕获对齐）；无映射退化为顺序填充。
  * 填充值一律 HTML 转义（防注入、防样式破坏）。
  */
 export function renderStatusBarHtml(skin: StatusBarSkin, valueSlots: string[]): string {
 	let cursor = 0;
 	const parts: string[] = [];
 	for (const script of skin.scripts) {
-		const slotValues = valueSlots.slice(cursor, cursor + script.groupCount).map(escapeHtml);
+		const mapped = script.mapping.some((x) => x >= 0);
+		const slotValues = new Array(script.groupCount).fill("");
+		for (let g = 0; g < script.groupCount; g++) {
+			const slotIdx = mapped ? script.mapping[g] : cursor + g;
+			if (slotIdx >= 0 && slotIdx < valueSlots.length) {
+				slotValues[g] = valueSlots[slotIdx];
+			}
+		}
 		cursor += script.groupCount;
-		parts.push(fillTemplate(script.template, slotValues));
+		parts.push(fillTemplate(script.template, slotValues.map(escapeHtml)));
 	}
-	return parts.join("");
+	let out = parts.join("");
+	// 配图占位符残渣（无配图数据时链式模板未消费）：整段清理，不露文本
+	out = out.replace(/§§IMG_START§§[\s\S]*?§§IMG_END§§/g, "");
+	// 空的无图说明标签（无图模板填了空值）：删掉
+	out = out.replace(/<div class="[^"]*nofig[^"]*">\s*<\/div>/g, "");
+	// 空 src 的 img（配图组未捕获到值）：删掉
+	out = out.replace(/<img[^>]*src=""[^>]*>/g, "");
+	return out;
 }

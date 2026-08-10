@@ -241,6 +241,41 @@ test("extractStatusBarSkin：抓取美化模板链（HTML 模板 + 捕获组数�
 	assert.equal(extractStatusBarSkin({ data: { first_mes: "无" } }), null);
 });
 
+test("extractStatusBarSkin：示例块学习组→值槽映射（细粒度捕获对齐）", () => {
+	const sample = `<Status_block>\n『📅 日期：7月15日 | ⏰ 时间：14:30 | 📍 位置：1号软卧包厢』\n<details><summary>[角色状态]</summary>\n- 苏小棉的状态\n  - 👤 姓名：苏小棉（棉宝/棉棉喵）\n  - 📝 当前行动：发完推文\n</details>\n</Status_block>`;
+	const fields = ["7月15日", "14:30", "1号软卧包厢", "苏小棉（棉宝/棉棉喵）", "发完推文"];
+	const skin = extractStatusBarSkin(SKIN_CARD, sample, fields);
+	assert.ok(skin);
+	// 容器头：组1=日期(槽0) 组2=时间(槽1) 组3=位置(槽2)
+	assert.deepEqual(skin?.scripts[0].mapping, [0, 1, 2], "容器头映射");
+	// 角色卡：组1=状态名(槽3) 组2=昵称(槽3 含于姓名整值) 组3=行动(槽4)
+	assert.deepEqual(skin?.scripts[1].mapping, [3, 3, 4], "角色卡映射（细粒度捕获归位到字段）");
+});
+
+test("renderStatusBarHtml：模板链按映射填充 → 完整 HTML", () => {
+	const sample = `<Status_block>\n『📅 日期：7月15日 | ⏰ 时间：14:30 | 📍 位置：1号软卧包厢』\n<details><summary>[角色状态]</summary>\n- 苏小棉的状态\n  - 👤 姓名：苏小棉（棉宝/棉棉喵）\n  - 📝 当前行动：发完推文\n</details>\n</Status_block>`;
+	const sampleFields = ["7月15日", "14:30", "1号软卧包厢", "苏小棉（棉宝/棉棉喵）", "发完推文"];
+	const skin = extractStatusBarSkin(SKIN_CARD, sample, sampleFields);
+	assert.ok(skin);
+	// 渲染时用当前账本值（槽位与示例同构）
+	const html = renderStatusBarHtml(skin!, ["7月16日", "21:00", "走廊", "苏小棉（棉棉喵）", "假装伸懒腰"]);
+	assert.ok(html.includes("<style>"), "容器头模板在场");
+	assert.ok(html.includes("7月16日"), "$1 填充日期（映射槽0）");
+	assert.ok(html.includes("21:00"), "$2 填充时间");
+	assert.ok(html.includes("假装伸懒腰"), "字段值填充（映射槽4）");
+	assert.ok(html.includes("苏小棉（棉棉喵）"), "细粒度组归位姓名整值");
+	assert.ok(html.includes("</div>"), "容器尾模板在场");
+	assert.ok(!html.includes("§§IMG_START§§"), "配图占位残渣已清理");
+});
+
+test("renderStatusBarHtml：无映射时退化顺序填充", () => {
+	const skin = extractStatusBarSkin(SKIN_CARD);
+	assert.ok(skin);
+	const html = renderStatusBarHtml(skin!, ["A", "B", "C", "D", "E", "F"]);
+	assert.ok(html.includes("A"), "顺序填充 $1");
+	assert.ok(html.includes("F"), "顺序填充 $6");
+});
+
 test("fillTemplate：$n 按槽位填充（非正则替换）", () => {
 	assert.equal(fillTemplate("a$1b$2c", ["X", "Y"]), "aXbYc");
 	assert.equal(fillTemplate("$1-$3", ["X", "Y"]), "X-", "缺槽位为空");

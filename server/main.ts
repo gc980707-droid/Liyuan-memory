@@ -583,9 +583,27 @@ const statusBarTemplateFor = (): import("../src/statusbar.ts").StatusBarTemplate
 				card.personality,
 			]);
 			// 皮肤：卡自带美化模板（regex_scripts 的 replaceString HTML 链）
+			// 学习映射：用卡示例块跑一次 findRegex，组值 ↔ 示例字段值对齐
 			try {
 				const rawCard = readCardRawJson(cardPath).raw;
-				statusSkinCache = { key, skin: extractStatusBarSkin(rawCard) };
+				const fieldSamples = template
+					? [
+							...template.head.split("|").map((seg) => {
+								const s = seg.trim();
+								const ci = s.indexOf("：");
+								const ci2 = s.indexOf(":");
+								const idx = ci < 0 ? ci2 : ci2 < 0 ? ci : Math.min(ci, ci2);
+								return idx > 0 ? s.slice(idx + 1).replace(/[』」」\]]+$/, "").trim() : "";
+							}),
+							...template.fieldLabels
+								.map((l) => template.rows.find((r) => r.kind === "field" && r.label === l)?.sample ?? "")
+								.filter((x) => x),
+						]
+					: undefined;
+				statusSkinCache = {
+					key,
+					skin: extractStatusBarSkin(rawCard, template?.raw, fieldSamples),
+				};
 			} catch {
 				statusSkinCache = { key, skin: null };
 			}
