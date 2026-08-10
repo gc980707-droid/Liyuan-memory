@@ -1,11 +1,13 @@
 /**
  * 「状态」面板（顶栏按钮开关，左栏渲染）：显示最新状态栏快照。
- * 多角色：顶部下拉切换出场角色，每个角色一份状态字段。
- * 数据源是服务端生成管道（卡模板 + 账本 status_fields + 每拍场记生成）的产物。
+ * 多角色：顶部下拉切换出场角色。
+ * 显示：卡自带美化模板（皮肤）渲染的 HTML 优先（HtmlFrame）；
+ * 无皮肤回落默认字段面板。全链路 harness 生成，零正则脚本。
  */
 
 import { useState } from "react";
 import type { StatusBarCharacter, StatusBarSnapshot } from "../../../server/wire.ts";
+import { HtmlFrame } from "./HtmlFrame.tsx";
 
 export function StatusRail({
 	snapshot,
@@ -56,6 +58,14 @@ export function StatusRail({
 }
 
 function StatusCharView({ c }: { c: StatusBarCharacter }) {
+	// 卡自带美化模板（皮肤）渲染的 HTML：直接嵌入显示（无痕 iframe）
+	if (c.html) {
+		return (
+			<div className="status-panel-skin">
+				<HtmlFrame html={c.html} seamless />
+			</div>
+		);
+	}
 	return (
 		<>
 			{c.head && <div className="status-panel-head">{c.head}</div>}

@@ -41,7 +41,7 @@ import {
 } from "../src/access.ts";
 import { loadAgentConfig, normalizeAgentConfig, syncAgentConfigToRuntime } from "../src/agent-config.ts";
 import { streamSimple } from "@liyuan/ai/compat";
-import { loadCardFile } from "../src/card.ts";
+import { loadCardFile, readCardRawJson } from "../src/card.ts";
 import { buildGreeting } from "../src/greeting.ts";
 import { StageEngine, type StageStreamFn } from "../src/stage/engine.ts";
 import { stateFromBranch, type BranchEntryLike } from "../src/stage/assemble.ts";
@@ -114,9 +114,12 @@ import {
 } from "./wire.ts";
 import { createAssistantHost, type AssistantHost, type StoryBridge } from "./assistant.ts";
 import {
+	buildStatusBarValueSlots,
+	extractStatusBarSkin,
 	extractStatusBarTemplate,
 	parseStatusBarBlock,
 	renderStatusBarFromState,
+	renderStatusBarHtml,
 } from "../src/statusbar.ts";
 import { registerAssistantRunner } from "../src/assistant-gateway.ts";
 import { sameCardPath } from "../src/paths.ts";
@@ -551,6 +554,8 @@ const statusBarSnapshotOfLatest = (): import("./wire.ts").StatusBarSnapshot | nu
 let statusTemplateCache: { key: string; template: import("../src/statusbar.ts").StatusBarTemplate | null } | null = null;
 /** 模板对应的卡名（主角；角色序排第一） */
 let statusTemplateCharName = "";
+/** 卡自带美化模板（皮肤）：同 key 缓存 */
+let statusSkinCache: { key: string; skin: import("../src/statusbar.ts").StatusBarSkin | null } | null = null;
 
 const statusBarTemplateFor = (): import("../src/statusbar.ts").StatusBarTemplate | null => {
 	let cardRel = "";
@@ -577,12 +582,25 @@ const statusBarTemplateFor = (): import("../src/statusbar.ts").StatusBarTemplate
 				card.description,
 				card.personality,
 			]);
+			// 皮肤：卡自带美化模板（regex_scripts 的 replaceString HTML 链）
+			try {
+				const rawCard = readCardRawJson(cardPath).raw;
+				statusSkinCache = { key, skin: extractStatusBarSkin(rawCard) };
+			} catch {
+				statusSkinCache = { key, skin: null };
+			}
 		}
 	} catch {
 		template = null;
 	}
 	statusTemplateCache = { key, template };
 	return template;
+};
+
+const statusSkinFor = (): import("../src/statusbar.ts").StatusBarSkin | null => {
+	statusBarTemplateFor(); // 确保缓存就位
+	if (!statusSkinCache || statusSkinCache.key !== statusTemplateCache?.key) return null;
+	return statusSkinCache.skin;
 };
 
 const templateCharName = (): string => statusTemplateCharName;
@@ -595,6 +613,7 @@ const renderStatusBarSnapshot = (): import("./wire.ts").StatusBarSnapshot | null
 	if (!state) return null;
 	const buckets = state.status_fields ?? {};
 	if (Object.keys(buckets).length === 0 && !state.time && !state.location) return null;
+	const skin = statusSkinFor();
 	// 角色序：账本出场序（characters 键优先），主角（卡名）排第一
 	const names = [...new Set([templateCharName(), ...Object.keys(buckets)])];
 	const characters: import("./wire.ts").StatusBarCharacter[] = [];
@@ -603,7 +622,14 @@ const renderStatusBarSnapshot = (): import("./wire.ts").StatusBarSnapshot | null
 		if (!bucket || Object.keys(bucket).length === 0) continue;
 		const text = renderStatusBarFromState(template, state, bucket);
 		const snap = parseStatusBarBlock(text, name);
-		if (snap.characters[0]) characters.push(snap.characters[0]);
+		if (!snap.characters[0]) continue;
+		const ch = snap.characters[0];
+		// 卡自带美化模板：值槽填充 → HTML（模板填充，非正则脚本）
+		if (skin) {
+			const slots = buildStatusBarValueSlots(template, state, bucket);
+			ch.html = renderStatusBarHtml(skin, slots);
+		}
+		characters.push(ch);
 	}
 	if (characters.length === 0) return null;
 	return { characters, raw: characters.map((c) => c.name).join("、") };

@@ -25,6 +25,8 @@ export interface StatusBarCharacter {
 	head: string;
 	/** 结构化字段（保持原文顺序） */
 	fields: StatusBarField[];
+	/** 卡自带美化模板（皮肤）渲染的 HTML——有则前端 HtmlFrame 显示，无则默认面板 */
+	html?: string;
 }
 
 export interface StatusBarSnapshot {
@@ -238,18 +240,19 @@ export function extractStatusBarTemplate(texts: string[]): StatusBarTemplate | n
 	};
 }
 
+/** 值查找：宽松匹配（段 label 常带 emoji 前缀，账本 key 可能只写「日期」——双向包含）；「未提及」视为无 */
+export function matchSlotValue(values: Record<string, string>, label: string): string | undefined {
+	const direct = values[label];
+	if (direct && direct !== "未提及") return direct;
+	for (const k of Object.keys(values)) {
+		const v = values[k];
+		if (v && v !== "未提及" && (label.includes(k) || k.includes(label))) return v;
+	}
+	return undefined;
+}
+
 /** head 行的段替换：『📅 日期：X | ⏰ 时间：Y | 📍 位置：Z』按 | 分段，段内「label：值」用账本值替换 */
 export function renderStatusBarHead(head: string, values: Record<string, string>): string {
-	// 宽松匹配：段 label 常带 emoji 前缀（📅 日期），账本 key 可能只写「日期」——双向包含判定
-	const findValue = (label: string): string | undefined => {
-		const direct = values[label];
-		if (direct && direct !== "未提及") return direct;
-		for (const k of Object.keys(values)) {
-			const v = values[k];
-			if (v && v !== "未提及" && (label.includes(k) || k.includes(label))) return v;
-		}
-		return undefined;
-	};
 	const parts = head.split("|").map((seg) => {
 		const s = seg.trim();
 		const ci = s.indexOf("：");
@@ -258,7 +261,7 @@ export function renderStatusBarHead(head: string, values: Record<string, string>
 		if (idx <= 0) return s;
 		const label = s.slice(0, idx).trim();
 		const oldValue = s.slice(idx + 1);
-		const v = findValue(label);
+		const v = matchSlotValue(values, label);
 		if (v) {
 			// 只替换值本体，保留段尾闭合符号（』」」等）
 			const suffix = (oldValue.match(/[』」」\]]+$/) ?? [""])[0];
@@ -267,6 +270,35 @@ export function renderStatusBarHead(head: string, values: Record<string, string>
 		return s;
 	});
 	return parts.join(" | ");
+}
+
+/**
+ * 值槽序（皮肤模板填充用）：head 段值（按 head 模板段序）→ 顶层字段值
+ * （账本 > 卡示例 > 空）。与卡美化脚本的捕获组串联序对应。
+ */
+export function buildStatusBarValueSlots(
+	template: StatusBarTemplate,
+	state: { time?: string; location?: string },
+	charFields?: Record<string, string>,
+): string[] {
+	const values: Record<string, string> = { ...(charFields ?? {}) };
+	if (state.time && !values["时间"]) values["时间"] = state.time;
+	if (state.location && !values["位置"]) values["位置"] = state.location;
+	const slots: string[] = [];
+	for (const seg of template.head.split("|")) {
+		const s = seg.trim();
+		const ci = s.indexOf("：");
+		const ci2 = s.indexOf(":");
+		const idx = ci < 0 ? ci2 : ci2 < 0 ? ci : Math.min(ci, ci2);
+		if (idx <= 0) continue;
+		slots.push(matchSlotValue(values, s.slice(0, idx).trim()) ?? "");
+	}
+	for (const label of template.fieldLabels) {
+		const v = values[label];
+		const effective = v && v !== "未提及" ? v : template.rows.find((r) => r.kind === "field" && r.label === label)?.sample;
+		slots.push(effective ?? "");
+	}
+	return slots;
 }
 
 /**
@@ -299,4 +331,159 @@ export function renderStatusBarFromState(
 		}
 	}
 	return `<Status_block>\n${head}\n${lines.join("\n")}\n</Status_block>`;
+}
+
+// ---------------- 卡自带美化模板（皮肤）：导入时抓取，harness 填充 ----------------
+// 角色卡的美化正则脚本 = 作者手写的 HTML/CSS 模板（replaceString）+ 匹配机制（findRegex）。
+// harness 已经自己生成内容，不需要匹配机制——导入时把模板链抓出来，
+// 渲染时用结构化字段按捕获组序填充（模板填充，非正则替换）。每张卡的状态栏都是它自己的设计。
+
+export interface StatusBarSkinScript {
+	/** 作者写的 HTML 模板（原 replaceString） */
+	template: string;
+	/** 该模板的捕获组数（组序 = 状态栏内容书写序，用于 $1..$n 填充） */
+	groupCount: number;
+}
+
+export interface StatusBarSkin {
+	scripts: StatusBarSkinScript[];
+	/** 状态栏内容值槽序（head 段值 → 字段值），与所有脚本的组序串联对应 */
+	valueSlots: string[];
+}
+
+/** 解析正则字符串的捕获组数（跳过转义、字符类、非捕获组）；解析失败返回 -1 */
+export function parseGroupCount(findRegex: string): number {
+	const s = findRegex.trim();
+	// 剥掉 /pattern/flags 外壳
+	let body = s;
+	const shell = /^\/([\s\S]*)\/[a-z]*$/.exec(s);
+	if (shell) body = shell[1];
+	let count = 0;
+	let i = 0;
+	while (i < body.length) {
+		const ch = body[i];
+		if (ch === "\\") {
+			i += 2;
+			continue;
+		}
+		if (ch === "[") {
+			// 字符类内跳过（含 ] 转义）
+			i++;
+			while (i < body.length && body[i] !== "]") {
+				if (body[i] === "\\") i++;
+				i++;
+			}
+			i++;
+			continue;
+		}
+		if (ch === "(") {
+			const rest = body.slice(i + 1);
+			// 非捕获组 / 断言 / 具名组判别
+			if (rest.startsWith("?:")) {
+				// 非捕获
+			} else if (rest.startsWith("?=") || rest.startsWith("?!") || rest.startsWith("?<=") || rest.startsWith("?<!")) {
+				// 断言
+			} else if (rest.startsWith("?<")) {
+				// 具名捕获组 (?<name>...
+				count++;
+			} else {
+				count++;
+			}
+		}
+		i++;
+	}
+	return count;
+}
+
+/**
+ * 从卡 regex_scripts 抓状态栏美化模板链：
+ * - 筛出「状态栏相关」脚本（scriptName 或内容提到 状态栏/status/Status_block），
+ *   且至少一个脚本的模板是 HTML（<style> / <div / <article 等）——避免误抓普通 status 脚本
+ * - 保持卡内脚本原顺序（链式：容器头 → 内容 → 配图 → 容器尾）
+ */
+export function extractStatusBarSkin(raw: Record<string, unknown> | null | undefined): StatusBarSkin | null {
+	if (!raw || typeof raw !== "object") return null;
+	const data = raw.data && typeof raw.data === "object" ? (raw.data as Record<string, unknown>) : raw;
+	const ext = data.extensions && typeof data.extensions === "object" ? (data.extensions as Record<string, unknown>) : {};
+	const scripts = Array.isArray(ext.regex_scripts) ? ext.regex_scripts : [];
+	const picked: StatusBarSkinScript[] = [];
+	let sawStatusBlock = false;
+	for (const s of scripts) {
+		if (!s || typeof s !== "object") continue;
+		const r = s as Record<string, unknown>;
+		const name = typeof r.scriptName === "string" ? r.scriptName : "";
+		const find = typeof r.findRegex === "string" ? r.findRegex : "";
+		const replace = typeof r.replaceString === "string" ? r.replaceString : "";
+		const isStatus = /状态栏|status|Status_?block/i.test(name + "\n" + find + "\n" + replace.slice(0, 300));
+		if (!isStatus) continue;
+		if (/Status_?block/i.test(name + "\n" + find + "\n" + replace)) sawStatusBlock = true;
+		// 只收 HTML 模板（美化脚本的 replaceString 是界面；纯文本替换不是皮肤）。
+		// 闭合类模板（如 </div> 容器尾）以闭合标签开头也算。
+		if (
+			!/<\s*(?:style|div|article|section|span|aside|main|table|img|a|p|h[1-6])[\s>]/i.test(replace) &&
+			!/^\s*<\/(?:div|article|section|aside|main|table|span)\s*>/.test(replace)
+		)
+			continue;
+		const groupCount = parseGroupCount(find);
+		if (groupCount < 0) continue;
+		picked.push({ template: replace, groupCount });
+	}
+	if (picked.length === 0 || !sawStatusBlock) return null;
+	return { scripts: picked, valueSlots: [] };
+}
+
+/** HTML 转义（模板填充防注入） */
+export function escapeHtml(s: string): string {
+	return s
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
+}
+
+/**
+ * 模板填充：把模板里的 $1..$n 替换为 values 对应槽位（$n ← values[n-1]）。
+ * 手动扫描实现（不用替换类正则——渲染机制不依赖正则脚本）。
+ */
+export function fillTemplate(template: string, values: string[]): string {
+	let out = "";
+	let i = 0;
+	while (i < template.length) {
+		const ch = template[i];
+		if (ch === "$") {
+			let j = i + 1;
+			let num = "";
+			while (j < template.length && /[0-9]/.test(template[j])) {
+				num += template[j];
+				j++;
+			}
+			if (num) {
+				const idx = Number(num) - 1;
+				out += idx >= 0 && idx < values.length ? values[idx] : "";
+				i = j;
+				continue;
+			}
+		}
+		out += ch;
+		i++;
+	}
+	return out;
+}
+
+/**
+ * 渲染状态栏 HTML（卡皮肤模板链填充）。
+ * valueSlots 已按 head 段值 + 字段值（账本优先、卡示例兜底）铺好；
+ * 各脚本模板按序取对应槽位填充后拼接（链式脚本的最终产物 ≈ 模板依次拼接）。
+ * 填充值一律 HTML 转义（防注入、防样式破坏）。
+ */
+export function renderStatusBarHtml(skin: StatusBarSkin, valueSlots: string[]): string {
+	let cursor = 0;
+	const parts: string[] = [];
+	for (const script of skin.scripts) {
+		const slotValues = valueSlots.slice(cursor, cursor + script.groupCount).map(escapeHtml);
+		cursor += script.groupCount;
+		parts.push(fillTemplate(script.template, slotValues));
+	}
+	return parts.join("");
 }
