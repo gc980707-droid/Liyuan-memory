@@ -162,17 +162,37 @@ export function applyPatch(state: WorldState, patch: Record<string, unknown>): P
 				break;
 			}
 			case "status_fields": {
-				// 卡状态栏字段（模型记账、harness 渲染）：按 label 键合并，null 删除
+				// 卡状态栏字段（harness 每拍生成、多角色）：按角色合并。
+				// 形态：{ 角色名: { 字段label: 值 } }；null 删除整角色；扁平值视为卡主角（迁移兼容）。
 				if (value && typeof value === "object" && !Array.isArray(value)) {
-					const cur: Record<string, string> = { ...(next.status_fields ?? {}) };
+					const cur: Record<string, Record<string, string>> = { ...(next.status_fields ?? {}) };
 					for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
 						if (v === null) {
 							delete cur[k];
 							applied.push(`status_fields.${k} 已移除`);
-						} else if (typeof v === "string") {
-							cur[k] = v;
-							applied.push(`status_fields.${k} → ${v.slice(0, 40)}${v.length > 40 ? "…" : ""}`);
-						} else warnings.push(`status_fields.${k} 需要字符串或 null，已忽略`);
+							continue;
+						}
+						if (typeof v === "string") {
+							// 扁平单角色形态（旧版/主角）：并入当前主角，键=字段
+							const char = next.characters && Object.keys(next.characters).length ? Object.keys(next.characters)[0] : k;
+							const bucket: Record<string, string> = cur[char] ?? {};
+							bucket[k] = v;
+							cur[char] = bucket;
+							applied.push(`status_fields.${char}.${k} → ${v.slice(0, 40)}${v.length > 40 ? "…" : ""}`);
+							continue;
+						}
+						if (!v || typeof v !== "object" || Array.isArray(v)) {
+							warnings.push(`status_fields.${k} 需要对象（角色字段KV）或 null，已忽略`);
+							continue;
+						}
+						const bucket: Record<string, string> = { ...(cur[k] ?? {}) };
+						for (const [f, fv] of Object.entries(v as Record<string, unknown>)) {
+							if (fv === null) delete bucket[f];
+							else if (typeof fv === "string") bucket[f] = fv;
+							else warnings.push(`status_fields.${k}.${f} 需要字符串或 null，已忽略`);
+						}
+						cur[k] = bucket;
+						applied.push(`status_fields.${k} 已更新`);
 					}
 					next.status_fields = cur;
 				} else warnings.push("status_fields 需要对象，已忽略");

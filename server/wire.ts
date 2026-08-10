@@ -20,12 +20,13 @@ import type { WorldState } from "../src/types.ts";
 import {
 	latestStatusBarSnapshot,
 	stripStatusBarText,
+	type StatusBarCharacter,
 	type StatusBarSnapshot,
 } from "../src/statusbar.ts";
 
 export type { DisplaySkin };
 
-export type { WorldState, RpPanel, StatusBarSnapshot };
+export type { WorldState, RpPanel, StatusBarCharacter, StatusBarSnapshot };
 export { isBackstageText };
 
 export type WireChannel =

@@ -94,15 +94,15 @@ export async function runScribeTurn(deps: ScribeRunDeps, input: ScribeRunInput):
 }
 
 /**
- * 状态栏字段补全（8/10 工具化：缺字段由 harness 主动调模型补，不静默留空）。
- * 只合并 status_fields；失败只跳过补全（主演已记的值保留，渲染端无值字段兜底跳过）。
+ * 状态栏生成（8/10 工具化·一次生成）：每拍为出场角色生成完整状态栏字段。
+ * 只合并 status_fields；失败只跳过生成（渲染端无字段角色自然不显示）。
  * 同场记：叶守卫——调用期间树动过则整体丢弃。
  */
 export async function runStatusBarCompletion(
 	deps: ScribeRunDeps,
-	input: ScribeRunInput & { fieldLabels: string[] },
+	input: ScribeRunInput & { fieldLabels: string[]; knownCharacters: string[] },
 ): Promise<ScribeRunOutcome> {
-	const { state, userText, assistantText, charName, userName, fieldLabels } = input;
+	const { state, userText, assistantText, charName, userName, fieldLabels, knownCharacters } = input;
 	if (fieldLabels.length === 0) return { kind: "skipped", reason: "no-fields" };
 	if (!assistantText.trim()) return { kind: "skipped", reason: "no-text" };
 
@@ -110,6 +110,7 @@ export async function runStatusBarCompletion(
 	const prompt = buildStatusBarCompletionPrompt({
 		fieldLabels,
 		current: state.status_fields ?? {},
+		knownCharacters,
 		assistantText,
 		charName,
 		userName,
@@ -119,12 +120,12 @@ export async function runStatusBarCompletion(
 
 	const parsed = parseStatusBarCompletion(resp);
 	if (!parsed || Object.keys(parsed.statusFields).length === 0) {
-		return { kind: "failed", error: "状态栏补全输出不可解析" };
+		return { kind: "failed", error: "状态栏生成输出不可解析" };
 	}
 
 	// R9 叶守卫
 	if (deps.getLeafId() !== leafBefore) {
-		deps.onActivity?.("状态栏补全已丢弃（本拍期间切换了分支）");
+		deps.onActivity?.("状态栏生成已丢弃（本拍期间切换了分支）");
 		return { kind: "stale" };
 	}
 
@@ -137,8 +138,11 @@ export async function runStatusBarCompletion(
 			// 缓存写失败不影响树上快照
 		}
 	}
-	const filled = fieldLabels.filter((f) => result.state.status_fields?.[f]);
-	deps.onActivity?.(`状态栏字段补全（${filled.length}/${fieldLabels.length} 项）`);
+	const filled = Object.values(result.state.status_fields ?? {}).reduce(
+		(n, bucket) => n + Object.keys(bucket).length,
+		0,
+	);
+	deps.onActivity?.(`状态栏已生成（${Object.keys(result.state.status_fields ?? {}).length} 角色 · ${filled} 字段）`);
 	return { kind: "applied", state: result.state, applied: result.applied };
 }
 

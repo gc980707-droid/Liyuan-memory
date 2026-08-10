@@ -841,6 +841,10 @@ export class StageEngine {
 		// 主演不需要记账状态栏；harneness 用这一发直接生成（用户定调：调一次生成，不留缺口）。
 		if (entryId && !aborted && finalText && materials.statusBarFields.length > 0) {
 			const nextState = projectedState(ws, state);
+			const knownCharacters = [
+				...(Object.keys(nextState.characters).length ? Object.keys(nextState.characters) : [materials.card.name]),
+				materials.config.userName,
+			];
 			const r = await runStatusBarCompletion(
 				{
 					sideText: (sp, ut) => this.#sideText(model, sp, ut, { apiKey, headers }, 2048),
@@ -856,6 +860,7 @@ export class StageEngine {
 					charName: materials.card.name,
 					userName: materials.config.userName,
 					fieldLabels: materials.statusBarFields,
+					knownCharacters,
 				},
 			);
 			if (r.kind === "failed") console.error(`[stage-statusbar] 生成跳过：${r.error}`);

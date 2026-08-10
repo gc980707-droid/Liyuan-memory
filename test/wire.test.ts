@@ -140,7 +140,11 @@ test("显示层剥预设脚手架：draft_notes/content/HTML 注释；假思维�
 	assert.ok(!w?.text.includes("地点:御书房"), "状态栏不出现在正文");
 	const snap = statusBarSnapshotOf(msg);
 	assert.ok(snap, "快照可提取");
-	assert.ok(snap?.head.includes("地点:御书房") || snap?.fields.some((f) => f.label.includes("地点")), "快照含状态栏内容");
+	assert.ok(
+		snap?.characters[0]?.head.includes("地点:御书房") ||
+			snap?.characters[0]?.fields.some((f) => f.label.includes("地点")),
+		"快照含状态栏内容",
+	);
 	assert.ok(w?.thinking?.includes("分析要点"), "草稿进折叠思维链");
 });
 

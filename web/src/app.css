@@ -724,6 +724,30 @@ html[data-theme="dark"] [data-tip]:focus-visible::after {
 	flex-direction: column;
 	gap: 10px;
 }
+.status-panel-picker {
+	flex: none;
+	display: flex;
+}
+.status-panel-select {
+	flex: 1 1 auto;
+	appearance: none;
+	-webkit-appearance: none;
+	background: color-mix(in srgb, var(--surface-dim) 60%, transparent);
+	border: 1px solid var(--hairline);
+	border-radius: var(--radius-m);
+	color: var(--text-strong);
+	font-size: 13px;
+	font-weight: 600;
+	padding: 7px 10px;
+	cursor: pointer;
+}
+.status-panel-select:hover {
+	border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.status-panel-select:focus-visible {
+	outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+	outline-offset: 1px;
+}
 .status-panel-head {
 	flex: none;
 	font-size: 13px;

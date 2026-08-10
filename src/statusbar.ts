@@ -18,11 +18,18 @@ export interface StatusBarField {
 	value: string;
 }
 
-export interface StatusBarSnapshot {
+export interface StatusBarCharacter {
+	/** 角色名（账本规范名） */
+	name: string;
 	/** 头部行（如 『📅 日期：7月15日 | ⏰ 时间：14:30 | 📍 位置：1号软卧包厢』） */
 	head: string;
 	/** 结构化字段（保持原文顺序） */
 	fields: StatusBarField[];
+}
+
+export interface StatusBarSnapshot {
+	/** 角色列表（前端下拉切换；至少一个） */
+	characters: StatusBarCharacter[];
 	/** 原始块全文（调试 / 兜底渲染） */
 	raw: string;
 }
@@ -103,12 +110,25 @@ export function latestStatusBarSnapshot(text: string): StatusBarSnapshot | null 
 	return parseStatusBarBlock(blocks[blocks.length - 1]);
 }
 
+/** 从块内提取角色名：顶层无冒号 bullet（如 `- 苏小棉的状态`）去掉「的状态」尾巴；无则空 */
+function guessCharName(inner: string): string {
+	for (const line of inner.split(/\r?\n/)) {
+		const t = line.trim();
+		if (!t || /^\s/.test(line)) continue;
+		const m = /^[-•*]\s*(.+)$/.exec(t);
+		if (!m) continue;
+		const item = m[1].trim();
+		if (!/[:：]/.test(item)) return item.replace(/的\s*状态\s*$/, "").trim();
+	}
+	return "";
+}
+
 /**
  * 单块 → 结构化快照。
  * 解析是“行前缀”扫描（非正则美化）：头部取『…』整行；字段取 details 内的
  * `- 前缀：值` 行，嵌套子行（缩进的子 bullet / 多行）归并进上一个字段值。
  */
-export function parseStatusBarBlock(block: string): StatusBarSnapshot {
+export function parseStatusBarBlock(block: string, charName?: string): StatusBarSnapshot {
 	const inner = block
 		.replace(OPEN_RE, "")
 		.replace(CLOSE_RE, "")
@@ -153,7 +173,8 @@ export function parseStatusBarBlock(block: string): StatusBarSnapshot {
 		}
 	}
 	// 去掉 value 为空的字段（- 🐦 推特日记： 这种纯标题行也是空值，保留 label 也行）
-	return { head, fields, raw };
+	const name = charName || guessCharName(inner) || "角色";
+	return { characters: [{ name, head, fields }], raw };
 }
 
 // ---------------- 彻底工具化：模板提取 + 账本渲染 ----------------
@@ -247,24 +268,24 @@ export function renderStatusBarHead(head: string, values: Record<string, string>
 }
 
 /**
- * 账本 → 状态栏块文本：按模板行骨架重建。
- * - head：renderStatusBarHead 段替换（日期/时间/位置等查 status_fields）
- * - field 行：value = status_fields[label] ?? ""（空值输出空）
+ * 账本 → 某角色的状态栏块文本：按模板行骨架重建。
+ * - charFields：该角色 status_fields（label → 值）
+ * - head：renderStatusBarHead 段替换（日期/时间/位置等查该角色字段 + 全局 time/location）
+ * - field 行：value = charFields[label]；无值整行跳过（不露空行）
  * - static 行（details/summary 骨架等）：原样
  */
 export function renderStatusBarFromState(
 	template: StatusBarTemplate,
-	state: { time?: string; location?: string; status_fields?: Record<string, string> },
+	state: { time?: string; location?: string },
+	charFields?: Record<string, string>,
 ): string {
-	const values: Record<string, string> = { ...(state.status_fields ?? {}) };
+	const values: Record<string, string> = { ...(charFields ?? {}) };
 	if (state.time && !values["时间"]) values["时间"] = state.time;
 	if (state.location && !values["位置"]) values["位置"] = state.location;
 	const head = renderStatusBarHead(template.head, values);
 	const lines: string[] = [];
 	for (const row of template.rows) {
 		if (row.kind === "field") {
-			// 账本无值的字段整行跳过——模板子结构（⏱️ 时间/推文/评论名等）不记账就不露空行；
-			// 顶层字段记账时写完整文本（嵌套内容合并成一行）。
 			const v = values[row.label];
 			if (v === undefined || v === "") continue;
 			lines.push(`${row.indent}- ${row.label}：${v}`);

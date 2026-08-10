@@ -64,10 +64,11 @@ export interface WorldState {
 	/** 登场名录（applyPatch 咽喉点自动登记；旧存档无此字段按空处理） */
 	roster?: StateRoster;
 	/**
-	 * 卡状态栏字段（彻底工具化：模型只记账、harness 渲染）。
-	 * 键 = 卡状态栏模板里的字段 label（如 👤 姓名 / 📝 当前行动），值 = 最新状态文本。
+	 * 卡状态栏字段（彻底工具化：harness 每拍生成、主演零负担）。
+	 * 多角色支持：键 = 角色规范名，值 = 该角色的字段KV（键 = 卡状态栏模板字段 label，
+	 * 如 👤 姓名 / 📝 当前行动）。旧扁平形态（string 值）视为卡主角一份，加载时迁移。
 	 */
-	status_fields?: Record<string, string>;
+	status_fields?: Record<string, Record<string, string>>;
 }
 
 export interface CharacterState {

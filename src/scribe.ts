@@ -121,13 +121,15 @@ export function parseScribeResult(text: string): ScribeResult | null {
 	return null;
 }
 
-// ---------- 状态栏字段补全（8/10 工具化：缺字段由 harness 主动调模型补） ----------
+// ---------- 状态栏字段生成（8/10 工具化·一次生成；多角色支持） ----------
 
 export interface StatusBarCompletionInput {
 	/** 卡状态栏模板顶层字段清单 */
 	fieldLabels: string[];
-	/** 账本当前 status_fields（已有值；缺失字段待补） */
-	current: Record<string, string>;
+	/** 账本当前 status_fields（角色 → 字段KV；已有值保留） */
+	current: Record<string, Record<string, string>>;
+	/** 出场角色（账本 characters 键 + 主角/用户；生成这些角色的状态栏） */
+	knownCharacters: string[];
 	/** 本拍定稿正文 */
 	assistantText: string;
 	charName: string;
@@ -135,35 +137,41 @@ export interface StatusBarCompletionInput {
 }
 
 export interface StatusBarCompletionResult {
-	/** 完整 status_fields（含已有值与补齐值） */
-	statusFields: Record<string, string>;
+	/** 角色 → 完整 status_fields（含已有值与更新值） */
+	statusFields: Record<string, Record<string, string>>;
 }
 
 /**
- * 补全 prompt：给字段清单 + 已有值 + 本轮正文，让场记把每个字段的最新值填全。
- * 缺失字段必须补（能从正文推断就填，推断不出填空串并注明？——填正文里最新的信息，
- * 宁可给保守描述也不留空）；已有字段按正文最新状态更新。
+ * 生成 prompt：给字段清单 + 各角色已有值 + 本轮正文，让场记为**每个出场角色**
+ * 生成一份状态栏字段（已有值保留、变化更新、缺失从正文推断）。
+ * 输出 {角色名: {字段: 值}} —— 角色名用账本规范写法。
  */
 export function buildStatusBarCompletionPrompt(input: StatusBarCompletionInput): {
 	systemPrompt: string;
 	userText: string;
 } {
-	const { fieldLabels, current, assistantText, charName, userName } = input;
+	const { fieldLabels, current, knownCharacters, assistantText, charName, userName } = input;
 	const fields = fieldLabels.join("\n");
+	const chars = knownCharacters.length ? knownCharacters.join("、") : `${charName}、${userName}`;
 	const currentJson = JSON.stringify(current, null, 2);
-	const systemPrompt = `你是角色扮演的场记。角色卡定义了状态栏，每个字段需要每拍的最新值。阅读【本轮正文】与【当前字段值】，输出 JSON：把【字段清单】里的每个字段补全为**本拍最新状态**。
+	const systemPrompt = `你是角色扮演的场记。角色卡定义了状态栏，每个出场角色需要每拍的最新状态。阅读【本轮正文】与【当前各角色状态】，输出 JSON：为**每个出场角色**生成一份状态栏字段。
 
 规则：
-- 每个字段都必须出现；已有值若无变化就原样保留；有变化按正文最新状态更新。
-- 缺失字段从正文推断（动作/神态/对话/环境细节都能支撑状态描述）；实在推断不出就给保守的空态描述（如「暂无变化」），不留空。
+- 输出对象按角色分组：{"status_fields": {"角色名": {"字段": "值", ...}, ...}}
+- 角色名用账本规范写法；至少包含主角「${charName}」与出场角色；本拍**没有戏份的角色**可以省略（保留在账本里，不输出即可）。
+- 每个角色的每个字段都必须出现；已有值若无变化就原样保留；有变化按正文最新状态更新。
+- 缺失字段从正文推断（动作/神态/对话/环境细节都能支撑状态描述）；实在推断不出就给保守的空态描述（如「未提及」），不留空。
 - 状态描述贴合本拍正文的具体细节，不编造正文里没有的重大事件。
+- **只写该角色自己的状态**：主角的字段写主角的行动/内心/穿搭，不要把另一角色的状态串进来（上一拍曾出现把用户角色状态写进主角状态栏的错误——角色分组必须严格对应）。
 
-字段清单：
+字段清单（每个角色都按这份填）：
 ${fields}
 
-只输出 JSON 对象：{"status_fields": { "字段名": "值", ... }}。不要输出任何其他文字。`;
+出场角色：${chars}
 
-	const user = `【当前字段值】（供参考，字段可能缺失）
+只输出 JSON 对象：{"status_fields": {...}}。不要输出任何其他文字。`;
+
+	const user = `【当前各角色状态】（供参考，字段可能缺失）
 ${currentJson}
 
 【本轮正文】
@@ -175,7 +183,7 @@ ${charName}：${assistantText}`;
 	return { systemPrompt, userText: user };
 }
 
-/** 宽容解析补全输出：{status_fields:{...}}；解析失败返回 null */
+/** 宽容解析生成输出：{status_fields:{角色:{字段:值}}}；解析失败返回 null */
 export function parseStatusBarCompletion(text: string): StatusBarCompletionResult | null {
 	let t = text.trim();
 	const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -187,12 +195,17 @@ export function parseStatusBarCompletion(text: string): StatusBarCompletionResul
 		const obj = JSON.parse(t.slice(start, end + 1)) as Record<string, unknown>;
 		const raw = obj.status_fields;
 		if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-		const statusFields: Record<string, string> = {};
-		for (const [k, v] of Object.entries(raw)) {
-			if (typeof v === "string") statusFields[k] = v;
-			else if (v !== null && v !== undefined) statusFields[k] = String(v);
+		const statusFields: Record<string, Record<string, string>> = {};
+		for (const [char, v] of Object.entries(raw as Record<string, unknown>)) {
+			if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+			const bucket: Record<string, string> = {};
+			for (const [k, fv] of Object.entries(v as Record<string, unknown>)) {
+				if (typeof fv === "string") bucket[k] = fv;
+				else if (fv !== null && fv !== undefined) bucket[k] = String(fv);
+			}
+			if (Object.keys(bucket).length > 0) statusFields[char] = bucket;
 		}
-		return { statusFields };
+		return Object.keys(statusFields).length > 0 ? { statusFields } : null;
 	} catch {
 		return null;
 	}

@@ -103,26 +103,28 @@ test("withAliases：合入去重、不改原条目", () => {
 	assert.deepEqual(src[0].keys, ["gloomhound"], "原条目不可变");
 });
 
-test("状态栏补全：prompt 含字段清单与已有值", () => {
+test("状态栏生成：prompt 含字段清单、角色分组与已有值", () => {
 	const { systemPrompt, userText } = buildStatusBarCompletionPrompt({
 		fieldLabels: ["👤 姓名", "📝 当前行动", "💭 当前内心"],
-		current: { "👤 姓名": "苏小棉" },
+		current: { 苏小棉: { "👤 姓名": "苏小棉" } },
+		knownCharacters: ["苏小棉", "旅人"],
 		assistantText: "她假装伸懒腰。",
 		charName: "苏小棉",
 		userName: "旅人",
 	});
 	assert.ok(systemPrompt.includes("👤 姓名"), "字段清单在场");
-	assert.ok(systemPrompt.includes("每个字段都必须出现"), "要求全字段补全");
+	assert.ok(systemPrompt.includes("角色分组必须严格对应"), "角色分组纪律在场");
+	assert.ok(systemPrompt.includes("出场角色"), "角色清单在场");
 	assert.ok(userText.includes("苏小棉"), "已有值在场");
 });
 
-test("状态栏补全：解析 status_fields", () => {
-	const r = parseStatusBarCompletion(`好的，以下是补全：
+test("状态栏生成：解析多角色 status_fields", () => {
+	const r = parseStatusBarCompletion(`好的，以下是生成：
 \`\`\`json
-{"status_fields": {"👤 姓名": "苏小棉（棉棉喵）", "📝 当前行动": "假装伸懒腰"}}
+{"status_fields": {"苏小棉": {"👤 姓名": "苏小棉（棉棉喵）", "📝 当前行动": "假装伸懒腰"}, "旅人": {"👤 姓名": "旅人"}}}
 \`\`\``);
 	assert.ok(r);
-	assert.equal(r?.statusFields["👤 姓名"], "苏小棉（棉棉喵）");
-	assert.equal(r?.statusFields["📝 当前行动"], "假装伸懒腰");
+	assert.equal(r?.statusFields["苏小棉"]["👤 姓名"], "苏小棉（棉棉喵）");
+	assert.equal(r?.statusFields["旅人"]["👤 姓名"], "旅人");
 	assert.equal(parseStatusBarCompletion("无法解析"), null);
 });

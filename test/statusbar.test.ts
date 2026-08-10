@@ -48,15 +48,15 @@ test("unclosed block not stripped", () => {
 
 test("parse: head + fields", () => {
 	const snap = parseStatusBarBlock(BLOCK);
-	assert.equal(snap.head, "[HEAD line 1 | HEAD line 2]");
-	const labels = snap.fields.map((f) => f.label);
+	assert.equal(snap.characters[0].head, "[HEAD line 1 | HEAD line 2]");
+	const labels = snap.characters[0].fields.map((f) => f.label);
 	assert.ok(labels.includes("[name]"));
 	assert.ok(labels.includes("[action]"));
-	const fans = snap.fields.find((f) => f.label === "[fans]");
+	const fans = snap.characters[0].fields.find((f) => f.label === "[fans]");
 	assert.equal(fans?.value, "285k");
-	const diary = snap.fields.find((f) => f.label === "[diary]");
+	const diary = snap.characters[0].fields.find((f) => f.label === "[diary]");
 	assert.ok(diary);
-	const time = snap.fields.find((f) => f.label === "[time]");
+	const time = snap.characters[0].fields.find((f) => f.label === "[time]");
 	assert.equal(time?.value, "2min ago");
 });
 
@@ -64,7 +64,7 @@ test("latest snapshot picks last block", () => {
 	const text = `one.\n\n${BLOCK}\n\ntwo.\n\n${BLOCK}`;
 	const snap = latestStatusBarSnapshot(text);
 	assert.ok(snap);
-	assert.equal(snap?.head, "[HEAD line 1 | HEAD line 2]");
+	assert.equal(snap?.characters[0].head, "[HEAD line 1 | HEAD line 2]");
 });
 
 test("no block -> null", () => {
@@ -77,7 +77,7 @@ test("spelling variants", () => {
 	const v2 = v1.replace("StatusBlock", "status_block");
 	assert.equal(stripStatusBarText(v1).includes("HEAD"), false);
 	assert.equal(stripStatusBarText(v2).includes("HEAD"), false);
-	assert.equal(latestStatusBarSnapshot(v1)?.fields[0]?.label, "[n] A");
+	assert.equal(latestStatusBarSnapshot(v1)?.characters[0].fields[0]?.label, "[n] A");
 });
 
 // ---------------- 彻底工具化：模板提取 + 账本渲染 ----------------
@@ -121,16 +121,16 @@ test("renderStatusBarHead：head 段按账本值替换", () => {
 test("renderStatusBarFromState：账本 → 状态栏块（字段填值、静态骨架保留）", () => {
 	const tpl = extractStatusBarTemplate([CARD_SAMPLE]);
 	assert.ok(tpl);
-	const text = renderStatusBarFromState(tpl!, {
-		time: "21:00",
-		location: "走廊",
-		status_fields: {
+	const text = renderStatusBarFromState(
+		tpl!,
+		{ time: "21:00", location: "走廊" },
+		{
 			"日期": "7月15日",
 			"👤 姓名": "苏小棉（棉棉喵）",
 			"📝 当前行动": "假装伸懒腰",
 			"📊 粉丝数": "28.6万",
 		},
-	});
+	);
 	assert.ok(text.includes("<Status_block>"), "块壳在场");
 	assert.ok(text.includes("📝 当前行动：假装伸懒腰"), "字段值已填");
 	assert.ok(text.includes("👤 姓名：苏小棉（棉棉喵）"), "字段值已填");
@@ -146,7 +146,7 @@ test("renderStatusBarFromState：账本 → 状态栏块（字段填值、静态
 	assert.ok(!text.includes("当前穿搭"), "未记账字段不出现");
 	// 渲染产物可被 parse 成快照（与 wire 管道一致）
 	const snap = parseStatusBarBlock(text);
-	assert.equal(snap.fields.find((f) => f.label === "📝 当前行动")?.value, "假装伸懒腰");
+	assert.equal(snap.characters[0].fields.find((f) => f.label === "📝 当前行动")?.value, "假装伸懒腰");
 });
 
 test("extractStatusBarTemplate：字段清单只含顶层字段（子结构不单独列）", () => {

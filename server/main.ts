@@ -549,6 +549,8 @@ const statusBarSnapshotOfLatest = (): import("./wire.ts").StatusBarSnapshot | nu
 
 // ---- 状态栏彻底工具化：模板（卡）+ 账本 → 渲染快照 ----
 let statusTemplateCache: { key: string; template: import("../src/statusbar.ts").StatusBarTemplate | null } | null = null;
+/** 模板对应的卡名（主角；角色序排第一） */
+let statusTemplateCharName = "";
 
 const statusBarTemplateFor = (): import("../src/statusbar.ts").StatusBarTemplate | null => {
 	let cardRel = "";
@@ -568,6 +570,7 @@ const statusBarTemplateFor = (): import("../src/statusbar.ts").StatusBarTemplate
 		if (cardRel) {
 			const cardPath = isAbsolute(cardRel) ? cardRel : join(cwd, cardRel);
 			const card = loadCardFile(cardPath);
+			statusTemplateCharName = card.name;
 			template = extractStatusBarTemplate([
 				card.firstMes,
 				...(Array.isArray(card.alternateGreetings) ? card.alternateGreetings : []),
@@ -582,16 +585,28 @@ const statusBarTemplateFor = (): import("../src/statusbar.ts").StatusBarTemplate
 	return template;
 };
 
-/** 模板 + 账本 → 状态栏快照（无模板或无字段则 null） */
+const templateCharName = (): string => statusTemplateCharName;
+
+/** 模板 + 账本 → 状态栏快照（多角色；无模板或无字段则 null） */
 const renderStatusBarSnapshot = (): import("./wire.ts").StatusBarSnapshot | null => {
 	const template = statusBarTemplateFor();
 	if (!template) return null;
 	const state = currentState();
-	if (!state || (!state.status_fields && !state.time && !state.location)) return null;
-	const text = renderStatusBarFromState(template, state);
-	const snap = parseStatusBarBlock(text);
-	if (!snap.head && snap.fields.length === 0) return null;
-	return snap;
+	if (!state) return null;
+	const buckets = state.status_fields ?? {};
+	if (Object.keys(buckets).length === 0 && !state.time && !state.location) return null;
+	// 角色序：账本出场序（characters 键优先），主角（卡名）排第一
+	const names = [...new Set([templateCharName(), ...Object.keys(buckets)])];
+	const characters: import("./wire.ts").StatusBarCharacter[] = [];
+	for (const name of names) {
+		const bucket = buckets[name];
+		if (!bucket || Object.keys(bucket).length === 0) continue;
+		const text = renderStatusBarFromState(template, state, bucket);
+		const snap = parseStatusBarBlock(text, name);
+		if (snap.characters[0]) characters.push(snap.characters[0]);
+	}
+	if (characters.length === 0) return null;
+	return { characters, raw: characters.map((c) => c.name).join("、") };
 };
 
 /** hello / message_end 共用的快照来源：渲染优先（工具化），无则回退历史扫描（老格式兼容） */
