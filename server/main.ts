@@ -645,6 +645,10 @@ const renderStatusBarSnapshot = (): import("./wire.ts").StatusBarSnapshot | null
 		// 卡自带美化模板：值槽填充 → HTML（模板填充，非正则脚本）
 		if (skin) {
 			const slots = buildStatusBarValueSlots(template, state, bucket);
+			// 配图回填：账本字段里可能含 [IMG:...]（子字段/合并文本）
+			for (const v of Object.values(bucket)) {
+				if (v && v.includes("[IMG:")) slots.push(v);
+			}
 			ch.html = renderStatusBarHtml(skin, slots);
 		}
 		characters.push(ch);
@@ -675,6 +679,10 @@ const attachSkinHtml = (snap: import("./wire.ts").StatusBarSnapshot | null): imp
 		}
 		for (const f of ch.fields) values[f.label] = f.value;
 		const slots = buildStatusBarValueSlots(template, state ?? {}, values);
+		// 配图回填：子字段（如 📸 配图）里的 [IMG:...] 也要进扫描范围
+		for (const v of Object.values(values)) {
+			if (v && v.includes("[IMG:")) slots.push(v);
+		}
 		ch.html = renderStatusBarHtml(skin, slots);
 	}
 	return snap;
