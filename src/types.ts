@@ -63,6 +63,11 @@ export interface WorldState {
 	plot_threads: string[];
 	/** 登场名录（applyPatch 咽喉点自动登记；旧存档无此字段按空处理） */
 	roster?: StateRoster;
+	/**
+	 * 卡状态栏字段（彻底工具化：模型只记账、harness 渲染）。
+	 * 键 = 卡状态栏模板里的字段 label（如 👤 姓名 / 📝 当前行动），值 = 最新状态文本。
+	 */
+	status_fields?: Record<string, string>;
 }
 
 export interface CharacterState {

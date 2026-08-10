@@ -113,6 +113,11 @@ import {
 	type WireStats,
 } from "./wire.ts";
 import { createAssistantHost, type AssistantHost, type StoryBridge } from "./assistant.ts";
+import {
+	extractStatusBarTemplate,
+	parseStatusBarBlock,
+	renderStatusBarFromState,
+} from "../src/statusbar.ts";
 import { registerAssistantRunner } from "../src/assistant-gateway.ts";
 import { sameCardPath } from "../src/paths.ts";
 import { toggleDisabledLore } from "../src/lorebook.ts";
@@ -542,6 +547,57 @@ const statusBarSnapshotOfLatest = (): import("./wire.ts").StatusBarSnapshot | nu
 	return null;
 };
 
+// ---- 状态栏彻底工具化：模板（卡）+ 账本 → 渲染快照 ----
+let statusTemplateCache: { key: string; template: import("../src/statusbar.ts").StatusBarTemplate | null } | null = null;
+
+const statusBarTemplateFor = (): import("../src/statusbar.ts").StatusBarTemplate | null => {
+	let cardRel = "";
+	try {
+		const configPath = resolveConfigPath(cwd);
+		if (existsSync(configPath)) {
+			const cfg = JSON.parse(readFileSync(configPath, "utf8")) as { card?: unknown };
+			if (typeof cfg.card === "string") cardRel = cfg.card;
+		}
+	} catch {
+		/* default */
+	}
+	const key = resolveConfigPath(cwd) + "\u0000" + cardRel;
+	if (statusTemplateCache && statusTemplateCache.key === key) return statusTemplateCache.template;
+	let template: import("../src/statusbar.ts").StatusBarTemplate | null = null;
+	try {
+		if (cardRel) {
+			const cardPath = isAbsolute(cardRel) ? cardRel : join(cwd, cardRel);
+			const card = loadCardFile(cardPath);
+			template = extractStatusBarTemplate([
+				card.firstMes,
+				...(Array.isArray(card.alternateGreetings) ? card.alternateGreetings : []),
+				card.description,
+				card.personality,
+			]);
+		}
+	} catch {
+		template = null;
+	}
+	statusTemplateCache = { key, template };
+	return template;
+};
+
+/** 模板 + 账本 → 状态栏快照（无模板或无字段则 null） */
+const renderStatusBarSnapshot = (): import("./wire.ts").StatusBarSnapshot | null => {
+	const template = statusBarTemplateFor();
+	if (!template) return null;
+	const state = currentState();
+	if (!state || (!state.status_fields && !state.time && !state.location)) return null;
+	const text = renderStatusBarFromState(template, state);
+	const snap = parseStatusBarBlock(text);
+	if (!snap.head && snap.fields.length === 0) return null;
+	return snap;
+};
+
+/** hello / message_end 共用的快照来源：渲染优先（工具化），无则回退历史扫描（老格式兼容） */
+const statusBarSnapshotFor = (): import("./wire.ts").StatusBarSnapshot | null =>
+	renderStatusBarSnapshot() ?? statusBarSnapshotOfLatest();
+
 const helloFrame = (): ServerFrame => {
 	const cardfront = loadCardFrontSnapshot(cwd);
 	const skin =
@@ -563,7 +619,7 @@ const helloFrame = (): ServerFrame => {
 		panels: currentPanels(),
 		// 一档皮肤与消息同帧:首屏不得依赖二次 REST(缓存/竞态会让 StatusBlock 回落统一面板)
 		cardfront,
-		statusbar: statusBarSnapshotOfLatest(),
+		statusbar: statusBarSnapshotFor(),
 	};
 };
 
@@ -966,8 +1022,8 @@ const bindSession = async () => {
 					// 中间 tool 轮 / 纯工具轮被过滤：清掉前端流式半成品，整轮只保留一个角色气泡
 					broadcast({ type: "stream", state: "clear" });
 				}
-				// 状态栏快照：本拍（或重放）含状态栏则推送最新一份到左栏
-				const snap = statusBarSnapshotOf(event.message);
+				// 状态栏快照：渲染优先（模板+账本，工具化）；无渲染结果回退本拍消息原文（老格式兼容）
+				const snap = renderStatusBarSnapshot() ?? statusBarSnapshotOf(event.message);
 				if (snap) broadcast({ type: "statusbar", snapshot: snap });
 				break;
 			}

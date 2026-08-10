@@ -155,3 +155,109 @@ export function parseStatusBarBlock(block: string): StatusBarSnapshot {
 	// 去掉 value 为空的字段（- 🐦 推特日记： 这种纯标题行也是空值，保留 label 也行）
 	return { head, fields, raw };
 }
+
+// ---------------- 彻底工具化：模板提取 + 账本渲染 ----------------
+// 模型不再写状态栏格式块；harness 从卡里提取「状态栏模板」（开场示例），
+// 每拍结束后用账本数据（time/location + status_fields）按模板骨架重建渲染。
+// 渲染是确定性的行骨架重建（无正则美化、无替换脚本）。
+
+export interface StatusBarTemplate {
+	/** 卡内找到的状态栏示例块原文（字段值为示例占位） */
+	raw: string;
+	/** head 行（『…』或第一非空行）——渲染时按段替换日期/时间/位置 */
+	head: string;
+	/** 行骨架（渲染时逐行重建：static 原样，field 填账本值） */
+	rows: Array<{ kind: "static" | "field"; text: string; indent: string; label: string }>;
+	/** 字段 label 清单（按出现顺序；提示词与账本 key 依据） */
+	fieldLabels: string[];
+}
+
+/** 从卡内容文本里提取状态栏模板：找第一个完整 <Status_block> 块 → 行骨架 */
+export function extractStatusBarTemplate(texts: string[]): StatusBarTemplate | null {
+	let block: string | null = null;
+	for (const t of texts) {
+		if (!t) continue;
+		const { blocks } = extractStatusBarBlocks(t);
+		if (blocks.length > 0) {
+			block = blocks[0];
+			break;
+		}
+	}
+	if (!block) return null;
+	const inner = block.replace(OPEN_RE, "").replace(CLOSE_RE, "").trim();
+	const headMatch = /『[^』\n]+(?:』|$)/.exec(inner);
+	const rows: Array<{ kind: "static" | "field"; text: string; indent: string; label: string }> = [];
+	const fieldLabels: string[] = [];
+	for (const line of inner.split(/\r?\n/)) {
+		const indent = /^(\s*)/.exec(line)?.[1] ?? "";
+		const t = line.trim();
+		if (!t) continue;
+		const bullet = /^[-•*]\s*(.+)$/.exec(t);
+		if (bullet) {
+			const item = bullet[1].trim();
+			const kv = /^(.+?)(?::|：)\s*([\s\S]*)$/.exec(item);
+			if (kv && kv[1].trim()) {
+				const label = kv[1].trim();
+				rows.push({ kind: "field", text: line, indent, label });
+				if (!fieldLabels.includes(label)) fieldLabels.push(label);
+				continue;
+			}
+		}
+		rows.push({ kind: "static", text: line, indent, label: "" });
+	}
+	return {
+		raw: block,
+		head: headMatch ? headMatch[0].trim() : rows.find((r) => r.kind === "static")?.text.trim() ?? "",
+		rows,
+		fieldLabels,
+	};
+}
+
+/** head 行的段替换：『📅 日期：X | ⏰ 时间：Y | 📍 位置：Z』按 | 分段，段内「label：值」用账本值替换 */
+export function renderStatusBarHead(head: string, values: Record<string, string>): string {
+	// 宽松匹配：段 label 常带 emoji 前缀（📅 日期），账本 key 可能只写「日期」——双向包含判定
+	const findValue = (label: string): string | undefined => {
+		if (values[label]) return values[label];
+		for (const k of Object.keys(values)) {
+			if (label.includes(k) || k.includes(label)) return values[k];
+		}
+		return undefined;
+	};
+	const parts = head.split("|").map((seg) => {
+		const s = seg.trim();
+		const ci = s.indexOf("：");
+		const ci2 = s.indexOf(":");
+		const idx = ci < 0 ? ci2 : ci2 < 0 ? ci : Math.min(ci, ci2);
+		if (idx <= 0) return s;
+		const label = s.slice(0, idx).trim();
+		const oldValue = s.slice(idx + 1);
+		const v = findValue(label);
+		if (v) {
+			// 只替换值本体，保留段尾闭合符号（』」」等）
+			const suffix = (oldValue.match(/[』」」\]]+$/) ?? [""])[0];
+			return `${s.slice(0, idx + 1)}${v}${suffix}`;
+		}
+		return s;
+	});
+	return parts.join(" | ");
+}
+
+/**
+ * 账本 → 状态栏块文本：按模板行骨架重建。
+ * - head：renderStatusBarHead 段替换（日期/时间/位置等查 status_fields）
+ * - field 行：value = status_fields[label] ?? ""（空值输出空）
+ * - static 行（details/summary 骨架等）：原样
+ */
+export function renderStatusBarFromState(
+	template: StatusBarTemplate,
+	state: { time?: string; location?: string; status_fields?: Record<string, string> },
+): string {
+	const values: Record<string, string> = { ...(state.status_fields ?? {}) };
+	if (state.time && !values["时间"]) values["时间"] = state.time;
+	if (state.location && !values["位置"]) values["位置"] = state.location;
+	const head = renderStatusBarHead(template.head, values);
+	const lines = template.rows.map((row) =>
+		row.kind === "field" ? `${row.indent}- ${row.label}：${values[row.label] ?? ""}` : row.text,
+	);
+	return `<Status_block>\n${head}\n${lines.join("\n")}\n</Status_block>`;
+}

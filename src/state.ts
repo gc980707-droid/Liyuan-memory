@@ -8,7 +8,7 @@ import { dirname } from "node:path";
 import { readJsonFile } from "./jsonio.ts";
 import type { CharacterState, StateRoster, WorldState } from "./types.ts";
 
-const TOP_KEYS = ["time", "location", "characters", "inventory", "flags", "plot_threads"] as const;
+const TOP_KEYS = ["time", "location", "characters", "inventory", "flags", "plot_threads", "status_fields"] as const;
 
 export function defaultState(): WorldState {
 	return {
@@ -159,6 +159,23 @@ export function applyPatch(state: WorldState, patch: Record<string, unknown>): P
 					next[key] = kept;
 					applied.push(`${key} → [${kept.join("、")}]`);
 				} else warnings.push(`${key} 需要完整数组（整体替换语义），已忽略`);
+				break;
+			}
+			case "status_fields": {
+				// 卡状态栏字段（模型记账、harness 渲染）：按 label 键合并，null 删除
+				if (value && typeof value === "object" && !Array.isArray(value)) {
+					const cur: Record<string, string> = { ...(next.status_fields ?? {}) };
+					for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+						if (v === null) {
+							delete cur[k];
+							applied.push(`status_fields.${k} 已移除`);
+						} else if (typeof v === "string") {
+							cur[k] = v;
+							applied.push(`status_fields.${k} → ${v.slice(0, 40)}${v.length > 40 ? "…" : ""}`);
+						} else warnings.push(`status_fields.${k} 需要字符串或 null，已忽略`);
+					}
+					next.status_fields = cur;
+				} else warnings.push("status_fields 需要对象，已忽略");
 				break;
 			}
 			case "roster": {

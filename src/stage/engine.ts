@@ -277,7 +277,6 @@ function roundCardFor(
 	ws: TurnWorkspace,
 	userName: string,
 	wordRange?: { min: number; max: number },
-	statusBarTags?: string[],
 ): string | undefined {
 	if (ws.plan.length === 0 && ws.draft.trim() === "") {
 		const range = wordRange ? `，本拍总字数约 ${wordRange.min}–${wordRange.max} 字，列路标时把字数分配到每一步（几步就分几份，心里有数）` : "";
@@ -315,14 +314,10 @@ function roundCardFor(
 	}
 	// 谢幕卡（8/09 review）：已封笔后不再催演/催构思——sealed 语境下回看/续写/
 	// 收笔评估卡全部失效（实弹：seal 后的记账轮被回看卡催「构思下一段」）。
-	// 封笔后的剩余正务只有记账与谢幕：状态栏等格式块是本拍最后的产出。
+	// 封笔后的剩余正务只有记账与谢幕：状态栏由系统自动渲染（8/10 工具化），
+	// 模型只需把状态字段记进 world_state_update 的 status_fields。
 	if (ws.appends > 0 && ws.sealed) {
-		const sb =
-			statusBarTags && statusBarTags.length > 0
-				? `然后输出状态栏（${statusBarTags.map((t) => `<${t}>`).join(" 或 ")}）等格式块——` +
-					`状态栏意味着本拍结束，输出完即停`
-				: `没有格式块要输出就直接停笔`;
-		return `【谢幕】已封笔，不要再写正文。世界有变动就先 \`world_state_update\` 记账；${sb}。`;
+		return `【谢幕】已封笔，不要再写正文。世界有变动（含卡状态栏字段）就先 \`world_state_update\` 记账（status_fields 记字段值、time/location 有变一并提交）；状态栏会自动渲染，不需要你输出。没有要记的直接停笔。`;
 	}
 	if (ws.appends > 0 && ws.plan.some((s) => !s.done)) {
 		return (
@@ -348,7 +343,7 @@ function roundCardFor(
 				`承接刚写下的，续写这一拍的自然下文——设定/世界书里的下一步（如「润墨之后的试墨」）。一段一段演。\n` +
 				`续写中涉及 ${userName} 的行动或选择，用 \`ask\` 停下来问；` +
 				`写到字数达标、戏到停点，用 \`draft_seal\` 收笔。` +
-				`状态栏等格式块是本拍**最后**的产出——续写全部完成之前不要输出。思考全程用中文。`
+				`收笔后系统自动渲染状态栏，你只需记账，不需要输出任何格式块。思考全程用中文。`
 			);
 		}
 		// 收笔评估卡（8/09 卡序纠正）：ask/续写判断必须在 seal **之前**——旧卡把
@@ -361,8 +356,7 @@ function roundCardFor(
 			`涉及就先用 \`ask\` 问用户、按答案续写，此时不要收笔；\n` +
 			`② 不涉及，再看剧情是否停在 ${userName} 可以接话、可以行动的位置——不在就续写到停点；\n` +
 			`③ 以上都满足，\`draft_seal\` 收笔；\n` +
-			`④ 封笔之后最后一步：输出状态栏等格式块——状态栏意味着本拍结束，` +
-			`必须是这拍的最后产出（续写/ask 全部完成之前不要输出）。\n` +
+			`④ 封笔后记账：世界/状态有变就用 \`world_state_update\` 提交（status_fields 记卡状态栏字段、time/location 有变一并）；状态栏由系统自动渲染，不要输出格式块。\n` +
 			`思考全程用中文。`
 		);
 	}
@@ -401,9 +395,10 @@ const mergeFinalText = (draft: string, text: string): string => {
  * 收尾放行门控：上一轮（或首轮）思考宣告了「还要写格式栈尾巴」才多给一轮。
  * 无条件放行会多拉一轮 LLM，把场记兜底响应当叙事轮消费（8/05 测试实证）；
  * 而 8/05 实弹里模型确实在思考里宣告过 status bar / cat commentary。
+ * 8/10 工具化：状态栏不再由模型输出，思考宣告仅认预设格式栈尾巴（w2g/点评等）。
  */
 const TAIL_INTENT_RE =
-	/(状态栏|点评|选择框|选项|摘要|咪咪|猫猫|吐槽|catsay|w2g|status|summary|choice|comment)/i;
+	/(点评|选择框|选项|摘要|咪咪|猫猫|吐槽|catsay|w2g|choice|comment)/i;
 const hasTailIntent = (m: AssistantMsgLike | null): boolean => {
 	if (!m || !Array.isArray(m.content)) return false;
 	const think = m.content
@@ -616,6 +611,7 @@ export class StageEngine {
 			skillTopics,
 			presetActive: materials.presetActive,
 			statusBarFormats: materials.statusBarFormats,
+			statusBarFields: materials.statusBarFields,
 			tools: tools.length > 0,
 			// MCP 外设索引进 system（不进每拍注入）：会话内字节稳定，不破前缀缓存。
 			// 与旧 director.ts 同一位置——工具清单里有 mcp__ 工具，这里说明它们是什么。
@@ -629,6 +625,7 @@ export class StageEngine {
 			presetTail: phTail,
 			presetActive: materials.presetActive,
 			statusBarFormats: materials.statusBarFormats,
+			statusBarFields: materials.statusBarFields,
 			languageMismatch,
 			panelIndex,
 			// P14：rehearsalGuard 默认开——「思考的用法」是轮次纪律的一部分（只读题、
@@ -649,7 +646,7 @@ export class StageEngine {
 		// P1 注入层：首轮（规划轮）卡并入注入块（用户话之前）——用户当拍的话必须保持
 		// 上下文最后一句（8/03 教训：注入块压提问之后，模型会把提问读成历史旧话）。
 		// 轮次卡是工作指令（如 opencode 的 system-reminder），随注入区在用户话前送达。
-		const firstCard = roundCardFor(ws, config.userName, wsDeps.rules.wordRange, wsDeps.rules.statusBarTagGroup);
+		const firstCard = roundCardFor(ws, config.userName, wsDeps.rules.wordRange);
 		const injWithCard = firstCard ? `${injection}\n\n${firstCard}` : injection;
 		const tailText = endsWithUser ? `${injWithCard}\n\n${history[history.length - 1].text}` : injWithCard;
 
@@ -1029,20 +1026,13 @@ export class StageEngine {
 						continue;
 					}
 					if (tailPass) break; // 谢幕轮只给一次，防空转
-					// 程序化谢幕（8/09 输出形式定案）：状态栏 = 本拍结束的标志，必须最后出现。
-					// 卡/预设定义了格式块而稿与 text 通道都还没出现过 → 必开一轮谢幕并点名清单，
-					// 不再靠思考关键词（hasTailIntent）碰运气——实弹：模型记完账思考里没提
-					// 状态栏三个字，直接收场，状态栏整拍蒸发。关键词判定仅兜「rules 没
-					// 提取到但模型自己宣告了尾巴」的残余场景。
-					// 首轮直出的正文（o.directText）也算已产出——寒暄拍模型第一轮就带状态栏时不再重催
+					// 程序化谢幕（8/09 输出形式定案 → 8/10 工具化修正）：
+					// 状态栏**不再由模型输出**（harness 拍末用账本自动渲染，见 assemble 提示词），
+					// 故此处只催预设 requiredTags（w2g 等格式栈尾巴）；statusBarTagGroup 不再催。
+					// 首轮直出的正文（o.directText）也算已产出——寒暄拍模型第一轮就带尾巴时不再重催
 					const producedSoFar = `${o.ws.draft}\n${o.directText}\n${text}`;
 					const missingReq = o.wsDeps.rules.requiredTags.filter((t) => !hasFormatTag(producedSoFar, t));
-					const sbGroup = o.wsDeps.rules.statusBarTagGroup;
-					const sbMissing = sbGroup.length > 0 && !sbGroup.some((t) => hasFormatTag(producedSoFar, t));
-					const wanted = [
-						...(sbMissing ? [`状态栏（${sbGroup.map((t) => `<${t}>`).join(" 或 ")}）`] : []),
-						...missingReq.map((t) => `<${t}>`),
-					];
+					const wanted = missingReq.map((t) => `<${t}>`);
 					// 缺格式块时无论本轮有无产出都催（产出里已有就不算缺）；不缺按旧逻辑收场
 					if (wanted.length === 0) {
 						if (text.trim()) break; // 本轮已有产出（可能正是尾巴）→ 正常谢幕
@@ -1058,7 +1048,7 @@ export class StageEngine {
 								text: wanted.length
 									? `剧情已收笔。最后一步：输出 ${wanted.join("、")}——预设定义的谢幕格式块，` +
 										`在正文之外直接输出（不进稿纸），输出完本拍结束。不要再写正文。`
-									: `正文已收稿。若本拍还有正文之外的收尾内容（状态栏、点评等预设格式块），` +
+									: `正文已收稿。若本拍还有正文之外的收尾内容（点评等预设格式块），` +
 										`现在直接输出；没有则回空，本拍就此收束。`,
 							},
 						],
@@ -1357,14 +1347,13 @@ export class StageEngine {
 			const ctx: Record<string, unknown> = { systemPrompt: o.systemPrompt, messages: convo };
 			if (!lastRound) ctx.tools = o.tools;
 			else {
-				// 8/09：撤工具的同时必须告知收场（实弹：轮次耗尽后模型不明所以干想一轮
-				// 散场，状态栏没了）——点名输出格式块，这一轮产出走 text 通道拼进定稿。
-				const sbG = o.wsDeps.rules.statusBarTagGroup;
-				const sbNote =
-					sbG.length > 0 && !sbG.some((t) => hasFormatTag(`${o.ws.draft}\n${text}`, t))
-						? `直接输出状态栏（${sbG.map((t) => `<${t}>`).join(" 或 ")}）等格式块收场——不要再写正文。`
-						: `就此收场，不要再写正文。`;
-				convo.push(nowMsg(`【收场】本拍轮次已达上限，工具已收起。${sbNote}`));
+			// 8/09：撤工具的同时必须告知收场（实弹：轮次耗尽后模型不明所以干想一轮
+			// 散场，状态栏没了）。8/10 工具化：状态栏由系统渲染，只需提醒记账收场。
+			convo.push(
+				nowMsg(
+					`【收场】本拍轮次已达上限，工具已收起。世界/状态有变先 \`world_state_update\` 记账（status_fields 记卡状态栏字段）；状态栏会自动渲染。就此收场，不要再写正文。`,
+				),
+			);
 			}
 
 			// P1 注入层：按工作区状态注入当前轮次卡。
@@ -1372,7 +1361,7 @@ export class StageEngine {
 			// 演段回看卡 / 收笔评估卡：**每轮都注入**——循环指令，每轮重新看到
 			// （8/08 修：旧逻辑只切一次，模型后面几轮看不到评估指令）。
 			// 用替换语义防累积：推新卡前把上一张卡从 convo 里移除。
-			const card = roundCardFor(o.ws, o.wsDeps.userName, o.wsDeps.rules.wordRange, o.wsDeps.rules.statusBarTagGroup);
+			const card = roundCardFor(o.ws, o.wsDeps.userName, o.wsDeps.rules.wordRange);
 			const hasPending = o.ws.plan.some((s) => !s.done);
 			const draftBodyChars = o.ws.draft.trim() ? extractDraftBody(o.ws.draft).replace(/\s+/g, "").length : 0;
 			const wordRange = o.wsDeps.rules.wordRange;

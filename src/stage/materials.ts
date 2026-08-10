@@ -13,6 +13,7 @@ import { isAbsolute, join } from "node:path";
 
 import { loadCardFile, readCardRawJson } from "../card.ts";
 import { cardStatusBarFormats } from "../cardfront.ts";
+import { extractStatusBarTemplate } from "../statusbar.ts";
 import { stripAuditLines } from "../draft.ts";
 import {
 	applyDisabledLore,
@@ -73,6 +74,8 @@ export interface StageMaterials {
 	presetActive: boolean;
 	/** 卡作者状态栏格式（StatusBlock / state1…）；空=卡未设计，勿硬造 */
 	statusBarFormats: string[];
+	/** 卡状态栏模板字段清单（模型记账 status_fields 的 key 依据；空=无模板） */
+	statusBarFields: string[];
 	/** 宏求值遇到的清单外宏名（供引擎降级告警） */
 	macroWarnings: string[];
 	/** 句级过滤摘掉的验算/格式栈指令行数（可观测性） */
@@ -104,10 +107,21 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 	const cardAbs = resolvePath(cwd, config.card);
 	const card = loadCardFile(cardAbs);
 	let statusBarFormats: string[] = [];
+	let statusBarFields: string[] = [];
 	try {
-		statusBarFormats = cardStatusBarFormats(readCardRawJson(cardAbs).raw);
+		const rawCard = readCardRawJson(cardAbs).raw;
+		statusBarFormats = cardStatusBarFormats(rawCard);
+		// 状态栏模板字段（彻底工具化：模型据此记账 status_fields，系统渲染）
+		const template = extractStatusBarTemplate([
+			card.firstMes,
+			...(Array.isArray(card.alternateGreetings) ? card.alternateGreetings : []),
+			card.description,
+			card.personality,
+		]);
+		statusBarFields = template?.fieldLabels ?? [];
 	} catch {
 		statusBarFormats = [];
+		statusBarFields = [];
 	}
 
 	// 世界书：已挂载独立书（0..N）+ 补充设定集 overlay；卡内 character_book 不自动进上下文
@@ -274,6 +288,7 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 		presetVarSnapshot: macroEnv.vars,
 		presetActive,
 		statusBarFormats,
+		statusBarFields,
 		macroWarnings: [...unsupported],
 		auditLinesDropped,
 		protocolDrops,

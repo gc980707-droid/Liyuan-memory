@@ -99,3 +99,15 @@ test("inventory：全字符串数组不产生警告（不误报）", () => {
 	const r = applyPatch(defaultState(), { inventory: ["猎刀", "草药"] });
 	assert.deepEqual(r.warnings, []);
 });
+
+test("补丁：status_fields 合并与删除（卡状态栏字段记账）", () => {
+	let st = applyPatch(defaultState(), { status_fields: { "👤 姓名": "苏小棉", "📝 当前行动": "发推文" } }).state;
+	assert.equal(st.status_fields?.["👤 姓名"], "苏小棉");
+	st = applyPatch(st, { status_fields: { "📝 当前行动": "假装伸懒腰", "👗 当前穿搭": "水手服" } }).state;
+	assert.equal(st.status_fields?.["📝 当前行动"], "假装伸懒腰", "按键合并");
+	assert.equal(st.status_fields?.["👤 姓名"], "苏小棉", "未变字段保留");
+	assert.equal(st.status_fields?.["👗 当前穿搭"], "水手服");
+	const r = applyPatch(st, { status_fields: { "👤 姓名": null } });
+	assert.equal(r.state.status_fields?.["👤 姓名"], undefined, "null 删除");
+	assert.equal(r.warnings.length, 0);
+});

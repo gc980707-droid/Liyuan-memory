@@ -240,6 +240,8 @@ export interface StageSystemOptions {
 	skillTopics?: string[];
 	presetActive?: boolean;
 	statusBarFormats?: string[];
+	/** 卡状态栏模板的字段清单（工具化渲染：模型据此记账 status_fields） */
+	statusBarFields?: string[];
 	/** false = 不声明检索工具（M1 前过渡形态；M3 起默认开） */
 	tools?: boolean;
 	/**
@@ -254,8 +256,17 @@ export function isPlaceholderStatusFormat(f: string): boolean {
 	return /\/>\s*$/.test(f.trim().replace(/^`|`$/g, ""));
 }
 
-/** 状态栏提示词：占位符型（自闭合）与面板型（成对、模型填内容）语义相反，分开写 */
-export function buildStatusBarPrompt(statusBarFormats: string[]): string {
+/**
+ * 状态栏提示词（彻底工具化 2026-08-10）：
+ * - 占位符型（自闭合 <Tag/>）：界面由卡渲染，模型只留占位符——维持原语义。
+ * - 面板型（成对、曾要求模型填内容）：**模型不再写格式块**。卡状态栏由 harness
+ *   在拍末用账本（time/location + status_fields）自动渲染；模型只需用
+ *   world_state_update 记账字段。字段清单来自卡状态栏模板（无则只提醒记账）。
+ */
+export function buildStatusBarPrompt(
+	statusBarFormats: string[],
+	statusBarFields?: string[],
+): string {
 	const placeholders = statusBarFormats.filter(isPlaceholderStatusFormat);
 	const panels = statusBarFormats.filter((f) => !isPlaceholderStatusFormat(f));
 	const parts: string[] = [];
@@ -266,8 +277,15 @@ export function buildStatusBarPrompt(statusBarFormats: string[]): string {
 		);
 	}
 	if (panels.length > 0) {
+		const fieldHint =
+			statusBarFields && statusBarFields.length > 0
+				? `字段：${statusBarFields.slice(0, 24).join("、")}${statusBarFields.length > 24 ? ` 等共 ${statusBarFields.length} 项` : ""}`
+				: "";
 		parts.push(
-			`用该标签包住整块写出，字段随本拍剧情更新（地点/时间/关系/数值等）——格式线索：${panels.join("；")}`,
+			`状态栏由系统在拍末自动渲染，**你不需要输出任何状态栏格式块**（不要写 <Status_block> 等标签）。` +
+				`只需在收笔前用 world_state_update 把本拍状态记入 status_fields` +
+				(fieldHint ? `（${fieldHint}；键用这些字段名，只记有变化的）` : `（键用卡定义的字段名，只记有变化的）`) +
+				`；time/location 有变一并提交。`,
 		);
 	}
 	return `${parts.join("；")}——这是卡作者设计的一部分，不依赖预设是否开启。`;
@@ -281,6 +299,7 @@ export function buildStageSystemPrompt({
 	skillTopics,
 	presetActive,
 	statusBarFormats,
+	statusBarFields,
 	tools,
 	mcpTools,
 }: StageSystemOptions): string {
@@ -329,7 +348,7 @@ ${
 1. **正文**：纯剧情叙事与对白。不要把正文包进 \`<content>\` 之类的分析标签，不要写 HTML 注释式导演旁注。篇幅：有用户预设则跟预设；无预设时可见正文约 800–1500 字（短打约 400）。
 2. **状态栏**：${
 			statusBarFormats && statusBarFormats.length > 0
-				? `本卡定义了状态栏。${buildStatusBarPrompt(statusBarFormats)}`
+				? `本卡定义了状态栏。${buildStatusBarPrompt(statusBarFormats, statusBarFields)}`
 				: `本卡未检测到状态栏格式；**不要硬造**状态栏。若卡作者在说明里另有约定，按卡作者格式执行。`
 		}`,
 	);
@@ -437,7 +456,9 @@ export interface StageInjectionOptions {
 	presetTail?: PresetResidentContent;
 	presetActive?: boolean;
 	statusBarFormats?: string[];
-	/** 上一拍台上叙事语言与配置不符（harness 检测） */
+	/** 卡状态栏模板的字段清单（工具化渲染：模型据此记账 status_fields） */
+	statusBarFields?: string[];
+	/** 上一拍语言错误（自动检测，harness 注入） */
 	languageMismatch?: boolean;
 	/** 活跃面板全文快照（formatPanelSnapshot 产出）或一行速览 */
 	panelIndex?: string;
@@ -465,6 +486,7 @@ export function buildStageInjection({
 	presetTail,
 	presetActive,
 	statusBarFormats,
+	statusBarFields,
 	languageMismatch,
 	panelIndex,
 	rehearsalGuard,
@@ -555,9 +577,8 @@ export function buildStageInjection({
 	blocks.push(`【导演备注】\n${notes.join("\n")}`);
 
 	// 状态栏独立成块（P9：一个提醒一件事，不挤进导演备注）。
-	// 时序与谢幕链对齐（8/09 输出形式）：状态栏是本拍**最后**的产出——
-	// seal 回执、收笔评估卡、程序化谢幕说的都是同一件事，这里不能说成「正文之后」
-	// 就完事，否则模型在续写/ask 未完时提前输出（实弹：状态栏出完又问试墨）。
+	// 彻底工具化（8/10）：面板型状态栏由系统在拍末自动渲染——模型只记账，不写格式块。
+	// 占位符型（自闭合 <Tag/>）仍由模型输出占位符（界面由卡渲染）。
 	if (statusBarFormats && statusBarFormats.length > 0) {
 		const placeholders = statusBarFormats.filter(isPlaceholderStatusFormat);
 		const panels = statusBarFormats.filter((f) => !isPlaceholderStatusFormat(f));
@@ -566,8 +587,14 @@ export function buildStageInjection({
 				`【状态栏】本卡扮演的一部分：本拍所有剧情（含续写与 ask）完成后，原样输出 ${placeholders.join(" 或 ")}（自闭合占位符，界面由卡渲染）。状态栏意味着本拍结束——它必须是最后的产出，漏写即未完成本拍。`,
 			);
 		} else {
+			const fieldHint =
+				statusBarFields && statusBarFields.length > 0
+					? `，字段：${statusBarFields.slice(0, 24).join("、")}${statusBarFields.length > 24 ? ` 等共 ${statusBarFields.length} 项` : ""}`
+					: "";
 			blocks.push(
-				`【状态栏】本卡扮演的一部分：本拍所有剧情（含续写与 ask）完成后，输出状态栏，格式 ${statusBarFormats.join(" 或 ")}，字段随本拍剧情更新。状态栏意味着本拍结束——它必须是最后的产出，漏写即未完成本拍。`,
+				`【状态栏】本卡的状态栏由剧场在拍末自动渲染——**你不需要输出任何状态栏标签或格式块**。` +
+					`收笔前用 world_state_update 把本拍状态记入 status_fields（键用卡字段名${fieldHint}，只记有变化的）；` +
+					`time/location 有变一并提交。状态栏会自动出现在界面上，它意味着本拍结束。`,
 			);
 		}
 	}

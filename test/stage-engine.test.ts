@@ -1124,8 +1124,8 @@ test("每轮修复可见性：draft_edit 修改后分段重同步（8/09 输出�
 	}
 });
 
-test("程序化谢幕：卡定义状态栏、模型 seal 后停手不输出 → 引擎点名催谢幕（8/09 输出形式）", async () => {
-	// 卡 first_mes 带 StatusBlock 示例 → statusBarTagGroup=["StatusBlock"]
+test("工具化谢幕：卡定义状态栏、模型 seal 后停手 → 引擎不再催输出格式块（8/10）", async () => {
+	// 卡 first_mes 带 StatusBlock 示例 → statusBarTagGroup=["StatusBlock"]（不再被催写）
 	const cwd = mkdtempSync(join(tmpdir(), "liyuan-eng-"));
 	writeFileSync(
 		join(cwd, "card.json"),
@@ -1149,11 +1149,9 @@ test("程序化谢幕：卡定义状态栏、模型 seal 后停手不输出 → 
 				{ stopReason: "toolUse" },
 			),
 			fauxAssistantMessage([fauxToolCall("draft_seal", {})], { stopReason: "toolUse" }),
-			// 记完账/封完笔直接停手，思考里只字未提状态栏——旧逻辑（hasTailIntent 猜词）
-			// 在此收场，状态栏整拍蒸发；新逻辑程序化判定缺 StatusBlock，点名催谢幕
+			// 封完笔停手、不输出任何格式块——8/10 工具化：状态栏由系统渲染，
+			// 引擎不再点名催谢幕（旧逻辑会拉一轮逼模型写 StatusBlock）
 			fauxAssistantMessage([fauxThinking("这拍演完了。")]),
-			// 谢幕轮：补状态栏
-			fauxAssistantMessage("<StatusBlock>\n地点：屋内\n</StatusBlock>"),
 			fauxScribeEmpty(),
 		]);
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"));
@@ -1169,13 +1167,7 @@ test("程序化谢幕：卡定义状态栏、模型 seal 后停手不输出 → 
 			.map((c) => c.text ?? "")
 			.join("");
 		assert.ok(treeText.includes("他推门进屋"), "正文在树上");
-		assert.ok(treeText.includes("StatusBlock"), "谢幕轮被程序化拉起，状态栏落树（不再靠思考关键词碰运气）");
-		// 分段同构：状态栏是独立尾巴段（非稿段），排在最后
-		const tl = (lastMsg?.message?.details?.rpTimeline ?? []) as Array<{ kind: string; text?: string; draft?: boolean }>;
-		const textSegs = tl.filter((s) => s.kind === "text");
-		assert.ok(textSegs.length >= 2, "稿段 + 尾巴段");
-		const tail = textSegs[textSegs.length - 1];
-		assert.ok((tail.text ?? "").includes("StatusBlock") && tail.draft !== true, "状态栏收成独立尾巴末段");
+		assert.ok(!treeText.includes("StatusBlock"), "状态栏不再由模型写入正文（系统渲染）");
 	} finally {
 		reg.unregister();
 		rmSync(cwd, { recursive: true, force: true });
