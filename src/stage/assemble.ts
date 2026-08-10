@@ -257,11 +257,10 @@ export function isPlaceholderStatusFormat(f: string): boolean {
 }
 
 /**
- * 状态栏提示词（彻底工具化 2026-08-10）：
+ * 状态栏提示词（工具管道：主演记账 → harness 渲染）：
  * - 占位符型（自闭合 <Tag/>）：界面由卡渲染，模型只留占位符——维持原语义。
- * - 面板型（成对、曾要求模型填内容）：**模型不再写格式块**。卡状态栏由 harness
- *   在拍末用账本（time/location + status_fields）自动渲染；模型只需用
- *   world_state_update 记账字段。字段清单来自卡状态栏模板（无则只提醒记账）。
+ * - 面板型（成对）：主演不写格式块；收笔前用 world_state_update 把状态字段
+ *   记入 status_fields（键用卡字段名），harness 拍末渲染。
  */
 export function buildStatusBarPrompt(
 	statusBarFormats: string[],
@@ -277,9 +276,13 @@ export function buildStatusBarPrompt(
 		);
 	}
 	if (panels.length > 0) {
+		const fieldHint =
+			statusBarFields && statusBarFields.length > 0
+				? `（键用这些字段名：${statusBarFields.slice(0, 24).join("、")}${statusBarFields.length > 24 ? ` 等共 ${statusBarFields.length} 项` : ""}，只记有变化的）`
+				: "（键用卡定义的字段名，只记有变化的）";
 		parts.push(
-			`状态栏由剧场在拍末**自动生成**（读你的正文更新，无需你输出任何格式块、也无需记账状态字段）` +
-				(statusBarFields && statusBarFields.length > 0 ? `——字段：${statusBarFields.slice(0, 24).join("、")}${statusBarFields.length > 24 ? ` 等共 ${statusBarFields.length} 项` : ""}` : ""),
+			`收笔前用 \`world_state_update\` 把本拍的状态栏字段记入 status_fields ${fieldHint}；` +
+				`系统会在拍末渲染状态栏，**你不需要输出任何状态栏标签或格式块**。`,
 		);
 	}
 	return `${parts.join("；")}——这是卡作者设计的一部分，不依赖预设是否开启。`;
@@ -586,9 +589,9 @@ export function buildStageInjection({
 					? `，字段：${statusBarFields.slice(0, 24).join("、")}${statusBarFields.length > 24 ? ` 等共 ${statusBarFields.length} 项` : ""}`
 					: "";
 			blocks.push(
-				`【状态栏】本卡的状态栏由剧场在拍末**自动生成**——你不需要输出任何状态栏标签或格式块，` +
-					`也不需要记账状态字段。剧场会读你的正文自动更新状态栏并显示在界面上，它意味着本拍结束。` +
-					fieldHint,
+				`【状态栏】本卡的状态栏由剧场在拍末自动渲染——**你不需要输出任何状态栏标签或格式块**。` +
+					`收笔前用 world_state_update 把本拍状态记入 status_fields（键用卡字段名${fieldHint}，只记有变化的）；` +
+					`time/location 有变一并提交。状态栏会自动出现在界面上，它意味着本拍结束。`,
 			);
 		}
 	}

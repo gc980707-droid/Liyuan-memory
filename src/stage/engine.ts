@@ -314,10 +314,9 @@ function roundCardFor(
 	}
 	// 谢幕卡（8/09 review）：已封笔后不再催演/催构思——sealed 语境下回看/续写/
 	// 收笔评估卡全部失效（实弹：seal 后的记账轮被回看卡催「构思下一段」）。
-	// 封笔后的剩余正务只有记账与谢幕：状态栏由系统自动生成（8/10 工具化），
-	// 主演只需记账世界事实（time/location/关系等），状态栏字段无需理会。
+	// 封笔后的剩余正务只有记账与谢幕：状态栏字段由主演记账（8/10 定案），系统渲染。
 	if (ws.appends > 0 && ws.sealed) {
-		return `【谢幕】已封笔，不要再写正文。世界有变动（时间/地点/关系/物品/伏笔）就先 \`world_state_update\` 记账；状态栏会自动生成，不需要你输出。没有要记的直接停笔。`;
+		return `【谢幕】已封笔，不要再写正文。世界有变动（含卡状态栏字段）就先 \`world_state_update\` 记账（status_fields 记字段值、time/location 有变一并提交）；状态栏会自动渲染，不需要你输出。没有要记的直接停笔。`;
 	}
 	if (ws.appends > 0 && ws.plan.some((s) => !s.done)) {
 		return (
@@ -343,7 +342,7 @@ function roundCardFor(
 				`承接刚写下的，续写这一拍的自然下文——设定/世界书里的下一步（如「润墨之后的试墨」）。一段一段演。\n` +
 				`续写中涉及 ${userName} 的行动或选择，用 \`ask\` 停下来问；` +
 				`写到字数达标、戏到停点，用 \`draft_seal\` 收笔。` +
-				`收笔后系统自动生成状态栏，你只需记账世界事实，不需要输出任何格式块。思考全程用中文。`
+				`收笔后系统自动渲染状态栏，你只需把状态栏字段记入 status_fields 并记账世界事实，不需要输出任何格式块。思考全程用中文。`
 			);
 		}
 		// 收笔评估卡（8/09 卡序纠正）：ask/续写判断必须在 seal **之前**——旧卡把
@@ -356,7 +355,7 @@ function roundCardFor(
 			`涉及就先用 \`ask\` 问用户、按答案续写，此时不要收笔；\n` +
 			`② 不涉及，再看剧情是否停在 ${userName} 可以接话、可以行动的位置——不在就续写到停点；\n` +
 			`③ 以上都满足，\`draft_seal\` 收笔；\n` +
-			`④ 封笔后记账：世界/状态有变就用 \`world_state_update\` 提交（时间/地点/关系/物品/伏笔）；状态栏由系统自动生成，不要输出格式块。\n` +
+			`④ 封笔后记账：世界/状态有变就用 \`world_state_update\` 提交（status_fields 记卡状态栏字段、time/location 有变一并）；状态栏由系统自动渲染，不要输出格式块。\n` +
 			`思考全程用中文。`
 		);
 	}
@@ -836,35 +835,46 @@ export class StageEngine {
 			sm.flush();
 		}
 
-		// 状态栏生成（8/10 工具化·一次生成）：卡有状态栏模板 → 每拍必调一次旁侧模型，
-		// 输入【字段清单 + 账本已有值 + 本轮正文】→ 输出完整 status_fields（已有保留、变化更新、缺的全补）。
-		// 主演不需要记账状态栏；harneness 用这一发直接生成（用户定调：调一次生成，不留缺口）。
+		// 状态栏字段兜底（8/10 定案：主演记账 + 场记补缺）：卡有状态栏模板且账本
+		// status_fields 有缺口时，调一次旁侧模型补齐缺失字段（不覆盖主演已记的值——
+		// 场记 prompt 要求已有值严格保留）。主演是现场目击者，harness 只兜底。
 		if (entryId && !aborted && finalText && materials.statusBarFields.length > 0) {
 			const nextState = projectedState(ws, state);
-			const knownCharacters = [
-				...(Object.keys(nextState.characters).length ? Object.keys(nextState.characters) : [materials.card.name]),
-				materials.config.userName,
-			];
-			const r = await runStatusBarCompletion(
-				{
-					sideText: (sp, ut) => this.#sideText(model, sp, ut, { apiKey, headers }, 2048),
-					appendStateEntry: (s) => sm.appendCustomEntry(STATE_ENTRY_TYPE, s),
-					getLeafId: () => sm.getLeafId(),
-					stateFile: this.#deps.getStateFile?.(sm.getSessionId()),
-					onActivity: (d) => ev.onActivity?.(d),
-				},
-				{
-					state: nextState,
-					userText: lastUserText,
-					assistantText: finalText,
-					charName: materials.card.name,
-					userName: materials.config.userName,
-					fieldLabels: materials.statusBarFields,
-					knownCharacters,
-				},
+			// 缺失判定（多角色嵌套）：某字段在所有角色桶里都没有 → 缺
+			const buckets = nextState.status_fields ?? {};
+			const charBuckets = Object.values(buckets).filter(
+				(b): b is Record<string, string> => !!b && typeof b === "object" && !Array.isArray(b),
 			);
-			if (r.kind === "failed") console.error(`[stage-statusbar] 生成跳过：${r.error}`);
-			sm.flush();
+			const missing =
+				charBuckets.length === 0
+					? materials.statusBarFields
+					: materials.statusBarFields.filter((f) => !charBuckets.some((b) => b[f]?.trim()));
+			if (missing.length > 0) {
+				const knownCharacters = [
+					...(Object.keys(nextState.characters).length ? Object.keys(nextState.characters) : [materials.card.name]),
+					materials.config.userName,
+				];
+				const r = await runStatusBarCompletion(
+					{
+						sideText: (sp, ut) => this.#sideText(model, sp, ut, { apiKey, headers }, 2048),
+						appendStateEntry: (s) => sm.appendCustomEntry(STATE_ENTRY_TYPE, s),
+						getLeafId: () => sm.getLeafId(),
+						stateFile: this.#deps.getStateFile?.(sm.getSessionId()),
+						onActivity: (d) => ev.onActivity?.(d),
+					},
+					{
+						state: nextState,
+						userText: lastUserText,
+						assistantText: finalText,
+						charName: materials.card.name,
+						userName: materials.config.userName,
+						fieldLabels: materials.statusBarFields,
+						knownCharacters,
+					},
+				);
+				if (r.kind === "failed") console.error(`[stage-statusbar] 兜底跳过：${r.error}`);
+				sm.flush();
+			}
 		}
 
 		// 场记兜底（D5）：模型本拍没调 world_state_update 才旁路补账，M-B 视实弹数据决定退役。
