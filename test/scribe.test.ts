@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { buildLoreAliasPrompt, buildScribeTurnPrompt, parseLoreAliases, parseScribeResult } from "../src/scribe.ts";
+import {
+	buildLoreAliasPrompt,
+	buildScribeTurnPrompt,
+	buildStatusBarCompletionPrompt,
+	parseLoreAliases,
+	parseScribeResult,
+	parseStatusBarCompletion,
+} from "../src/scribe.ts";
 import { withAliases } from "../src/lorebook.ts";
 import { defaultState } from "../src/state.ts";
 import type { LorebookEntry } from "../src/types.ts";
@@ -94,4 +101,28 @@ test("withAliases：合入去重、不改原条目", () => {
 	assert.deepEqual(out[0].keys, ["gloomhound", "幽影犬"], "大小写重复的别名应去重");
 	assert.deepEqual(out[1].keys, ["glade"]);
 	assert.deepEqual(src[0].keys, ["gloomhound"], "原条目不可变");
+});
+
+test("状态栏补全：prompt 含字段清单与已有值", () => {
+	const { systemPrompt, userText } = buildStatusBarCompletionPrompt({
+		fieldLabels: ["👤 姓名", "📝 当前行动", "💭 当前内心"],
+		current: { "👤 姓名": "苏小棉" },
+		assistantText: "她假装伸懒腰。",
+		charName: "苏小棉",
+		userName: "旅人",
+	});
+	assert.ok(systemPrompt.includes("👤 姓名"), "字段清单在场");
+	assert.ok(systemPrompt.includes("每个字段都必须出现"), "要求全字段补全");
+	assert.ok(userText.includes("苏小棉"), "已有值在场");
+});
+
+test("状态栏补全：解析 status_fields", () => {
+	const r = parseStatusBarCompletion(`好的，以下是补全：
+\`\`\`json
+{"status_fields": {"👤 姓名": "苏小棉（棉棉喵）", "📝 当前行动": "假装伸懒腰"}}
+\`\`\``);
+	assert.ok(r);
+	assert.equal(r?.statusFields["👤 姓名"], "苏小棉（棉棉喵）");
+	assert.equal(r?.statusFields["📝 当前行动"], "假装伸懒腰");
+	assert.equal(parseStatusBarCompletion("无法解析"), null);
 });

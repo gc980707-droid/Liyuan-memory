@@ -135,12 +135,38 @@ test("renderStatusBarFromState：账本 → 状态栏块（字段填值、静态
 	assert.ok(text.includes("📝 当前行动：假装伸懒腰"), "字段值已填");
 	assert.ok(text.includes("👤 姓名：苏小棉（棉棉喵）"), "字段值已填");
 	assert.ok(text.includes("<details>"), "骨架保留");
-	// 未记账字段 → 空值
-	assert.ok(text.includes("💭 当前内心："), "缺失字段留空");
+	// 未记账字段整行跳过（模板子结构/缺失字段不露空行）
+	assert.ok(!text.includes("💭 当前内心"), "无账本值的字段整行跳过");
+	assert.ok(!text.includes("当前穿搭"), "未记账字段不出现");
 	// head 段替换（账本 time/location 兜底）
 	assert.ok(text.includes("📍 位置：走廊"), "head 位置已替换");
 	assert.ok(text.includes("⏰ 时间：21:00"), "head 时间已替换");
+	// 未记账字段整行跳过（模板子结构不露空行）
+	assert.ok(!text.includes("💭 当前内心："), "无账本值的字段整行跳过");
+	assert.ok(!text.includes("当前穿搭"), "未记账字段不出现");
 	// 渲染产物可被 parse 成快照（与 wire 管道一致）
 	const snap = parseStatusBarBlock(text);
 	assert.equal(snap.fields.find((f) => f.label === "📝 当前行动")?.value, "假装伸懒腰");
+});
+
+test("extractStatusBarTemplate：字段清单只含顶层字段（子结构不单独列）", () => {
+	const nested = `你来了。
+<Status_block>
+『📅 日期：7月15日』
+<details><summary>[角色状态]</summary>
+- 苏小棉的状态
+  - 👤 姓名：苏小棉（棉宝/棉棉喵）
+  - 🐦 推特日记：
+    - ⏱️ 时间：2分钟前
+    - 推文：坐长途火车好无聊呀~
+    - 💬 评论：
+      - 孙吧在逃鼠鼠：虽然知道是营业
+</details>
+</Status_block>`;
+	const tpl = extractStatusBarTemplate([nested]);
+	assert.ok(tpl);
+	assert.ok(tpl?.fieldLabels.includes("👤 姓名"), "顶层字段在场");
+	assert.ok(tpl?.fieldLabels.includes("🐦 推特日记"), "顶层字段在场");
+	assert.ok(!tpl?.fieldLabels.includes("时间"), "子字段（⏱️ 时间）不单独列");
+	assert.ok(!tpl?.fieldLabels.includes("孙吧在逃鼠鼠"), "评论名不单独列");
 });

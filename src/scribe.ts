@@ -121,6 +121,83 @@ export function parseScribeResult(text: string): ScribeResult | null {
 	return null;
 }
 
+// ---------- 状态栏字段补全（8/10 工具化：缺字段由 harness 主动调模型补） ----------
+
+export interface StatusBarCompletionInput {
+	/** 卡状态栏模板顶层字段清单 */
+	fieldLabels: string[];
+	/** 账本当前 status_fields（已有值；缺失字段待补） */
+	current: Record<string, string>;
+	/** 本拍定稿正文 */
+	assistantText: string;
+	charName: string;
+	userName: string;
+}
+
+export interface StatusBarCompletionResult {
+	/** 完整 status_fields（含已有值与补齐值） */
+	statusFields: Record<string, string>;
+}
+
+/**
+ * 补全 prompt：给字段清单 + 已有值 + 本轮正文，让场记把每个字段的最新值填全。
+ * 缺失字段必须补（能从正文推断就填，推断不出填空串并注明？——填正文里最新的信息，
+ * 宁可给保守描述也不留空）；已有字段按正文最新状态更新。
+ */
+export function buildStatusBarCompletionPrompt(input: StatusBarCompletionInput): {
+	systemPrompt: string;
+	userText: string;
+} {
+	const { fieldLabels, current, assistantText, charName, userName } = input;
+	const fields = fieldLabels.join("\n");
+	const currentJson = JSON.stringify(current, null, 2);
+	const systemPrompt = `你是角色扮演的场记。角色卡定义了状态栏，每个字段需要每拍的最新值。阅读【本轮正文】与【当前字段值】，输出 JSON：把【字段清单】里的每个字段补全为**本拍最新状态**。
+
+规则：
+- 每个字段都必须出现；已有值若无变化就原样保留；有变化按正文最新状态更新。
+- 缺失字段从正文推断（动作/神态/对话/环境细节都能支撑状态描述）；实在推断不出就给保守的空态描述（如「暂无变化」），不留空。
+- 状态描述贴合本拍正文的具体细节，不编造正文里没有的重大事件。
+
+字段清单：
+${fields}
+
+只输出 JSON 对象：{"status_fields": { "字段名": "值", ... }}。不要输出任何其他文字。`;
+
+	const user = `【当前字段值】（供参考，字段可能缺失）
+${currentJson}
+
+【本轮正文】
+${userName}：${assistantText}
+
+【对话补充】
+${charName}：${assistantText}`;
+
+	return { systemPrompt, userText: user };
+}
+
+/** 宽容解析补全输出：{status_fields:{...}}；解析失败返回 null */
+export function parseStatusBarCompletion(text: string): StatusBarCompletionResult | null {
+	let t = text.trim();
+	const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+	if (fence) t = fence[1].trim();
+	const start = t.indexOf("{");
+	const end = t.lastIndexOf("}");
+	if (start === -1 || end <= start) return null;
+	try {
+		const obj = JSON.parse(t.slice(start, end + 1)) as Record<string, unknown>;
+		const raw = obj.status_fields;
+		if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+		const statusFields: Record<string, string> = {};
+		for (const [k, v] of Object.entries(raw)) {
+			if (typeof v === "string") statusFields[k] = v;
+			else if (v !== null && v !== undefined) statusFields[k] = String(v);
+		}
+		return { statusFields };
+	} catch {
+		return null;
+	}
+}
+
 // ---------- 世界书中文别名（修复：专有名词中译后英文关键词地板失效） ----------
 
 export interface AliasEntryInput {

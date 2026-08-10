@@ -1,6 +1,6 @@
 /**
  * 「状态」面板（顶栏按钮开关，左栏渲染）：显示最新状态栏快照。
- * 数据源是服务端剥离正文后推送的最新快照（StatusBarSnapshot），
+ * 数据源是服务端渲染管道（卡模板 + 账本 status_fields + 场记补全）的产物，
  * 不依赖任何正则脚本——正文里的 <Status_block> 已被 wire 层剥走。
  */
 
@@ -18,12 +18,18 @@ export function StatusRail({
 		<>
 			{snapshot ? (
 				<>
-					<div className="status-panel-head">{snapshot.head || "当前状态"}</div>
+					{snapshot.head && <div className="status-panel-head">{snapshot.head}</div>}
 					<div className="status-panel-fields">
 						{snapshot.fields.map((f, i) => (
 							<div key={i} className="status-panel-field">
-								<span className="status-panel-label">{f.label}</span>
-								{f.value ? <div className="status-panel-value">{f.value}</div> : null}
+								{f.value ? (
+									<>
+										<span className="status-panel-label">{f.label}</span>
+										<div className="status-panel-value">{f.value}</div>
+									</>
+								) : (
+									<span className="status-panel-title">{f.label}</span>
+								)}
 							</div>
 						))}
 					</div>

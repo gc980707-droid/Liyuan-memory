@@ -12,7 +12,12 @@
  */
 
 import { applyPatch, canonicalizeCharacterKeys, saveState } from "../state.ts";
-import { buildScribeTurnPrompt, parseScribeResult } from "../scribe.ts";
+import {
+	buildScribeTurnPrompt,
+	buildStatusBarCompletionPrompt,
+	parseScribeResult,
+	parseStatusBarCompletion,
+} from "../scribe.ts";
 import type { WorldState } from "../types.ts";
 
 /** 场记快照的会话树条目类型（CustomEntry，不进 LLM 上下文） */
@@ -85,6 +90,55 @@ export async function runScribeTurn(deps: ScribeRunDeps, input: ScribeRunInput):
 		}
 	}
 	if (result.applied.length > 0) deps.onActivity?.(`记账 ${summarizeApplied(result.applied)}`);
+	return { kind: "applied", state: result.state, applied: result.applied };
+}
+
+/**
+ * 状态栏字段补全（8/10 工具化：缺字段由 harness 主动调模型补，不静默留空）。
+ * 只合并 status_fields；失败只跳过补全（主演已记的值保留，渲染端无值字段兜底跳过）。
+ * 同场记：叶守卫——调用期间树动过则整体丢弃。
+ */
+export async function runStatusBarCompletion(
+	deps: ScribeRunDeps,
+	input: ScribeRunInput & { fieldLabels: string[] },
+): Promise<ScribeRunOutcome> {
+	const { state, userText, assistantText, charName, userName, fieldLabels } = input;
+	if (fieldLabels.length === 0) return { kind: "skipped", reason: "no-fields" };
+	if (!assistantText.trim()) return { kind: "skipped", reason: "no-text" };
+
+	const leafBefore = deps.getLeafId();
+	const prompt = buildStatusBarCompletionPrompt({
+		fieldLabels,
+		current: state.status_fields ?? {},
+		assistantText,
+		charName,
+		userName,
+	});
+	const resp = await deps.sideText(prompt.systemPrompt, prompt.userText);
+	if (typeof resp !== "string") return { kind: "failed", error: resp.error };
+
+	const parsed = parseStatusBarCompletion(resp);
+	if (!parsed || Object.keys(parsed.statusFields).length === 0) {
+		return { kind: "failed", error: "状态栏补全输出不可解析" };
+	}
+
+	// R9 叶守卫
+	if (deps.getLeafId() !== leafBefore) {
+		deps.onActivity?.("状态栏补全已丢弃（本拍期间切换了分支）");
+		return { kind: "stale" };
+	}
+
+	const result = applyPatch(state, { status_fields: parsed.statusFields });
+	deps.appendStateEntry(result.state);
+	if (deps.stateFile) {
+		try {
+			saveState(deps.stateFile, result.state);
+		} catch {
+			// 缓存写失败不影响树上快照
+		}
+	}
+	const filled = fieldLabels.filter((f) => result.state.status_fields?.[f]);
+	deps.onActivity?.(`状态栏字段补全（${filled.length}/${fieldLabels.length} 项）`);
 	return { kind: "applied", state: result.state, applied: result.applied };
 }
 

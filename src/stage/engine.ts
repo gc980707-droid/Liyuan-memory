@@ -60,7 +60,7 @@ import {
 	type CompactOutcome,
 	type RpSummaryData,
 } from "./compact.ts";
-import { runScribeTurn, STATE_ENTRY_TYPE } from "./scribe-run.ts";
+import { runScribeTurn, runStatusBarCompletion, STATE_ENTRY_TYPE } from "./scribe-run.ts";
 import {
 	MAX_ROUNDS,
 	runStageTool,
@@ -834,6 +834,34 @@ export class StageEngine {
 			}
 			ev.onActivity?.(`记账 ${ws.patches.length} 笔（模型提交）`);
 			sm.flush();
+		}
+
+		// 状态栏字段补全（8/10 工具化）：卡有状态栏模板且账本 status_fields 有缺口时，
+		// harness 主动调一次旁侧模型补齐缺失字段——不静默留空（用户定调：缺内容让模型补）。
+		if (entryId && !aborted && finalText && materials.statusBarFields.length > 0) {
+			const nextState = projectedState(ws, state);
+			const missing = materials.statusBarFields.filter((f) => !nextState.status_fields?.[f]?.trim());
+			if (missing.length > 0) {
+				const r = await runStatusBarCompletion(
+					{
+						sideText: (sp, ut) => this.#sideText(model, sp, ut, { apiKey, headers }, 2048),
+						appendStateEntry: (s) => sm.appendCustomEntry(STATE_ENTRY_TYPE, s),
+						getLeafId: () => sm.getLeafId(),
+						stateFile: this.#deps.getStateFile?.(sm.getSessionId()),
+						onActivity: (d) => ev.onActivity?.(d),
+					},
+					{
+						state: nextState,
+						userText: lastUserText,
+						assistantText: finalText,
+						charName: materials.card.name,
+						userName: materials.config.userName,
+						fieldLabels: materials.statusBarFields,
+					},
+				);
+				if (r.kind === "failed") console.error(`[stage-statusbar] 补全跳过：${r.error}`);
+				sm.flush();
+			}
 		}
 
 		// 场记兜底（D5）：模型本拍没调 world_state_update 才旁路补账，M-B 视实弹数据决定退役。

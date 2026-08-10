@@ -187,7 +187,7 @@ export function extractStatusBarTemplate(texts: string[]): StatusBarTemplate | n
 	const inner = block.replace(OPEN_RE, "").replace(CLOSE_RE, "").trim();
 	const headMatch = /『[^』\n]+(?:』|$)/.exec(inner);
 	const rows: Array<{ kind: "static" | "field"; text: string; indent: string; label: string }> = [];
-	const fieldLabels: string[] = [];
+	let minFieldIndent = -1;
 	for (const line of inner.split(/\r?\n/)) {
 		const indent = /^(\s*)/.exec(line)?.[1] ?? "";
 		const t = line.trim();
@@ -199,12 +199,16 @@ export function extractStatusBarTemplate(texts: string[]): StatusBarTemplate | n
 			if (kv && kv[1].trim()) {
 				const label = kv[1].trim();
 				rows.push({ kind: "field", text: line, indent, label });
-				if (!fieldLabels.includes(label)) fieldLabels.push(label);
+				if (minFieldIndent < 0 || indent.length < minFieldIndent) minFieldIndent = indent.length;
 				continue;
 			}
 		}
 		rows.push({ kind: "static", text: line, indent, label: "" });
 	}
+	// 字段清单只含最浅缩进层级（顶层字段；子结构如 ⏱️ 时间/推文/评论名不单独列）
+	const fieldLabels = rows
+		.filter((r) => r.kind === "field" && r.indent.length === minFieldIndent)
+		.map((r) => r.label);
 	return {
 		raw: block,
 		head: headMatch ? headMatch[0].trim() : rows.find((r) => r.kind === "static")?.text.trim() ?? "",
@@ -256,8 +260,17 @@ export function renderStatusBarFromState(
 	if (state.time && !values["时间"]) values["时间"] = state.time;
 	if (state.location && !values["位置"]) values["位置"] = state.location;
 	const head = renderStatusBarHead(template.head, values);
-	const lines = template.rows.map((row) =>
-		row.kind === "field" ? `${row.indent}- ${row.label}：${values[row.label] ?? ""}` : row.text,
-	);
+	const lines: string[] = [];
+	for (const row of template.rows) {
+		if (row.kind === "field") {
+			// 账本无值的字段整行跳过——模板子结构（⏱️ 时间/推文/评论名等）不记账就不露空行；
+			// 顶层字段记账时写完整文本（嵌套内容合并成一行）。
+			const v = values[row.label];
+			if (v === undefined || v === "") continue;
+			lines.push(`${row.indent}- ${row.label}：${v}`);
+		} else {
+			lines.push(row.text);
+		}
+	}
 	return `<Status_block>\n${head}\n${lines.join("\n")}\n</Status_block>`;
 }
