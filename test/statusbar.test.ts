@@ -135,18 +135,33 @@ test("renderStatusBarFromState：账本 → 状态栏块（字段填值、静态
 	assert.ok(text.includes("📝 当前行动：假装伸懒腰"), "字段值已填");
 	assert.ok(text.includes("👤 姓名：苏小棉（棉棉喵）"), "字段值已填");
 	assert.ok(text.includes("<details>"), "骨架保留");
-	// 未记账字段整行跳过（模板子结构/缺失字段不露空行）
-	assert.ok(!text.includes("💭 当前内心"), "无账本值的字段整行跳过");
-	assert.ok(!text.includes("当前穿搭"), "未记账字段不出现");
+	// 账本无值的顶层字段继承卡示例值（不露空行、不靠每拍推断）
+	assert.ok(text.includes("💭 当前内心：*信号断了……*"), "缺省继承卡示例值");
+	assert.ok(text.includes("👗 当前穿搭：水手服衬衫"), "静态字段继承卡示例值");
 	// head 段替换（账本 time/location 兜底）
 	assert.ok(text.includes("📍 位置：走廊"), "head 位置已替换");
 	assert.ok(text.includes("⏰ 时间：21:00"), "head 时间已替换");
-	// 未记账字段整行跳过（模板子结构不露空行）
-	assert.ok(!text.includes("💭 当前内心："), "无账本值的字段整行跳过");
-	assert.ok(!text.includes("当前穿搭"), "未记账字段不出现");
 	// 渲染产物可被 parse 成快照（与 wire 管道一致）
 	const snap = parseStatusBarBlock(text);
 	assert.equal(snap.characters[0].fields.find((f) => f.label === "📝 当前行动")?.value, "假装伸懒腰");
+});
+
+test("renderStatusBarFromState：静态字段继承卡模板示例值（账号/粉丝数不靠每拍推断）", () => {
+	const tpl = extractStatusBarTemplate([CARD_SAMPLE]);
+	assert.ok(tpl);
+	// 只给动态字段账本值；静态字段（👤 姓名等）缺省 → 用卡示例
+	const text = renderStatusBarFromState(tpl!, {}, {
+		"📝 当前行动": "假装伸懒腰",
+	});
+	assert.ok(text.includes("📝 当前行动：假装伸懒腰"), "动态字段用账本值");
+	// CARD_SAMPLE 里 👤 姓名示例值 = 苏小棉（棉宝/棉棉喵）
+	assert.ok(text.includes("👤 姓名：苏小棉（棉宝/棉棉喵）"), "静态字段继承卡示例值");
+	// 「未提及」视为无值 → fallback 卡示例
+	const withNa = renderStatusBarFromState(tpl!, {}, {
+		"📝 当前行动": "未提及",
+	});
+	assert.ok(withNa.includes("📝 当前行动："), "未提及时用卡示例");
+	assert.ok(!withNa.includes("未提及"), "未提及不进渲染");
 });
 
 test("extractStatusBarTemplate：字段清单只含顶层字段（子结构不单独列）", () => {

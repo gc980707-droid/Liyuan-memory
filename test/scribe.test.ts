@@ -108,14 +108,18 @@ test("状态栏生成：prompt 含字段清单、角色分组与已有值", () =
 		fieldLabels: ["👤 姓名", "📝 当前行动", "💭 当前内心"],
 		current: { 苏小棉: { "👤 姓名": "苏小棉" } },
 		knownCharacters: ["苏小棉", "旅人"],
+		userText: "我走进包厢。",
 		assistantText: "她假装伸懒腰。",
 		charName: "苏小棉",
 		userName: "旅人",
 	});
 	assert.ok(systemPrompt.includes("👤 姓名"), "字段清单在场");
-	assert.ok(systemPrompt.includes("角色分组必须严格对应"), "角色分组纪律在场");
+	assert.ok(systemPrompt.includes("角色归属必须严格"), "角色分组纪律在场");
 	assert.ok(systemPrompt.includes("出场角色"), "角色清单在场");
-	assert.ok(userText.includes("苏小棉"), "已有值在场");
+	assert.ok(systemPrompt.includes("推断不出就省略该字段"), "省略纪律在场（不写未提及）");
+	assert.ok(systemPrompt.includes("正文是「苏小棉」的叙事"), "正文归属主角在场");
+	assert.ok(userText.includes("旅人（用户）：我走进包厢。"), "用户输入归属正确");
+	assert.ok(userText.includes("苏小棉：她假装伸懒腰。"), "正文归属正确（修复串角色根因）");
 });
 
 test("状态栏生成：解析多角色 status_fields", () => {

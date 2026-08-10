@@ -187,8 +187,8 @@ export interface StatusBarTemplate {
 	raw: string;
 	/** head 行（『…』或第一非空行）——渲染时按段替换日期/时间/位置 */
 	head: string;
-	/** 行骨架（渲染时逐行重建：static 原样，field 填账本值） */
-	rows: Array<{ kind: "static" | "field"; text: string; indent: string; label: string }>;
+	/** 行骨架（渲染时逐行重建：static 原样，field 填账本值，缺则用卡示例值） */
+	rows: Array<{ kind: "static" | "field"; text: string; indent: string; label: string; sample: string }>;
 	/** 字段 label 清单（按出现顺序；提示词与账本 key 依据） */
 	fieldLabels: string[];
 }
@@ -207,7 +207,7 @@ export function extractStatusBarTemplate(texts: string[]): StatusBarTemplate | n
 	if (!block) return null;
 	const inner = block.replace(OPEN_RE, "").replace(CLOSE_RE, "").trim();
 	const headMatch = /『[^』\n]+(?:』|$)/.exec(inner);
-	const rows: Array<{ kind: "static" | "field"; text: string; indent: string; label: string }> = [];
+	const rows: Array<{ kind: "static" | "field"; text: string; indent: string; label: string; sample: string }> = [];
 	let minFieldIndent = -1;
 	for (const line of inner.split(/\r?\n/)) {
 		const indent = /^(\s*)/.exec(line)?.[1] ?? "";
@@ -219,12 +219,12 @@ export function extractStatusBarTemplate(texts: string[]): StatusBarTemplate | n
 			const kv = /^(.+?)(?::|：)\s*([\s\S]*)$/.exec(item);
 			if (kv && kv[1].trim()) {
 				const label = kv[1].trim();
-				rows.push({ kind: "field", text: line, indent, label });
+				rows.push({ kind: "field", text: line, indent, label, sample: kv[2].trim() });
 				if (minFieldIndent < 0 || indent.length < minFieldIndent) minFieldIndent = indent.length;
 				continue;
 			}
 		}
-		rows.push({ kind: "static", text: line, indent, label: "" });
+		rows.push({ kind: "static", text: line, indent, label: "", sample: "" });
 	}
 	// 字段清单只含最浅缩进层级（顶层字段；子结构如 ⏱️ 时间/推文/评论名不单独列）
 	const fieldLabels = rows
@@ -242,9 +242,11 @@ export function extractStatusBarTemplate(texts: string[]): StatusBarTemplate | n
 export function renderStatusBarHead(head: string, values: Record<string, string>): string {
 	// 宽松匹配：段 label 常带 emoji 前缀（📅 日期），账本 key 可能只写「日期」——双向包含判定
 	const findValue = (label: string): string | undefined => {
-		if (values[label]) return values[label];
+		const direct = values[label];
+		if (direct && direct !== "未提及") return direct;
 		for (const k of Object.keys(values)) {
-			if (label.includes(k) || k.includes(label)) return values[k];
+			const v = values[k];
+			if (v && v !== "未提及" && (label.includes(k) || k.includes(label))) return v;
 		}
 		return undefined;
 	};
@@ -286,9 +288,12 @@ export function renderStatusBarFromState(
 	const lines: string[] = [];
 	for (const row of template.rows) {
 		if (row.kind === "field") {
+			// 取值优先级：账本 > 卡模板示例值（静态字段如账号/粉丝数继承卡设定）> 跳过。
+			// 「未提及」视为无值（场记推断不出时省略，不写死占位）。
 			const v = values[row.label];
-			if (v === undefined || v === "") continue;
-			lines.push(`${row.indent}- ${row.label}：${v}`);
+			const effective = v && v !== "未提及" ? v : row.sample;
+			if (!effective) continue;
+			lines.push(`${row.indent}- ${row.label}：${effective}`);
 		} else {
 			lines.push(row.text);
 		}

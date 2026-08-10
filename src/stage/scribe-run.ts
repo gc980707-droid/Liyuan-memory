@@ -111,6 +111,7 @@ export async function runStatusBarCompletion(
 		fieldLabels,
 		current: state.status_fields ?? {},
 		knownCharacters,
+		userText,
 		assistantText,
 		charName,
 		userName,

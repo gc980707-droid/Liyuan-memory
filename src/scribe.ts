@@ -130,7 +130,9 @@ export interface StatusBarCompletionInput {
 	current: Record<string, Record<string, string>>;
 	/** 出场角色（账本 characters 键 + 主角/用户；生成这些角色的状态栏） */
 	knownCharacters: string[];
-	/** 本拍定稿正文 */
+	/** 本拍用户输入 */
+	userText: string;
+	/** 本拍定稿正文（角色卡角色的叙事） */
 	assistantText: string;
 	charName: string;
 	userName: string;
@@ -142,27 +144,28 @@ export interface StatusBarCompletionResult {
 }
 
 /**
- * 生成 prompt：给字段清单 + 各角色已有值 + 本轮正文，让场记为**每个出场角色**
+ * 生成 prompt：给字段清单 + 各角色已有值 + 本轮对话，让场记为**每个出场角色**
  * 生成一份状态栏字段（已有值保留、变化更新、缺失从正文推断）。
  * 输出 {角色名: {字段: 值}} —— 角色名用账本规范写法。
+ * 重要：正文是 ${charName} 的叙事，用户输入是 ${userName} 的话——角色归属必须严格。
  */
 export function buildStatusBarCompletionPrompt(input: StatusBarCompletionInput): {
 	systemPrompt: string;
 	userText: string;
 } {
-	const { fieldLabels, current, knownCharacters, assistantText, charName, userName } = input;
+	const { fieldLabels, current, knownCharacters, userText, assistantText, charName, userName } = input;
 	const fields = fieldLabels.join("\n");
 	const chars = knownCharacters.length ? knownCharacters.join("、") : `${charName}、${userName}`;
 	const currentJson = JSON.stringify(current, null, 2);
-	const systemPrompt = `你是角色扮演的场记。角色卡定义了状态栏，每个出场角色需要每拍的最新状态。阅读【本轮正文】与【当前各角色状态】，输出 JSON：为**每个出场角色**生成一份状态栏字段。
+	const systemPrompt = `你是角色扮演的场记。角色卡定义了状态栏，每个出场角色需要每拍的最新状态。阅读【本轮对话】与【当前各角色状态】，输出 JSON：为**每个出场角色**生成一份状态栏字段。
 
 规则：
 - 输出对象按角色分组：{"status_fields": {"角色名": {"字段": "值", ...}, ...}}
 - 角色名用账本规范写法；至少包含主角「${charName}」与出场角色；本拍**没有戏份的角色**可以省略（保留在账本里，不输出即可）。
 - 每个角色的每个字段都必须出现；已有值若无变化就原样保留；有变化按正文最新状态更新。
-- 缺失字段从正文推断（动作/神态/对话/环境细节都能支撑状态描述）；实在推断不出就给保守的空态描述（如「未提及」），不留空。
+- 缺失字段从正文推断（动作/神态/对话/环境细节都能支撑状态描述）；**推断不出就省略该字段**（不要写「未提及」——省略的字段渲染时自动沿用卡作者预设值）。
 - 状态描述贴合本拍正文的具体细节，不编造正文里没有的重大事件。
-- **只写该角色自己的状态**：主角的字段写主角的行动/内心/穿搭，不要把另一角色的状态串进来（上一拍曾出现把用户角色状态写进主角状态栏的错误——角色分组必须严格对应）。
+- **角色归属必须严格**：正文是「${charName}」的叙事，用户输入是「${userName}」的话——各自的行动/内心/穿搭写进各自角色，绝不要把用户的动作写进主角状态栏，反之亦然。
 
 字段清单（每个角色都按这份填）：
 ${fields}
@@ -174,10 +177,9 @@ ${fields}
 	const user = `【当前各角色状态】（供参考，字段可能缺失）
 ${currentJson}
 
-【本轮正文】
-${userName}：${assistantText}
+【本轮对话】
+${userName}（用户）：${userText}
 
-【对话补充】
 ${charName}：${assistantText}`;
 
 	return { systemPrompt, userText: user };
