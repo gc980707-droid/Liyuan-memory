@@ -3560,6 +3560,116 @@ input.panel-search.num {
 }
 
 
+
+/* 角色信息卡（点击关系图节点弹出） */
+.relgraph-char-card {
+	position: absolute;
+	top: 12px;
+	right: 12px;
+	width: min(280px, calc(100% - 24px));
+	max-height: calc(100% - 24px);
+	overflow-y: auto;
+	background: color-mix(in srgb, var(--surface) 96%, #000);
+	border: 1px solid var(--hairline);
+	border-radius: var(--radius-l);
+	box-shadow: var(--shadow-3);
+	padding: 12px 14px;
+	font-size: 12.5px;
+	line-height: 1.55;
+	color: var(--text);
+	z-index: 5;
+}
+.relgraph-card-close {
+	position: absolute;
+	top: 8px;
+	right: 10px;
+	background: none;
+	border: none;
+	color: var(--text-faint);
+	font-size: 13px;
+	cursor: pointer;
+	padding: 2px 4px;
+}
+.relgraph-card-close:hover {
+	color: var(--text-strong);
+}
+.relgraph-card-head {
+	display: flex;
+	gap: 10px;
+	align-items: center;
+	margin-bottom: 10px;
+}
+.relgraph-card-avatar {
+	width: 38px;
+	height: 38px;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 16px;
+	font-weight: 700;
+	color: #f8fafc;
+	flex: none;
+}
+.relgraph-card-name {
+	font-size: 14.5px;
+	font-weight: 800;
+	color: var(--text-strong);
+}
+.relgraph-card-tags {
+	display: flex;
+	gap: 5px;
+	margin-top: 2px;
+}
+.relgraph-card-tag {
+	font-size: 10.5px;
+	font-weight: 700;
+	color: #f8fafc;
+	background: color-mix(in srgb, var(--accent) 60%, transparent);
+	border-radius: 6px;
+	padding: 1px 6px;
+}
+.relgraph-card-row {
+	display: flex;
+	gap: 8px;
+	padding: 4px 0;
+	border-bottom: 1px dashed color-mix(in srgb, var(--hairline) 70%, transparent);
+}
+.relgraph-card-k {
+	flex: 0 0 auto;
+	color: var(--text-faint);
+	font-weight: 600;
+	width: 4.5em;
+}
+.relgraph-card-v {
+	flex: 1 1 auto;
+	word-break: break-word;
+}
+.relgraph-card-rel {
+	margin-top: 8px;
+}
+.relgraph-card-rel-title {
+	font-size: 11px;
+	font-weight: 700;
+	color: var(--text-faint);
+	margin-bottom: 3px;
+}
+.relgraph-card-rel-row {
+	display: flex;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 2px 0;
+	font-size: 12px;
+}
+.relgraph-card-rel-name {
+	color: var(--text-strong);
+	font-weight: 600;
+}
+.relgraph-card-empty {
+	color: var(--text-faint);
+	font-size: 11.5px;
+}
+
 /* 人物关系图面板（左栏） */
 .relgraph {
 	flex: 1 1 auto;

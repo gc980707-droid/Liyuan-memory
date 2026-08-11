@@ -183,6 +183,9 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 	// 悬停详情
 	const [hover, setHover] = useState<RelationshipEdge | null>(null);
 	const [hoverNode, setHoverNode] = useState<string | null>(null);
+	// 选中角色（点击节点弹出信息卡）
+	const [selected, setSelected] = useState<string | null>(null);
+	const selectNode = (name: string) => setSelected((cur) => (cur === name ? null : name));
 
 	// 节点拖拽按下：记录偏移（鼠标与节点中心的差），保证跟手；捕获到 svg（move 事件统一走 svg）
 	const onNodeDown = (idx: number, ev: React.PointerEvent) => {
@@ -273,6 +276,7 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 									className="relgraph-node"
 									transform={`translate(${n.x},${n.y})`}
 									onPointerDown={(ev) => onNodeDown(idx, ev)}
+									onClick={() => selectNode(n.name)}
 									onMouseEnter={() => setHoverNode(n.name)}
 									onMouseLeave={() => setHoverNode(null)}
 									style={{ cursor: "grab" }}
@@ -281,8 +285,8 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 									<circle
 										r={NODE_R}
 										fill={isUser ? "#0ea5e9" : isMain ? "#f59e0b" : "#334155"}
-										stroke="#e2e8f0"
-										strokeWidth={isUser || isMain ? 2.5 : 1.5}
+										stroke={selected === n.name ? "#fbbf24" : "#e2e8f0"}
+										strokeWidth={selected === n.name ? 3 : isUser || isMain ? 2.5 : 1.5}
 									/>
 									<text className="relgraph-node-char" textAnchor="middle" dy={5}>
 										{n.name.slice(0, 1)}
@@ -295,6 +299,16 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 						})}
 					</g>
 				</svg>
+				{selected && (
+					<CharInfoCard
+						name={selected}
+						charName={charName}
+						userName={userName}
+						state={state}
+						edges={uniqEdges}
+						onClose={() => setSelected(null)}
+					/>
+				)}
 				{hover && (
 					<div className="relgraph-tip">
 						<strong>
@@ -316,8 +330,101 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 				<span style={{ color: "#94a3b8" }}>中立</span>
 				<span style={{ color: "#84cc16" }}>友善</span>
 				<span style={{ color: "#22c55e" }}>亲近</span>
-				<span className="relgraph-hint">滚轮缩放 · 空白拖拽平移 · 拖节点调整</span>
+				<span className="relgraph-hint">滚轮缩放 · 空白拖拽平移 · 拖节点调整 · 点击节点看信息</span>
 			</div>
+		</div>
+	);
+}
+
+/** 点击角色节点弹出的信息卡（数据来自账本 characters/roster + 关系边） */
+function CharInfoCard({
+	name,
+	charName,
+	userName,
+	state,
+	edges,
+	onClose,
+}: {
+	name: string;
+	charName: string;
+	userName: string;
+	state: WorldState | null;
+	edges: RelationshipEdge[];
+	onClose: () => void;
+}) {
+	const cs = state?.characters?.[name];
+	const roster = state?.roster?.characters?.[name];
+	const isUser = name === userName;
+	const isMain = name === charName;
+	const related = edges.filter((e) => e.a === name || e.b === name);
+	const withMe = edges.find((e) => (e.a === name && e.b === userName) || (e.b === name && e.a === userName));
+	return (
+		<div className="relgraph-char-card" onClick={(e) => e.stopPropagation()}>
+			<button type="button" className="relgraph-card-close" onClick={onClose} aria-label="关闭">
+				✕
+			</button>
+			<div className="relgraph-card-head">
+				<span
+					className="relgraph-card-avatar"
+					style={{ background: isUser ? "#0ea5e9" : isMain ? "#f59e0b" : "#334155" }}
+				>
+					{name.slice(0, 1)}
+				</span>
+				<div>
+					<div className="relgraph-card-name">{name}</div>
+					<div className="relgraph-card-tags">
+						{isUser ? <span className="relgraph-card-tag">你</span> : null}
+						{isMain ? <span className="relgraph-card-tag">主角</span> : null}
+					</div>
+				</div>
+			</div>
+			{withMe && (
+				<div className="relgraph-card-row">
+					<span className="relgraph-card-k">对你的态度</span>
+					<span style={{ color: affinityColor(withMe.affinity) }}>
+						{withMe.relation} · {affinityLabel(withMe.affinity)}（{withMe.affinity > 0 ? "+" : ""}
+						{withMe.affinity}）
+					</span>
+				</div>
+			)}
+			{cs?.status && (
+				<div className="relgraph-card-row">
+					<span className="relgraph-card-k">状态</span>
+					<span className="relgraph-card-v">{cs.status}</span>
+				</div>
+			)}
+			{roster && (
+				<div className="relgraph-card-row">
+					<span className="relgraph-card-k">简介</span>
+					<span className="relgraph-card-v">{roster}</span>
+				</div>
+			)}
+			{cs?.notes && (
+				<div className="relgraph-card-row">
+					<span className="relgraph-card-k">备注</span>
+					<span className="relgraph-card-v">{cs.notes}</span>
+				</div>
+			)}
+			{related.length > 0 && (
+				<div className="relgraph-card-rel">
+					<div className="relgraph-card-rel-title">关联</div>
+					{related.map((e, i) => {
+						const other = e.a === name ? e.b : e.a;
+						return (
+							<div key={i} className="relgraph-card-rel-row">
+								<span className="relgraph-card-rel-name">↔ {other}</span>
+								<span style={{ color: affinityColor(e.affinity) }}>
+									{e.relation}（{e.affinity > 0 ? "+" : ""}
+									{e.affinity}）
+								</span>
+							</div>
+						);
+					})}
+				</div>
+			)}
+			{!cs && !roster && !withMe && related.length === 0 && (
+				<div className="relgraph-card-empty">（暂无记录——剧情互动后自动生成）</div>
+			)}
 		</div>
 	);
 }
