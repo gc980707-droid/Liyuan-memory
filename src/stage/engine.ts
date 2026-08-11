@@ -837,14 +837,39 @@ export class StageEngine {
 			sm.flush();
 		}
 
+		// 场记兜底（D5）：模型本拍没调 world_state_update 才旁路补账——先跑，
+		// 让状态栏生成基于**最新账本**（否则场记用开演前旧账本 appendStateEntry
+		// 会覆盖状态栏刚写的 status_fields——8/11 docker 实弹：推送 2 角色但
+		// hello 只 1 角色，status_fields 被冲掉）。
+		let ledgerState = projectedState(ws, state);
+		if (entryId && !aborted && finalText && ws.patches.length === 0) {
+			const r = await runScribeTurn(
+				{
+					// 2048：账本+名录随剧情增长，patch 可能很长；1024 实测会截断出半截 JSON（8/03）
+					sideText: (sp, ut) => this.#sideText(model, sp, ut, { apiKey, headers }, 2048),
+					appendStateEntry: (s) => sm.appendCustomEntry(STATE_ENTRY_TYPE, s),
+					getLeafId: () => sm.getLeafId(),
+					stateFile: this.#deps.getStateFile?.(sm.getSessionId()),
+					onActivity: (d) => ev.onActivity?.(d),
+				},
+				{
+					state: ledgerState,
+					userText: lastUserText,
+					assistantText: finalText,
+					charName: materials.card.name,
+					userName: materials.config.userName,
+				},
+			);
+			if (r.kind === "failed") console.error(`[stage-scribe] 记账跳过：${r.error}`);
+			if (r.kind === "applied") ledgerState = r.state;
+			sm.flush();
+		}
+
 		// 状态栏生成（harness 读正文）：卡有状态栏模板 → 每拍必调一次旁侧模型，
-		// 输入【字段清单 + 账本已有值 + 本轮正文】→ 输出完整 status_fields。
-		// 主演只写正文，不记账状态栏——变量 = 正文的直接映射（正文写了什么，
-		// 状态栏就是什么），不存在「主演没记/场记乱补」的变量错位。
+		// 基于**最新账本**（主演 patches + 场记补账）写 status_fields，不被后续覆盖。
 		if (entryId && !aborted && finalText && materials.statusBarFields.length > 0) {
-			const nextState = projectedState(ws, state);
 			const knownCharacters = [
-				...(Object.keys(nextState.characters).length ? Object.keys(nextState.characters) : [materials.card.name]),
+				...(Object.keys(ledgerState.characters).length ? Object.keys(ledgerState.characters) : [materials.card.name]),
 				materials.config.userName,
 			];
 			ev.onActivity?.(`状态栏生成（读正文 · ${materials.statusBarFields.length} 字段）`);
@@ -857,7 +882,7 @@ export class StageEngine {
 					onActivity: (d) => ev.onActivity?.(d),
 				},
 				{
-					state: nextState,
+					state: ledgerState,
 					userText: lastUserText,
 					assistantText: finalText,
 					charName: materials.card.name,
@@ -871,33 +896,10 @@ export class StageEngine {
 			// 确定性推送：账本已更新，通知 server 广播最新快照（fs.watch 在容器卷上不可靠）
 			if (r.kind === "applied" || r.kind === "stale") ev.onStatusBarUpdated?.();
 			sm.flush();
-		} else {
+		} else if (materials.statusBarFields.length > 0) {
 			console.log(
 				`[stage-statusbar] 未调用：entryId=${!!entryId} aborted=${aborted} finalText=${!!finalText} fields=${materials.statusBarFields.length}`,
 			);
-		}
-
-		// 场记兜底（D5）：模型本拍没调 world_state_update 才旁路补账，M-B 视实弹数据决定退役。
-		if (entryId && !aborted && finalText && ws.patches.length === 0) {
-			const r = await runScribeTurn(
-				{
-					// 2048：账本+名录随剧情增长，patch 可能很长；1024 实测会截断出半截 JSON（8/03）
-					sideText: (sp, ut) => this.#sideText(model, sp, ut, { apiKey, headers }, 2048),
-					appendStateEntry: (s) => sm.appendCustomEntry(STATE_ENTRY_TYPE, s),
-					getLeafId: () => sm.getLeafId(),
-					stateFile: this.#deps.getStateFile?.(sm.getSessionId()),
-					onActivity: (d) => ev.onActivity?.(d),
-				},
-				{
-					state,
-					userText: lastUserText,
-					assistantText: finalText,
-					charName: materials.card.name,
-					userName: materials.config.userName,
-				},
-			);
-			if (r.kind === "failed") console.error(`[stage-scribe] 记账跳过：${r.error}`);
-			sm.flush();
 		}
 
 		// M4 长局压缩：攒够拍数就把早期剧情摘要成 rp-summary（装配时回读为【前情提要】）。
