@@ -57,6 +57,12 @@ export function StatusRail({
 	const [char, setChar] = useState(0);
 	const chars = snapshot?.characters ?? [];
 	const active = chars[Math.min(char, Math.max(0, chars.length - 1))] ?? null;
+	if (typeof window !== "undefined") {
+		// eslint-disable-next-line no-console
+		console.log(
+			`[statusrail] 渲染：${chars.length} 角色 · ${chars.map((c) => c.name).join("/")} · html=${chars.some((c) => c.html) ? "有" : "无"}`,
+		);
+	}
 	const body = (
 		<>
 			{snapshot && chars.length > 0 ? (

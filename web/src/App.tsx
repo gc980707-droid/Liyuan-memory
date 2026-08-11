@@ -803,6 +803,9 @@ export default function App() {
 					setWorldState(frame.state);
 					break;
 				case "statusbar":
+					console.log(
+						`[ws:statusbar] 收到帧：${frame.snapshot ? `${frame.snapshot.characters.length} 角色` : "null"}`,
+					);
 					setStatusBar(frame.snapshot ?? null);
 					break;
 				case "panels": {
