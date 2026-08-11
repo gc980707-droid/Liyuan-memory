@@ -515,12 +515,20 @@ export function fillTemplate(template: string, values: string[]): string {
 
 /**
  * 渲染状态栏 HTML（卡皮肤模板链填充）。
- * valueSlots 已按 head 段值 + 字段值（账本优先、卡示例兜底）铺好；
- * 各脚本模板按序取槽位填充后拼接（链式脚本的最终产物 ≈ 模板依次拼接）。
- * 有学习映射时按映射取槽（细粒度捕获对齐）；无映射退化为顺序填充。
- * 填充值一律 HTML 转义（防注入、防样式破坏）。
+ * valueSlots 已按 head 段值 + 字段值铺好；各脚本模板按序取槽位填充后拼接。
+ * 填充细节：
+ * - 有学习映射按映射取槽；无映射退化顺序填充
+ * - **同槽连续组拆分**：两个组映射到同一字段（如福利度「38/100（擦边升级）」的数字+说明），
+ *   第一组填数字、第二组填括号内说明
+ * - **未映射组智能 fallback**：按 时间 → 推文字段 → 其余未用槽 的顺序补值
+ *   （模板子结构如 ⏱️ 时间/推文 的捕获组示例块里学不到映射）
+ * - 填充值一律 HTML 转义
  */
-export function renderStatusBarHtml(skin: StatusBarSkin, valueSlots: string[]): string {
+export function renderStatusBarHtml(
+	skin: StatusBarSkin,
+	valueSlots: string[],
+	template?: StatusBarTemplate,
+): string {
 	let cursor = 0;
 	const parts: string[] = [];
 	for (const script of skin.scripts) {
@@ -530,6 +538,37 @@ export function renderStatusBarHtml(skin: StatusBarSkin, valueSlots: string[]): 
 			const slotIdx = mapped ? script.mapping[g] : cursor + g;
 			if (slotIdx >= 0 && slotIdx < valueSlots.length) {
 				slotValues[g] = valueSlots[slotIdx];
+			}
+		}
+		// 同槽连续组拆分：「38/100（擦边升级）」→ 组1 填 38、组2 填 擦边升级
+		for (let g = 0; g < script.groupCount - 1; g++) {
+			if (script.mapping[g] >= 0 && script.mapping[g] === script.mapping[g + 1]) {
+				const v = slotValues[g];
+				const m = /^(\d+)\s*\/\s*100\s*[（(](.+)[）)]$/.exec(v);
+				if (m) {
+					slotValues[g] = m[1];
+					slotValues[g + 1] = m[2];
+				}
+			}
+		}
+		// 未映射组 fallback（仅学习映射存在时）：时间 → 推文字段 → 其余未用槽
+		if (mapped) {
+			const usedSlots = new Set(script.mapping.filter((x) => x >= 0));
+			const tweetIdx = template
+				? 3 + template.fieldLabels.findIndex((l) => /推文|日记/.test(l))
+				: -1;
+			const fallbackOrder = [1, tweetIdx >= 3 ? tweetIdx : -1, 0, 2]
+				.filter((i) => i >= 0 && i < valueSlots.length && !usedSlots.has(i) && valueSlots[i])
+				.concat(
+					valueSlots
+						.map((_, i) => i)
+						.filter((i) => ![0, 1, 2, tweetIdx].includes(i) && !usedSlots.has(i) && valueSlots[i]),
+				);
+			let fb = 0;
+			for (let g = 0; g < script.groupCount; g++) {
+				if (script.mapping[g] < 0 && fb < fallbackOrder.length) {
+					slotValues[g] = valueSlots[fallbackOrder[fb++]];
+				}
 			}
 		}
 		cursor += script.groupCount;
@@ -551,11 +590,23 @@ export function renderStatusBarHtml(skin: StatusBarSkin, valueSlots: string[]): 
 	}
 	// 配图占位符残渣（无配图数据时链式模板未消费）：整段清理，不露文本
 	out = out.replace(/§§IMG_START§§[\s\S]*?§§IMG_END§§/g, "");
-	// 空的无图说明标签（无图模板填了空值）：删掉
-	out = out.replace(/<div class="[^"]*nofig[^"]*">\s*<\/div>/g, "");
+	// 正文区残留的 [IMG:url|desc] 文本（配图已由回填转成 <img>，文本残渣删掉）
+	out = out.replace(/\[IMG:[^\]]*\]/g, "");
+	// 空的无图说明标签（含 📷 前缀）：删掉
+	out = out.replace(/<div class="[^"]*nofig[^"]*">\s*(?:📷\s*)?<\/div>/g, "");
 	// 空 src 的 img（配图组未捕获到值）：删掉
 	out = out.replace(/<img[^>]*src=""[^>]*>/g, "");
 	// 空的配图容器（<div class="flj-md">…</div> 内无 img）：删掉
 	out = out.replace(/<div class="flj-md">[\s\S]*?<\/div>/g, (m) => (/<img[^>]*src="[^"]+"/.test(m) ? m : ""));
+	// 空评论折叠区（<details class="flj-cm">…</details> 内评论全空）：删掉
+	out = out.replace(
+		/<details class="flj-cm">[\s\S]*?<\/details>/g,
+		(m) => (/class="flj-rpt">\s*[^<\s]/.test(m) ? m : ""),
+	);
+	// 评论区内空回复条目（无昵称无内容）：删掉
+	out = out.replace(
+		/<div class="flj-rp">[\s\S]*?<\/div>\s*(?=<div class="flj-rp"|<\/details>)/g,
+		(m) => (/class="flj-rpn">\s*[^<\s]/.test(m) ? m : ""),
+	);
 	return out;
 }

@@ -663,7 +663,7 @@ const renderStatusBarSnapshot = (): import("./wire.ts").StatusBarSnapshot | null
 			for (const v of Object.values(bucket)) {
 				if (v && v.includes("[IMG:")) slots.push(v);
 			}
-			ch.html = renderStatusBarHtml(skin, slots);
+			ch.html = renderStatusBarHtml(skin, slots, template);
 		}
 		characters.push(ch);
 	}
@@ -697,7 +697,7 @@ const attachSkinHtml = (snap: import("./wire.ts").StatusBarSnapshot | null): imp
 		for (const v of Object.values(values)) {
 			if (v && v.includes("[IMG:")) slots.push(v);
 		}
-		ch.html = renderStatusBarHtml(skin, slots);
+		ch.html = renderStatusBarHtml(skin, slots, template);
 	}
 	return snap;
 };
