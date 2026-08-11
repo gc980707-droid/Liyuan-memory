@@ -44,6 +44,12 @@ const makeEngine = (
  */
 const fauxScribeEmpty = () => fauxAssistantMessage(JSON.stringify({ patch: {} }));
 
+/**
+ * 关系提取那一发（每拍场记后必发）。
+ * 空 relationships = 不落关系快照，用于「本测试不关心关系图」的场合。
+ */
+const fauxRelEmpty = () => fauxAssistantMessage(JSON.stringify({ relationships: [] }));
+
 test("引擎：一拍全链路（user 落树 → 流式 → assistant 落树 → 谢幕）", async () => {
 	const { cwd, sm } = makeStage();
 	const reg = registerFauxProvider({ models: [{ id: "faux-rp" }] });
@@ -78,8 +84,10 @@ test("引擎：忙时排队（R9 回合互斥）——两拍依序完成", async
 		reg.setResponses([
 			fauxAssistantMessage("第一拍回应。"),
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 			fauxAssistantMessage("第二拍回应。"),
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"));
 
@@ -106,8 +114,10 @@ test("引擎：regenerate 在钉回的 user 下挂 sibling（swipe 语义）", a
 		reg.setResponses([
 			fauxAssistantMessage("第一版回复。"),
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 			fauxAssistantMessage("重演的第二版。"),
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"));
 
@@ -219,6 +229,7 @@ test("引擎循环：违禁直出→代收+报告喂回→模型 draft_write 重
 			},
 			fauxAssistantMessage(""), // 收稿即验全绿 → 模型收笔
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		const activities: string[] = [];
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"), {
@@ -256,6 +267,7 @@ test("引擎循环：报告喂回后模型不改（只闲聊收笔）→ 保留�
 			fauxAssistantMessage("她眼中闪过一丝冷意，收剑入鞘。"),
 			fauxAssistantMessage("就这样吧。"), // 模型无视报告直接收笔
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"));
 		await engine.performTurn("拔剑指向她。");
@@ -330,8 +342,10 @@ test("引擎记账：swipe 重演后账本自动回滚（8/02 泄漏事故复测
 		reg.setResponses([
 			fauxAssistantMessage("她收下了怀表。"),
 			fauxScribe({ inventory: ["黄铜怀表（云澜持有）"], flags: { 赠礼: "已收下" } }),
+			fauxRelEmpty(),
 			fauxAssistantMessage("她把怀表推了回来。"),
 			fauxScribe({ inventory: ["黄铜怀表（沈舟持有）"], flags: { 赠礼: "被拒绝" } }),
+			fauxRelEmpty(),
 		]);
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"));
 		await engine.performTurn("我把怀表递给她。");
@@ -361,6 +375,7 @@ test("引擎记账：中断的半拍不记账（半截正文不进账本）", as
 		reg.setResponses([
 			fauxAssistantMessage("很长的一拍正文，慢慢地流出来，一句接一句，足够被中途打断的长度，再加一句压秤。"),
 			fauxScribe({ time: "不该被记下的时间" }),
+			fauxRelEmpty(),
 		]);
 		let streamed = "";
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"), {
@@ -376,7 +391,7 @@ test("引擎记账：中断的半拍不记账（半截正文不进账本）", as
 			(e) => e.type === "custom" && e.customType === "rp-state",
 		);
 		assert.equal(snaps.length, 0, "中断拍不落账本快照");
-		assert.equal(reg.getPendingResponseCount(), 1, "场记那一发根本没发出");
+		assert.equal(reg.getPendingResponseCount(), 2, "场记与关系提取那两发根本没发出");
 	} finally {
 		reg.unregister();
 		rmSync(cwd, { recursive: true, force: true });
@@ -427,6 +442,7 @@ test("引擎工具：查设定 → 结果回喂 → 续演正文；工具装配�
 				return fauxAssistantMessage("她提起北境的规矩：折骨立誓，背誓不得入祠。");
 			},
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		const activities: string[] = [];
 		let streamed = "";
@@ -506,6 +522,7 @@ test("引擎循环：draft_write 工具交稿 → 收稿即验回喂 → 收笔�
 				return fauxAssistantMessage(""); // 看到全绿报告 → 收笔
 			},
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		const activities: string[] = [];
 		let streamed = "";
@@ -560,6 +577,7 @@ test("引擎循环：draft_append 分段续写 → 中途查证 → draft_seal �
 			fauxAssistantMessage([fauxToolCall("draft_seal", {})], { stopReason: "toolUse" }),
 			fauxAssistantMessage(""), // 看到验收报告 → 收笔
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		const activities: string[] = [];
 		let streamed = "";
@@ -615,6 +633,7 @@ test("引擎循环：draft_append 后忘了封笔 → 催告一轮 → 仍不封
 				return fauxAssistantMessage(""); // 催告后仍不封笔
 			},
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"), {});
 		await engine.performTurn("我抬头看她。");
@@ -649,6 +668,7 @@ test("引擎循环：格式尾巴（状态栏占位+catsay）走 text 通道 →
 				"<StatusPlaceHolderImpl/>\n\n<catsay>\n<details><summary>😼咪咪点评</summary>\n选天赋磨叽半天喵呜。\n</details>\n</catsay>",
 			),
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		const activities: string[] = [];
 		let streamed = "";
@@ -741,6 +761,7 @@ test("引擎循环：空手停笔（0 字病灶）→ 催稿一轮 → 补交定
 				return fauxAssistantMessage("补上的正文。");
 			},
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"));
 		await engine.performTurn("开演。");
@@ -825,6 +846,7 @@ test("引擎压缩：攒够拍数后自管落 rp-summary，被覆盖的正文不
 				return fauxAssistantMessage(long(i));
 			});
 			responses.push(fauxScribeEmpty());
+			responses.push(fauxRelEmpty());
 		}
 		// 压缩那一发（第 8 拍尾）
 		responses.push(fauxAssistantMessage("## 前情提要\n沈舟与云澜在山门相遇。\n## 当前场景\n第三天黄昏，后山。"));
@@ -865,11 +887,13 @@ test("引擎压缩：下一拍装配读回【前情提要】，被覆盖的往�
 		for (let i = 1; i <= 8; i++) {
 			responses.push(cap(`第 ${i} 拍的正文。${"云".repeat(1200)}`));
 			responses.push(fauxScribeEmpty());
+			responses.push(fauxRelEmpty());
 		}
 		responses.push(fauxAssistantMessage("## 前情提要\n沈舟与云澜在山门相遇，立了骨誓。"));
 		// 压缩之后的第 9 拍
 		responses.push(cap("第 9 拍的正文。"));
 		responses.push(fauxScribeEmpty());
+		responses.push(fauxRelEmpty());
 		reg.setResponses(responses as never);
 
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"));
@@ -901,6 +925,7 @@ test("引擎压缩：中断的半拍不触发压缩（脏拍不压）", async ()
 		for (let i = 1; i <= 8; i++) {
 			responses.push(fauxAssistantMessage(`第 ${i} 拍的正文。${"云".repeat(1200)}`));
 			responses.push(fauxScribeEmpty());
+			responses.push(fauxRelEmpty());
 		}
 		// 第 8 拍收尾时可裁正文（前 2 拍）才越过字数地板 → 恰好压一次
 		responses.push(fauxAssistantMessage("## 前情提要\n前两拍的摘要。"));
@@ -931,6 +956,7 @@ test("引擎压缩：compactNow() 手动压缩不等周期；流式中拒绝", a
 		for (let i = 1; i <= 8; i++) {
 			responses.push(fauxAssistantMessage(`第 ${i} 拍的正文。${"云".repeat(1200)}`));
 			responses.push(fauxScribeEmpty());
+			responses.push(fauxRelEmpty());
 		}
 		reg.setResponses(responses as never);
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"));
@@ -986,6 +1012,7 @@ test("演段轮连发门禁：同一轮两个 draft_append → 第二个被拒�
 		responses.push(fauxAssistantMessage([fauxToolCall("draft_seal", {})], { stopReason: "toolUse" }));
 		responses.push(fauxAssistantMessage(""));
 		responses.push(fauxScribeEmpty());
+		responses.push(fauxRelEmpty());
 		reg.setResponses(responses as never);
 
 		const ctxs: Array<{ messages: unknown[] }> = [];
@@ -1053,6 +1080,7 @@ test("演段轮未修违规门禁：上一段带禁词不修就续演 → 被拒
 		responses.push(fauxAssistantMessage([fauxToolCall("draft_seal", {})], { stopReason: "toolUse" }));
 		responses.push(fauxAssistantMessage(""));
 		responses.push(fauxScribeEmpty());
+		responses.push(fauxRelEmpty());
 		reg.setResponses(responses as never);
 
 		const activities: string[] = [];
@@ -1105,6 +1133,7 @@ test("每轮修复可见性：draft_edit 修改后分段重同步（8/09 输出�
 		responses.push(fauxAssistantMessage([fauxToolCall("draft_seal", {})], { stopReason: "toolUse" }));
 		responses.push(fauxAssistantMessage(""));
 		responses.push(fauxScribeEmpty());
+		responses.push(fauxRelEmpty());
 		reg.setResponses(responses as never);
 
 		const resyncs: string[][] = [];
@@ -1153,6 +1182,7 @@ test("工具化谢幕：卡定义状态栏、模型 seal 后停手 → 引擎不
 			// 引擎不再点名催谢幕（旧逻辑会拉一轮逼模型写 StatusBlock）
 			fauxAssistantMessage([fauxThinking("这拍演完了。")]),
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"));
 		await engine.performTurn("你先进去。");
@@ -1196,6 +1226,7 @@ test("谢幕卡：封笔后的下一轮注入【谢幕】而非回看卡——se
 			},
 			fauxAssistantMessage(""),
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"));
 		await engine.performTurn("你先进去。");
@@ -1226,6 +1257,7 @@ test("规划旁白不入正文：稿落地前工具轮的 text 产出被清理�
 			// 停手轮直接带尾巴（稿落地后的 text = 合法尾巴，保留）
 			fauxAssistantMessage("<catsay>点评一句。</catsay>"),
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		let clears = 0;
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"), {
@@ -1283,6 +1315,7 @@ test("轮次耗尽收场：安全阀撤工具时注入【收场】指令，最�
 			return fauxAssistantMessage("<catsay>收场点评。</catsay>");
 		});
 		responses.push(fauxScribeEmpty());
+		responses.push(fauxRelEmpty());
 		reg.setResponses(responses as never);
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"));
 		await engine.performTurn("开演。");
@@ -1311,6 +1344,7 @@ test("直出代收不静默放行：有计划=有戏，代收全绿也喂一轮�
 				return fauxAssistantMessage("");
 			},
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"));
 		await engine.performTurn("开始吧。");
@@ -1337,6 +1371,7 @@ test("ask：注入 askUser 才上清单；未注入则剔除（依赖缺失不�
 				return fauxAssistantMessage("你好。");
 			},
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"));
 		await engine.performTurn("开演。");
@@ -1359,6 +1394,7 @@ test("ask：注入 askUser 时 ask 上清单", async () => {
 				return fauxAssistantMessage("你好。");
 			},
 			fauxScribeEmpty(),
+			fauxRelEmpty(),
 		]);
 		const engine = new StageEngine({
 			cwd,
@@ -1404,6 +1440,7 @@ test("ask：作答回喂模型，计划据此重拟（P7 决策闭环 + 8/09 时
 		responses.push(fauxAssistantMessage([fauxToolCall("draft_seal", {})], { stopReason: "toolUse" }));
 		responses.push(fauxAssistantMessage(""));
 		responses.push(fauxScribeEmpty());
+		responses.push(fauxRelEmpty());
 		reg.setResponses(responses as never);
 
 		const engine = new StageEngine({

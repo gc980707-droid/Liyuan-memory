@@ -121,6 +121,85 @@ export function parseScribeResult(text: string): ScribeResult | null {
 	return null;
 }
 
+// ---------- 人物关系提取（harness 每拍从正文更新关系图） ----------
+
+export interface RelationshipInput {
+	/** 当前账本关系（保留未变的） */
+	current: import("./types.ts").RelationshipEdge[];
+	/** 出场角色（含主角/用户） */
+	knownCharacters: string[];
+	userText: string;
+	assistantText: string;
+	charName: string;
+	userName: string;
+}
+
+export interface RelationshipResult {
+	/** 全量关系列表（场记输出当前全部关系，整体替换） */
+	relationships: import("./types.ts").RelationshipEdge[];
+}
+
+/** 关系提取 prompt：读正文 → 输出全量关系（谁与谁、关系标签、双向态度、备注） */
+export function buildRelationshipPrompt(input: RelationshipInput): { systemPrompt: string; userText: string } {
+	const { current, knownCharacters, userText, assistantText, charName, userName } = input;
+	const chars = knownCharacters.length ? knownCharacters.join("、") : `${charName}、${userName}`;
+	const currentJson = JSON.stringify(current, null, 2);
+	const systemPrompt = `你是角色扮演的场记。你的任务是维护**人物关系图**：阅读【本轮对话】，输出 JSON，给出**当前全部人物关系**（整体替换——没变的照抄，有变化的更新，新出现的加入）。
+
+规则：
+- 输出：{"relationships": [{"a":"角色名","b":"角色名","relation":"关系标签","affinity":数值,"note":"备注"}]}
+- 每个条目是一条**双向**关系：a/b 为角色规范名（用账本已有写法；用户角色是「${userName}」），affinity 为 -100..100 的**双向平均态度**（>0 友善、<0 敌对、0 中立），每拍按剧情小步调整（±5~15）。
+- relation 用简洁中文标签：恋人/暧昧/好友/亲人/师徒/上司下属/合作/交易/债主/仇敌/竞争者/陌生/其他……贴合剧情。
+- note 只记关键承诺、恩怨、秘密（一句话，可省略）。
+- **角色必须来自剧情实际出场**：正文/对话里出现的才算；不要虚构未出场人物。
+- 出场角色范围：${chars}；本拍无互动的关系保持原值照抄输出。
+- 只输出 JSON 对象，不要输出任何其他文字。`;
+
+	const user = `【当前关系】（没变的照抄）
+${currentJson}
+
+【本轮对话】
+${userName}（用户）：${userText}
+
+${charName}：${assistantText}`;
+
+	return { systemPrompt, userText: user };
+}
+
+/** 宽容解析关系输出：{relationships:[...]}；解析失败返回 null */
+export function parseRelationshipResult(text: string): RelationshipResult | null {
+	let t = text.trim();
+	const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+	if (fence) t = fence[1].trim();
+	const start = t.indexOf("{");
+	const end = t.lastIndexOf("}");
+	if (start === -1 || end <= start) return null;
+	try {
+		const obj = JSON.parse(t.slice(start, end + 1)) as Record<string, unknown>;
+		const raw = obj.relationships;
+		if (!Array.isArray(raw)) return null;
+		const relationships: import("./types.ts").RelationshipEdge[] = [];
+		for (const item of raw) {
+			if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+			const e = item as Record<string, unknown>;
+			const a = typeof e.a === "string" ? e.a.trim() : "";
+			const b = typeof e.b === "string" ? e.b.trim() : "";
+			if (!a || !b || a === b) continue;
+			const affinity = typeof e.affinity === "number" && Number.isFinite(e.affinity) ? e.affinity : 0;
+			relationships.push({
+				a,
+				b,
+				relation: typeof e.relation === "string" && e.relation.trim() ? e.relation.trim() : "相识",
+				affinity: Math.max(-100, Math.min(100, Math.round(affinity))),
+				...(typeof e.note === "string" && e.note.trim() ? { note: e.note.trim() } : {}),
+			});
+		}
+		return relationships.length > 0 ? { relationships } : null;
+	} catch {
+		return null;
+	}
+}
+
 // ---------- 世界书中文别名（修复：专有名词中译后英文关键词地板失效） ----------
 
 export interface AliasEntryInput {

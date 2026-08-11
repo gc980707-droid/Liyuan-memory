@@ -60,7 +60,7 @@ import {
 	type CompactOutcome,
 	type RpSummaryData,
 } from "./compact.ts";
-import { runScribeTurn, STATE_ENTRY_TYPE } from "./scribe-run.ts";
+import { runRelationshipUpdate, runScribeTurn, STATE_ENTRY_TYPE } from "./scribe-run.ts";
 import {
 	MAX_ROUNDS,
 	runStageTool,
@@ -855,6 +855,33 @@ export class StageEngine {
 			);
 			if (r.kind === "failed") console.error(`[stage-scribe] 记账跳过：${r.error}`);
 			if (r.kind === "applied") ledgerState = r.state;
+			sm.flush();
+		}
+
+		// 人物关系图提取（harness 每拍）：读正文 → 全量关系 → 落账（左栏关系图数据源）
+		if (entryId && !aborted && finalText) {
+			const knownCharacters = [
+				...(Object.keys(ledgerState.characters).length ? Object.keys(ledgerState.characters) : [materials.card.name]),
+				materials.config.userName,
+			];
+			const r = await runRelationshipUpdate(
+				{
+					sideText: (sp, ut) => this.#sideText(model, sp, ut, { apiKey, headers }, 4096),
+					appendStateEntry: (s) => sm.appendCustomEntry(STATE_ENTRY_TYPE, s),
+					getLeafId: () => sm.getLeafId(),
+					stateFile: this.#deps.getStateFile?.(sm.getSessionId()),
+					onActivity: (d) => ev.onActivity?.(d),
+				},
+				{
+					state: ledgerState,
+					userText: lastUserText,
+					assistantText: finalText,
+					charName: materials.card.name,
+					userName: materials.config.userName,
+					knownCharacters,
+				},
+			);
+			if (r.kind === "failed") console.error(`[stage-relgraph] 提取跳过：${r.error}`);
 			sm.flush();
 		}
 

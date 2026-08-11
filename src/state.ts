@@ -6,9 +6,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { readJsonFile } from "./jsonio.ts";
-import type { CharacterState, StateRoster, WorldState } from "./types.ts";
+import type { CharacterState, RelationshipEdge, StateRoster, WorldState } from "./types.ts";
 
-const TOP_KEYS = ["time", "location", "characters", "inventory", "flags", "plot_threads"] as const;
+const TOP_KEYS = ["time", "location", "characters", "inventory", "flags", "plot_threads", "relationships"] as const;
 
 export function defaultState(): WorldState {
 	return {
@@ -159,6 +159,39 @@ export function applyPatch(state: WorldState, patch: Record<string, unknown>): P
 					next[key] = kept;
 					applied.push(`${key} → [${kept.join("、")}]`);
 				} else warnings.push(`${key} 需要完整数组（整体替换语义），已忽略`);
+				break;
+			}
+			case "relationships": {
+				// 人物关系图（harness 每拍提取）：数组整体替换语义——场记输出当前全量关系。
+				if (Array.isArray(value)) {
+					const kept: RelationshipEdge[] = [];
+					for (const item of value) {
+						if (!item || typeof item !== "object" || Array.isArray(item)) {
+							warnings.push("relationships 条目需要对象，已忽略");
+							continue;
+						}
+						const e = item as Partial<RelationshipEdge>;
+						const a = typeof e.a === "string" ? e.a.trim() : "";
+						const b = typeof e.b === "string" ? e.b.trim() : "";
+						if (!a || !b || a === b) {
+							warnings.push("relationships 条目需要 a/b 两个不同角色名，已忽略");
+							continue;
+						}
+						const affinity =
+							typeof e.affinity === "number" && Number.isFinite(e.affinity)
+								? clamp(Math.round(e.affinity), -100, 100)
+								: 0;
+						kept.push({
+							a,
+							b,
+							relation: typeof e.relation === "string" && e.relation.trim() ? e.relation.trim() : "相识",
+							affinity,
+							...(typeof e.note === "string" && e.note.trim() ? { note: e.note.trim() } : {}),
+						});
+					}
+					next.relationships = kept;
+					applied.push(`relationships → ${kept.length} 条`);
+				} else warnings.push("relationships 需要数组，已忽略");
 				break;
 			}
 			case "roster": {

@@ -48,6 +48,7 @@ import {
 	IconClose,
 	IconCodex,
 	IconDock,
+	IconStatus,
 	IconLorebook,
 	IconPersona,
 	IconPreset,
@@ -84,6 +85,7 @@ import {
 } from "./timeline.ts";
 import type { DisplayRule } from "../../src/cardfront.ts";
 import { PanelDock } from "./components/PanelDock.tsx";
+import { RelGraphPanel } from "./components/RelGraphPanel.tsx";
 import { PersonaPanel } from "./components/PersonaPanel.tsx";
 import { PowersPanel } from "./components/PowersPanel.tsx";
 import { PresetPanel } from "./components/PresetPanel.tsx";
@@ -146,7 +148,8 @@ type PanelId =
 	| "persona"
 	| "roster"
 	| "uploads"
-	| "assistant";
+	| "assistant"
+	| "relgraph";
 
 /** agent 自建面板的右栏选择 id（柱 2）：`agent:` + 面板名，页签随 panels 帧动态长出 */
 type AgentPanelId = `agent:${string}`;
@@ -159,7 +162,7 @@ const agentId = (name: string): AgentPanelId => `agent:${name}`;
  * - 右 4：角色卡 / 世界书 / 知识库 / 用户角色
  * 会话在底栏。
  */
-const LEFT_PANELS: PanelId[] = ["connect", "preset", "powers", "uploads"];
+const LEFT_PANELS: PanelId[] = ["connect", "preset", "powers", "uploads", "relgraph"];
 const RIGHT_PANELS: PanelId[] = ["card", "lorebook", "codex", "persona"];
 /** 右栏可开面板全集：顶栏 4 入口 + 助手（入口在输入框发送钮右侧，不占顶栏） */
 const RIGHT_OPENABLE: PanelId[] = [...RIGHT_PANELS, "assistant"];
@@ -181,6 +184,7 @@ const PANEL_LABEL: Record<PanelId, string> = {
 	roster: "登场名录",
 	uploads: "上传区",
 	assistant: "助手",
+	relgraph: "关系图",
 };
 
 /** 顶栏图标(收纳入口的关键:图标承载识别,文字进 tooltip/aria-label) */
@@ -198,6 +202,7 @@ const PANEL_ICON: Record<PanelId, (p: { size?: number }) => React.JSX.Element> =
 	roster: IconRoster,
 	uploads: IconUploads,
 	assistant: IconAssistant,
+	relgraph: IconStatus,
 };
 
 type CenterMenu = "settings" | "panels" | null;
@@ -1473,6 +1478,10 @@ export default function App() {
 							pushToast("info", `已附到待发送：${u.name}`);
 						}}
 					/>
+				);
+			case "relgraph":
+				return (
+					<RelGraphPanel state={worldState} charName={charName} userName={userName} />
 				);
 			case "assistant":
 				return (

@@ -16,12 +16,12 @@ import {
 import { isBackstageText } from "../src/stance.ts";
 import { applyDraftOps, type DraftMsgLike } from "../src/draft.ts";
 import type { RpPanel } from "../src/panels.ts";
-import type { WorldState } from "../src/types.ts";
+import type { RelationshipEdge, WorldState } from "../src/types.ts";
 import { stripStatusBarText } from "../src/statusbar.ts";
 
 export type { DisplaySkin };
 
-export type { WorldState, RpPanel };
+export type { WorldState, RpPanel, RelationshipEdge };
 export { isBackstageText };
 
 export type WireChannel =

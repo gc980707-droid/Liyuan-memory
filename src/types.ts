@@ -61,8 +61,26 @@ export interface WorldState {
 	flags: Record<string, string>;
 	/** 未了结的剧情线/伏笔 */
 	plot_threads: string[];
-	/** 登场名录（applyPatch 咽喉点自动登记；旧存档无此字段按空处理） */
-	roster?: StateRoster;
+/** 登场名录（applyPatch 咽喉点自动登记；旧存档无此字段按空处理） */
+roster?: StateRoster;
+/**
+ * 人物关系图（harness 每拍从正文提取）：
+ * 角色之间的互动关系。a/b 为角色规范名，relation 为关系标签（恋人/仇敌/合作…），
+ * affinity 为 -100..100 的态度值（>0 友善、<0 敌对），note 为备注。
+ */
+relationships?: RelationshipEdge[];
+}
+
+/** 关系图边（有序对 a→b；亲和值双向对称存储为一条，以正负表达方向倾向） */
+export interface RelationshipEdge {
+	a: string;
+	b: string;
+	/** 关系标签（如 恋人 / 交易 / 敌对 / 陌生） */
+	relation: string;
+	/** 双向态度值 -100..100 */
+	affinity: number;
+	/** 备注（承诺/恩怨/背景） */
+	note?: string;
 }
 
 export interface CharacterState {

@@ -12,7 +12,12 @@
  */
 
 import { applyPatch, canonicalizeCharacterKeys, saveState } from "../state.ts";
-import { buildScribeTurnPrompt, parseScribeResult } from "../scribe.ts";
+import {
+	buildRelationshipPrompt,
+	buildScribeTurnPrompt,
+	parseRelationshipResult,
+	parseScribeResult,
+} from "../scribe.ts";
 import type { WorldState } from "../types.ts";
 
 /** 场记快照的会话树条目类型（CustomEntry，不进 LLM 上下文） */
@@ -94,6 +99,58 @@ export async function runScribeTurn(deps: ScribeRunDeps, input: ScribeRunInput):
  * 同场记：叶守卫——调用期间树动过则整体丢弃。
  */
 /** 状态栏快照的 STATE_ENTRY_TYPE 已在顶部定义 */
+
+/**
+ * 人物关系提取（harness 每拍）：读正文 → 全量关系列表 → 落账（整体替换）。
+ * 只写 relationships；失败只跳过本拍（关系滞后一拍由下拍补上）。
+ * 同场记：叶守卫——调用期间树动过则整体丢弃。
+ */
+export async function runRelationshipUpdate(
+	deps: ScribeRunDeps,
+	input: ScribeRunInput & { knownCharacters: string[] },
+): Promise<ScribeRunOutcome> {
+	const { state, userText, assistantText, charName, userName, knownCharacters } = input;
+	if (!assistantText.trim()) return { kind: "skipped", reason: "no-text" };
+
+	const leafBefore = deps.getLeafId();
+	const prompt = buildRelationshipPrompt({
+		current: state.relationships ?? [],
+		knownCharacters,
+		userText,
+		assistantText,
+		charName,
+		userName,
+	});
+	// 偶发断流重试一次
+	let resp = await deps.sideText(prompt.systemPrompt, prompt.userText);
+	if (typeof resp !== "string") {
+		resp = await deps.sideText(prompt.systemPrompt, prompt.userText);
+	}
+	if (typeof resp !== "string") return { kind: "failed", error: resp.error };
+
+	const parsed = parseRelationshipResult(resp);
+	if (!parsed || parsed.relationships.length === 0) {
+		return { kind: "failed", error: "关系输出不可解析" };
+	}
+
+	// R9 叶守卫
+	if (deps.getLeafId() !== leafBefore) {
+		deps.onActivity?.("关系更新已丢弃（本拍期间切换了分支）");
+		return { kind: "stale" };
+	}
+
+	const result = applyPatch(state, { relationships: parsed.relationships });
+	deps.appendStateEntry(result.state);
+	if (deps.stateFile) {
+		try {
+			saveState(deps.stateFile, result.state);
+		} catch {
+			// 缓存写失败不影响树上快照
+		}
+	}
+	deps.onActivity?.(`关系图更新（${parsed.relationships.length} 条关系）`);
+	return { kind: "applied", state: result.state, applied: result.applied };
+}
 
 /** 过程条用的记账摘要：条数 + 前两条中文化字段名 */
 function summarizeApplied(applied: string[]): string {

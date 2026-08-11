@@ -15,4 +15,5 @@ export type {
 	WireStats,
 	WireSwipe,
 	WorldState,
+	RelationshipEdge,
 } from "../../server/wire.ts";
