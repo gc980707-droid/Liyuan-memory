@@ -631,11 +631,20 @@ const templateCharName = (): string => statusTemplateCharName;
 /** 模板 + 账本 → 状态栏快照（多角色；无模板或无字段则 null） */
 const renderStatusBarSnapshot = (): import("./wire.ts").StatusBarSnapshot | null => {
 	const template = statusBarTemplateFor();
-	if (!template) return null;
+	if (!template) {
+		console.log("[stage-statusbar] 渲染：模板为空（卡无状态栏示例？）");
+		return null;
+	}
 	const state = currentState();
-	if (!state) return null;
+	if (!state) {
+		console.log("[stage-statusbar] 渲染：账本为空");
+		return null;
+	}
 	const buckets = state.status_fields ?? {};
-	if (Object.keys(buckets).length === 0 && !state.time && !state.location) return null;
+	if (Object.keys(buckets).length === 0 && !state.time && !state.location) {
+		console.log("[stage-statusbar] 渲染：账本无 status_fields 字段");
+		return null;
+	}
 	const skin = statusSkinFor();
 	// 角色序：账本出场序（characters 键优先），主角（卡名）排第一
 	const names = [...new Set([templateCharName(), ...Object.keys(buckets)])];
@@ -2318,6 +2327,9 @@ const stage = new StageEngine({
 		// 状态栏字段更新完成：确定性广播最新快照（不依赖 fs.watch——容器卷环境不可靠）
 		onStatusBarUpdated: () => {
 			const snap = attachSkinHtml(renderStatusBarSnapshot());
+			console.log(
+				`[stage-statusbar] 推送：${snap ? `快照（${snap.characters.length} 角色）` : "renderStatusBarSnapshot 返回 null"}`,
+			);
 			if (snap) broadcast({ type: "statusbar", snapshot: snap });
 		},
 		onTurnEnd: (info) => {
