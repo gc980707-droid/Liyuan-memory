@@ -136,6 +136,7 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 			...(Array.isArray(card.alternateGreetings) ? card.alternateGreetings : []),
 			card.description,
 			card.personality,
+			card.mesExample,
 		]) {
 			if (!t) continue;
 			for (const m of t.matchAll(/\[IMG:([^\s|]+)\|([^\]]*)\]/g)) {
@@ -167,6 +168,17 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 	);
 	const entries = protocolFiltered.entries;
 	const protocolDrops = protocolFiltered.dropped;
+	// 世界书条目里的图片素材并入状态栏图池（卡的图常在世界书里，不只开场白）
+	if (statusBarImagePool.length < 60) {
+		for (const e of entries) {
+			if (!e.content) continue;
+			for (const m of e.content.matchAll(/\[IMG:([^\s|]+)\|([^\]]*)\]/g)) {
+				statusBarImagePool.push(`${m[1]}|${m[2].trim()}`);
+			}
+			if (statusBarImagePool.length >= 60) break;
+		}
+		statusBarImagePool = [...new Set(statusBarImagePool)];
+	}
 
 	// 预设：工作草稿（preset-override.json）优先，与预设页签热编辑一致
 	let preset: RpPreset | null = null;
