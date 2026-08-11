@@ -570,6 +570,27 @@ export function renderStatusBarHtml(
 					slotValues[g] = valueSlots[fallbackOrder[fb++]];
 				}
 			}
+			// 推文字段结构解析：模型按约定生成「⏱️ | 推文 | 📸 | 💗 | 💬」，按模板结构定位填位
+			if (tweetIdx >= 3 && tweetIdx < valueSlots.length) {
+				const tweetVal = valueSlots[tweetIdx];
+				const segs = tweetVal.split("|").map((s) => s.trim());
+				let tTime = "";
+				let tTweet = "";
+				for (const seg of segs) {
+					if (seg.startsWith("⏱️")) tTime = seg.replace(/^⏱️\s*[：:]\s*/, "").trim();
+					else if (seg.startsWith("推文")) tTweet = seg.replace(/^推文\s*[：:]\s*/, "").trim();
+					else if (!tTweet) tTweet = seg;
+				}
+				// 模板结构定位：flj-tm（时间）前的 $n / flj-tx（推文）前的 $n
+				const tmG = /<i class="flj-tm">[^$]*\$(\d+)/.exec(script.template);
+				const txG = /<div class="flj-tx">[^$]*\$(\d+)/.exec(script.template);
+				if (tmG && tTime && script.mapping[Number(tmG[1]) - 1] < 0) {
+					slotValues[Number(tmG[1]) - 1] = tTime;
+				}
+				if (txG && tTweet && script.mapping[Number(txG[1]) - 1] < 0) {
+					slotValues[Number(txG[1]) - 1] = tTweet;
+				}
+			}
 		}
 		cursor += script.groupCount;
 		parts.push(fillTemplate(script.template, slotValues.map(escapeHtml)));
