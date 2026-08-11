@@ -71,3 +71,22 @@ export function extractStatusBarBlocks(text: string): { cleaned: string; blocks:
 export function stripStatusBarText(text: string): string {
 	return extractStatusBarBlocks(text).cleaned;
 }
+
+/** 自闭合占位符标签剥离（<StatusPlaceHolderImpl/> 等非 HTML 标准标签） */
+const HTML_SELF_CLOSE = new Set([
+	"br", "hr", "img", "input", "meta", "link", "wbr", "area", "base", "col", "embed", "source", "track",
+]);
+export function stripStatusPlaceholders(text: string): string {
+	return text.replace(/<([A-Za-z_][\w.-]*)\s*\/\s*>/g, (m, tag: string) => {
+		const t = tag.toLowerCase();
+		if (HTML_SELF_CLOSE.has(t)) return m;
+		if (["slot", "template", "component", "view"].includes(t)) return m;
+		return "";
+	});
+}
+
+/** 卡/正文的完整状态栏清理：成对块 + 自闭合占位符（导入时与上屏时共用） */
+export function stripAllStatusBarArtifacts(text: string): string {
+	if (!text) return text;
+	return stripStatusPlaceholders(stripStatusBarText(text));
+}

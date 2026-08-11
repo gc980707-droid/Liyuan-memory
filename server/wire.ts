@@ -17,7 +17,7 @@ import { isBackstageText } from "../src/stance.ts";
 import { applyDraftOps, type DraftMsgLike } from "../src/draft.ts";
 import type { RpPanel } from "../src/panels.ts";
 import type { RelationshipEdge, WorldState } from "../src/types.ts";
-import { stripStatusBarText } from "../src/statusbar.ts";
+import { stripStatusBarText, stripStatusPlaceholders } from "../src/statusbar.ts";
 
 export type { DisplaySkin };
 
@@ -482,7 +482,7 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 		const scaffoldThinking = text ? extractScaffoldThinking(text) : "";
 		const thinking = [modelThinking, scaffoldThinking].filter(Boolean).join("\n\n").trim();
 		// 状态栏块先剥离（正文只留叙事；状态栏另走快照通道 → 左栏面板）
-		const proseText = text ? stripStatusBarText(text) : "";
+		const proseText = text ? stripStatusPlaceholders(stripStatusBarText(text)) : "";
 		// narrative：先卡显示正则再策略；backstage 仍纯文本策略（不套角色卡皮肤）
 		const display = proseText
 			? channel === "narrative"
@@ -518,7 +518,7 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 			Array.isArray(rpTimeline) && rpTimeline.length > 0
 				? (rpTimeline as WireSegment[]).map((seg) =>
 						seg.kind === "text"
-							? { ...seg, text: prepareDisplayText(stripStatusBarText(seg.text), tlSkin) }
+							? { ...seg, text: prepareDisplayText(stripStatusPlaceholders(stripStatusBarText(seg.text)), tlSkin) }
 							: seg,
 					)
 				: undefined;
@@ -546,7 +546,7 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 			return {
 				channel: "greeting",
 				name: names.charName,
-				text: prepareDisplayText(stripStatusBarText(text), skin),
+				text: prepareDisplayText(stripStatusPlaceholders(stripStatusBarText(text)), skin),
 				...(index !== undefined && total !== undefined && total > 0
 					? { greetingPick: { index, total } }
 					: {}),
@@ -555,11 +555,11 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 		/** 用户手改后的角色回复：显示同叙事通道 */
 		if (msg.customType === "rp-edited-reply") {
 			return text
-				? { channel: "narrative", name: names.charName, text: prepareDisplayText(stripStatusBarText(text), skin) }
+				? { channel: "narrative", name: names.charName, text: prepareDisplayText(stripStatusPlaceholders(stripStatusBarText(text)), skin) }
 				: null;
 		}
 		if (msg.customType === "rp-import") {
-			return text ? { channel: "import", text: prepareDisplayText(stripStatusBarText(text), skin) } : null;
+			return text ? { channel: "import", text: prepareDisplayText(stripStatusPlaceholders(stripStatusBarText(text)), skin) } : null;
 		}
 		// 用户气泡「配音」写入的可展示音频（details.rpAudio；正文尽量不进 LLM 注意力，见 convert 侧仍可能带短标记）
 		if (msg.customType === "rp-audio") {

@@ -10,6 +10,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import type { CharacterCard, LorebookEntry, MacroContext } from "./types.ts";
 import { normalizeEntries } from "./lorebook.ts";
+import { stripAllStatusBarArtifacts } from "./statusbar.ts";
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -85,17 +86,21 @@ export function normalizeCard(input: unknown): CharacterCard {
 		book = normalizeEntries(entries);
 	}
 
+	// 导入即清理：状态栏示例块/自闭合占位符（<StatusPlaceHolderImpl/> 等）从卡文本移除——
+	// 不进 prompt，模型不会学着写；正文侧 wire 剥离兜底
+	const clean = (t: string): string => stripAllStatusBarArtifacts(t);
+
 	return {
 		name,
-		description: str(pick("description")),
-		personality: str(pick("personality")),
-		scenario: str(pick("scenario")),
-		firstMes: str(pick("first_mes")),
-		mesExample: str(pick("mes_example")),
-		systemPrompt: str(pick("system_prompt")),
-		postHistoryInstructions: str(pick("post_history_instructions")),
-		creatorNotes: str(pick("creator_notes")) || str(top.creatorcomment),
-		alternateGreetings: strArray(pick("alternate_greetings")),
+		description: clean(str(pick("description"))),
+		personality: clean(str(pick("personality"))),
+		scenario: clean(str(pick("scenario"))),
+		firstMes: clean(str(pick("first_mes"))),
+		mesExample: clean(str(pick("mes_example"))),
+		systemPrompt: clean(str(pick("system_prompt"))),
+		postHistoryInstructions: clean(str(pick("post_history_instructions"))),
+		creatorNotes: clean(str(pick("creator_notes")) || str(top.creatorcomment)),
+		alternateGreetings: strArray(pick("alternate_greetings")).map(clean),
 		tags: strArray(pick("tags")),
 		book,
 	};
