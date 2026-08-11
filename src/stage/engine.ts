@@ -850,7 +850,7 @@ export class StageEngine {
 			ev.onActivity?.(`状态栏生成（读正文 · ${materials.statusBarFields.length} 字段）`);
 			const r = await runStatusBarCompletion(
 				{
-					sideText: (sp, ut) => this.#sideText(model, sp, ut, { apiKey, headers }, 2048),
+					sideText: (sp, ut) => this.#sideText(model, sp, ut, { apiKey, headers }, 4096),
 					appendStateEntry: (s) => sm.appendCustomEntry(STATE_ENTRY_TYPE, s),
 					getLeafId: () => sm.getLeafId(),
 					stateFile: this.#deps.getStateFile?.(sm.getSessionId()),

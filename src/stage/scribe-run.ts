@@ -116,7 +116,11 @@ export async function runStatusBarCompletion(
 		charName,
 		userName,
 	});
-	const resp = await deps.sideText(prompt.systemPrompt, prompt.userText);
+	// 偶发断流重试：Stream ended without finish_reason 等服务端瞬时故障（8/11 docker 实弹）
+	let resp = await deps.sideText(prompt.systemPrompt, prompt.userText);
+	if (typeof resp !== "string") {
+		resp = await deps.sideText(prompt.systemPrompt, prompt.userText);
+	}
 	if (typeof resp !== "string") return { kind: "failed", error: resp.error };
 
 	const parsed = parseStatusBarCompletion(resp);
