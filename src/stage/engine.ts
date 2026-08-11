@@ -185,6 +185,8 @@ export interface StageEvents {
 	onNotify?: (level: "info" | "warning" | "error", text: string) => void;
 	/** 过程条短句（验收/修订进度；kind:"note" 形态，无需工具名） */
 	onActivity?: (detail: string) => void;
+	/** 状态栏字段更新完成（场记落账后确定性回调——不依赖 fs.watch，容器/卷环境可靠） */
+	onStatusBarUpdated?: () => void;
 }
 
 export interface StageEngineDeps {
@@ -866,6 +868,8 @@ export class StageEngine {
 			);
 			console.log(`[stage-statusbar] 结果：${r.kind}${r.kind === "failed" ? " · " + r.error : ""}`);
 			if (r.kind === "failed") console.error(`[stage-statusbar] 生成跳过：${r.error}`);
+			// 确定性推送：账本已更新，通知 server 广播最新快照（fs.watch 在容器卷上不可靠）
+			if (r.kind === "applied" || r.kind === "stale") ev.onStatusBarUpdated?.();
 			sm.flush();
 		} else {
 			console.log(

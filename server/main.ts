@@ -2315,6 +2315,11 @@ const stage = new StageEngine({
 		onStreamClear: () => broadcast({ type: "stream", state: "clear" }),
 		onNotify: (level, text) => broadcast({ type: "notify", level, text }),
 		onActivity: (detail) => broadcast({ type: "activity", activity: { kind: "note", name: "stage", detail } }),
+		// 状态栏字段更新完成：确定性广播最新快照（不依赖 fs.watch——容器卷环境不可靠）
+		onStatusBarUpdated: () => {
+			const snap = attachSkinHtml(renderStatusBarSnapshot());
+			if (snap) broadcast({ type: "statusbar", snapshot: snap });
+		},
 		onTurnEnd: (info) => {
 			broadcast({ type: "agent", state: "end" });
 			// reroll/编辑输入后无产出（aborted 无落树 / error）：回退到 reroll 前的旧叶——
