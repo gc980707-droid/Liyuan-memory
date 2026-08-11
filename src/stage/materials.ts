@@ -144,11 +144,22 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 			}
 		}
 		statusBarImagePool = [...new Set(statusBarImagePool)];
+		// 导入诊断：抓到的状态栏信息全量打点（字段/设定值/图池/格式）
+		console.log(
+			`[statusbar-import] 卡「${card.name}」抓取结果：` +
+				`格式=${statusBarFormats.length ? statusBarFormats.join("、") : "（未检测到）"} | ` +
+				`字段=${statusBarFields.length ? statusBarFields.join("、") : "（无）"} | ` +
+				`设定值=${Object.keys(statusBarSamples).length} 项 | 图池=${statusBarImagePool.length} 张`,
+		);
+		if (statusBarImagePool.length) {
+			console.log(`[statusbar-import] 图池前 8 张：${statusBarImagePool.slice(0, 8).join(" ; ")}`);
+		}
 	} catch {
 		statusBarFormats = [];
 		statusBarFields = [];
 		statusBarSamples = {};
 		statusBarImagePool = [];
+		console.log(`[statusbar-import] 卡「${card.name}」抓取失败（异常）`);
 	}
 
 	// 世界书：已挂载独立书（0..N）+ 补充设定集 overlay；卡内 character_book 不自动进上下文
