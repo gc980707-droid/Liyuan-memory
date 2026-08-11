@@ -74,8 +74,10 @@ export interface StageMaterials {
 	presetActive: boolean;
 	/** 卡作者状态栏格式（StatusBlock / state1…）；空=卡未设计，勿硬造 */
 	statusBarFormats: string[];
-	/** 卡状态栏模板字段清单（模型记账 status_fields 的 key 依据；空=无模板） */
+	/** 卡状态栏模板字段清单（场记生成 status_fields 的 key 依据；空=无模板） */
 	statusBarFields: string[];
+	/** 卡状态栏模板字段的设定值（label → 示例值；场记正文未提及时照抄，禁止编造） */
+	statusBarSamples: Record<string, string>;
 	/** 宏求值遇到的清单外宏名（供引擎降级告警） */
 	macroWarnings: string[];
 	/** 句级过滤摘掉的验算/格式栈指令行数（可观测性） */
@@ -108,10 +110,11 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 	const card = loadCardFile(cardAbs);
 	let statusBarFormats: string[] = [];
 	let statusBarFields: string[] = [];
+	let statusBarSamples: Record<string, string> = {};
 	try {
 		const rawCard = readCardRawJson(cardAbs).raw;
 		statusBarFormats = cardStatusBarFormats(rawCard);
-		// 状态栏模板字段（彻底工具化：模型据此记账 status_fields，系统渲染）
+		// 状态栏模板字段（工具管道：场记据此生成 status_fields，系统渲染）
 		const template = extractStatusBarTemplate([
 			card.firstMes,
 			...(Array.isArray(card.alternateGreetings) ? card.alternateGreetings : []),
@@ -119,9 +122,15 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 			card.personality,
 		]);
 		statusBarFields = template?.fieldLabels ?? [];
+		statusBarSamples = {};
+		for (const label of statusBarFields) {
+			const sample = template?.rows.find((r) => r.kind === "field" && r.label === label)?.sample;
+			if (sample) statusBarSamples[label] = sample;
+		}
 	} catch {
 		statusBarFormats = [];
 		statusBarFields = [];
+		statusBarSamples = {};
 	}
 
 	// 世界书：已挂载独立书（0..N）+ 补充设定集 overlay；卡内 character_book 不自动进上下文
@@ -289,6 +298,7 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 		presetActive,
 		statusBarFormats,
 		statusBarFields,
+		statusBarSamples,
 		macroWarnings: [...unsupported],
 		auditLinesDropped,
 		protocolDrops,

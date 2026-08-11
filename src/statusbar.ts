@@ -305,9 +305,16 @@ export function buildStatusBarValueSlots(
  * 账本 → 某角色的状态栏块文本：按模板行骨架重建。
  * - charFields：该角色 status_fields（label → 值）
  * - head：renderStatusBarHead 段替换（日期/时间/位置等查该角色字段 + 全局 time/location）
- * - field 行：value = charFields[label]；无值整行跳过（不露空行）
+ * - field 行取值优先级：账本值 > 卡示例（**仅设定类字段**：账号/粉丝/福利度等身份与数值
+ *   设定，正文一般不变；剧情类字段——行动/内心/穿搭/推文等——无账本值就**跳过**，
+ *   不显示开场示例内容，避免「图片/推文没更新」的错觉）
  * - static 行（details/summary 骨架等）：原样
  */
+/** 设定类字段特征（无账本值时继承卡示例；其余剧情类字段无值跳过） */
+const STATIC_FIELD_HINTS = ["姓名", "账号", "粉丝", "福利", "昵称", "ID", "身份", "职业"];
+const isStaticStatusField = (label: string): boolean =>
+	STATIC_FIELD_HINTS.some((h) => label.includes(h));
+
 export function renderStatusBarFromState(
 	template: StatusBarTemplate,
 	state: { time?: string; location?: string },
@@ -320,10 +327,9 @@ export function renderStatusBarFromState(
 	const lines: string[] = [];
 	for (const row of template.rows) {
 		if (row.kind === "field") {
-			// 取值优先级：账本 > 卡模板示例值（静态字段如账号/粉丝数继承卡设定）> 跳过。
-			// 「未提及」视为无值（场记推断不出时省略，不写死占位）。
+			// 取值优先级：账本 > 卡示例（仅设定类字段）> 跳过。「未提及」视为无值。
 			const v = values[row.label];
-			const effective = v && v !== "未提及" ? v : row.sample;
+			const effective = v && v !== "未提及" ? v : isStaticStatusField(row.label) ? row.sample : "";
 			if (!effective) continue;
 			lines.push(`${row.indent}- ${row.label}：${effective}`);
 		} else {
@@ -549,5 +555,7 @@ export function renderStatusBarHtml(skin: StatusBarSkin, valueSlots: string[]): 
 	out = out.replace(/<div class="[^"]*nofig[^"]*">\s*<\/div>/g, "");
 	// 空 src 的 img（配图组未捕获到值）：删掉
 	out = out.replace(/<img[^>]*src=""[^>]*>/g, "");
+	// 空的配图容器（<div class="flj-md">…</div> 内无 img）：删掉
+	out = out.replace(/<div class="flj-md">[\s\S]*?<\/div>/g, (m) => (/<img[^>]*src="[^"]+"/.test(m) ? m : ""));
 	return out;
 }

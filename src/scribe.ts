@@ -128,6 +128,8 @@ export interface StatusBarCompletionInput {
 	fieldLabels: string[];
 	/** 账本当前 status_fields（角色 → 字段KV；已有值保留） */
 	current: Record<string, Record<string, string>>;
+	/** 卡状态栏模板的设定字段值（账号/粉丝数/福利度等；正文未提及则必须照抄，禁止编造） */
+	sampleFields: Record<string, string>;
 	/** 出场角色（账本 characters 键 + 主角/用户；生成这些角色的状态栏） */
 	knownCharacters: string[];
 	/** 本拍用户输入 */
@@ -153,19 +155,24 @@ export function buildStatusBarCompletionPrompt(input: StatusBarCompletionInput):
 	systemPrompt: string;
 	userText: string;
 } {
-	const { fieldLabels, current, knownCharacters, userText, assistantText, charName, userName } = input;
+	const { fieldLabels, current, sampleFields, knownCharacters, userText, assistantText, charName, userName } = input;
 	const fields = fieldLabels.join("\n");
 	const chars = knownCharacters.length ? knownCharacters.join("、") : `${charName}、${userName}`;
 	const currentJson = JSON.stringify(current, null, 2);
+	const sampleJson = JSON.stringify(sampleFields, null, 2);
 	const systemPrompt = `你是角色扮演的场记。角色卡定义了状态栏，你负责**读本轮正文**，为每个出场角色生成状态栏字段——正文写了什么，状态栏就是什么。阅读【本轮对话】与【当前各角色状态】，输出 JSON：为**每个出场角色**生成一份状态栏字段。
 
 规则：
 - 输出对象按角色分组：{"status_fields": {"角色名": {"字段": "值", ...}, ...}}
 - 角色名用账本规范写法；本拍没有戏份的角色可以省略（保留在账本里）。
 - 每个角色的每个字段都必须出现；已有值若无变化就原样保留，有变化按正文最新状态更新。
-- 缺失字段从正文推断（动作/神态/对话/环境细节都能支撑状态描述）；**推断不出就省略该字段**（不要写「未提及」——省略的字段渲染时自动沿用卡作者预设值）。
+- **设定字段（账号/粉丝数/福利度/姓名等身份与数值设定）**：正文**没有明确写到**时，必须照抄【卡设定值】中的对应值，**禁止编造**（正文明确写到了才更新）；【卡设定值】里没有的才从正文推断。
+- 剧情字段（当前行动/内心/穿搭/身体/气味/推特日记等）：从正文推断（动作/神态/对话/环境细节都能支撑状态描述）；**正文没写新推文就不要输出「🐦 推特日记」字段**（省略，渲染自动沿用卡设定）；其他推断不出的也省略（不要写「未提及」）。
 - 状态描述贴合本拍正文的具体细节，不编造正文里没有的重大事件。
 - **角色归属必须严格**：正文是「${charName}」的叙事，用户输入是「${userName}」的话——各自的行动/内心/穿搭写进各自角色，绝不要把用户的动作写进主角状态栏，反之亦然。
+
+【卡设定值】（正文未提及的设定字段照抄这里，禁止编造）
+${sampleJson}
 
 字段清单（每个角色都按这份填）：
 ${fields}

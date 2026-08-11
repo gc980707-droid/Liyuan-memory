@@ -103,10 +103,11 @@ test("withAliases：合入去重、不改原条目", () => {
 	assert.deepEqual(src[0].keys, ["gloomhound"], "原条目不可变");
 });
 
-test("状态栏生成：prompt 读正文生成、角色归属、字段清单", () => {
+test("状态栏生成：prompt 读正文生成、设定字段照抄、角色归属", () => {
 	const { systemPrompt, userText } = buildStatusBarCompletionPrompt({
 		fieldLabels: ["👤 姓名", "📝 当前行动", "💭 当前内心"],
 		current: { 苏小棉: { "👤 姓名": "苏小棉" } },
+		sampleFields: { "🆔 账号": "@mianbao_JK ✔", "📊 粉丝数": "28.5万" },
 		knownCharacters: ["苏小棉", "旅人"],
 		userText: "我走进包厢。",
 		assistantText: "她假装伸懒腰。",
@@ -115,8 +116,10 @@ test("状态栏生成：prompt 读正文生成、角色归属、字段清单", (
 	});
 	assert.ok(systemPrompt.includes("👤 姓名"), "字段清单在场");
 	assert.ok(systemPrompt.includes("正文写了什么，状态栏就是什么"), "读正文生成语义在场");
+	assert.ok(systemPrompt.includes("禁止编造"), "设定字段照抄纪律在场");
+	assert.ok(systemPrompt.includes("@mianbao_JK ✔"), "卡设定值在场");
 	assert.ok(systemPrompt.includes("角色归属必须严格"), "角色分组纪律在场");
-	assert.ok(systemPrompt.includes("推断不出就省略该字段"), "省略纪律在场（不写未提及）");
+	assert.ok(systemPrompt.includes("没写新推文就不要输出"), "推特日记省略纪律在场");
 	assert.ok(userText.includes("旅人（用户）：我走进包厢。"), "用户输入归属正确");
 	assert.ok(userText.includes("苏小棉：她假装伸懒腰。"), "正文归属主角");
 });

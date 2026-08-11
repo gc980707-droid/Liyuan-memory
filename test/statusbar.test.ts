@@ -141,9 +141,10 @@ test("renderStatusBarFromState：账本 → 状态栏块（字段填值、静态
 	assert.ok(text.includes("📝 当前行动：假装伸懒腰"), "字段值已填");
 	assert.ok(text.includes("👤 姓名：苏小棉（棉棉喵）"), "字段值已填");
 	assert.ok(text.includes("<details>"), "骨架保留");
-	// 账本无值的顶层字段继承卡示例值（不露空行、不靠每拍推断）
-	assert.ok(text.includes("💭 当前内心：*信号断了……*"), "缺省继承卡示例值");
-	assert.ok(text.includes("👗 当前穿搭：水手服衬衫"), "静态字段继承卡示例值");
+	// 账本有值 → 用账本值（粉丝数 28.6万）；剧情类字段无账本值跳过（不显示开场示例）
+	assert.ok(text.includes("📊 粉丝数：28.6万"), "设定字段有账本值用账本值");
+	assert.ok(!text.includes("💭 当前内心"), "剧情字段（内心）无账本值则跳过");
+	assert.ok(!text.includes("👗 当前穿搭"), "剧情字段（穿搭）无账本值则跳过");
 	// head 段替换（账本 time/location 兜底）
 	assert.ok(text.includes("📍 位置：走廊"), "head 位置已替换");
 	assert.ok(text.includes("⏰ 时间：21:00"), "head 时间已替换");
@@ -152,21 +153,22 @@ test("renderStatusBarFromState：账本 → 状态栏块（字段填值、静态
 	assert.equal(snap.characters[0].fields.find((f) => f.label === "📝 当前行动")?.value, "假装伸懒腰");
 });
 
-test("renderStatusBarFromState：静态字段继承卡模板示例值（账号/粉丝数不靠每拍推断）", () => {
+test("renderStatusBarFromState：设定字段继承卡示例值（账号/粉丝数不靠每拍推断）", () => {
 	const tpl = extractStatusBarTemplate([CARD_SAMPLE]);
 	assert.ok(tpl);
-	// 只给动态字段账本值；静态字段（👤 姓名等）缺省 → 用卡示例
+	// 只给动态字段账本值；设定字段（👤 姓名等）缺省 → 用卡示例
 	const text = renderStatusBarFromState(tpl!, {}, {
 		"📝 当前行动": "假装伸懒腰",
 	});
 	assert.ok(text.includes("📝 当前行动：假装伸懒腰"), "动态字段用账本值");
 	// CARD_SAMPLE 里 👤 姓名示例值 = 苏小棉（棉宝/棉棉喵）
-	assert.ok(text.includes("👤 姓名：苏小棉（棉宝/棉棉喵）"), "静态字段继承卡示例值");
-	// 「未提及」视为无值 → fallback 卡示例
+	assert.ok(text.includes("👤 姓名：苏小棉（棉宝/棉棉喵）"), "设定字段继承卡示例值");
+	assert.ok(text.includes("📊 粉丝数：28.5万"), "设定字段（粉丝数）继承卡示例值");
+	// 「未提及」视为无值：剧情字段跳过（不显示示例内容）
 	const withNa = renderStatusBarFromState(tpl!, {}, {
 		"📝 当前行动": "未提及",
 	});
-	assert.ok(withNa.includes("📝 当前行动："), "未提及时用卡示例");
+	assert.ok(!withNa.includes("📝 当前行动"), "剧情字段未提及时跳过");
 	assert.ok(!withNa.includes("未提及"), "未提及不进渲染");
 });
 

@@ -889,6 +889,7 @@ export class StageEngine {
 					userName: materials.config.userName,
 					fieldLabels: materials.statusBarFields,
 					knownCharacters,
+					sampleFields: materials.statusBarSamples,
 				},
 			);
 			console.log(`[stage-statusbar] 结果：${r.kind}${r.kind === "failed" ? " · " + r.error : ""}`);
