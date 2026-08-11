@@ -124,34 +124,32 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 	const dragOffsetRef = useRef({ dx: 0, dy: 0 });
 	const panRef = useRef<{ px: number; py: number } | null>(null);
 
-	/** 屏幕坐标 → viewBox 坐标（含缩放平移） */
+	/** 屏幕坐标 → viewBox 坐标（getScreenCTM 逆变换，自动处理 preserveAspectRatio 留白） */
 	const toViewBox = (clientX: number, clientY: number): { x: number; y: number } => {
 		const svg = svgRef.current;
 		if (!svg) return { x: 0, y: 0 };
-		const rect = svg.getBoundingClientRect();
-		return {
-			x: ((clientX - rect.left) / rect.width) * W,
-			y: ((clientY - rect.top) / rect.height) * H,
-		};
+		const pt = svg.createSVGPoint();
+		pt.x = clientX;
+		pt.y = clientY;
+		const ctm = svg.getScreenCTM();
+		if (!ctm) return { x: 0, y: 0 };
+		const p = pt.matrixTransform(ctm.inverse());
+		return { x: p.x, y: p.y };
 	};
-	/** 屏幕坐标 → 世界坐标（viewBox 变换前） */
+	/** 屏幕坐标 → 世界坐标（viewBox 再反变换我的视口 translate/scale） */
 	const toWorld = (clientX: number, clientY: number): { x: number; y: number } => {
 		const vb = toViewBox(clientX, clientY);
 		return { x: (vb.x - view.tx) / view.scale, y: (vb.y - view.ty) / view.scale };
 	};
 
-	// 滚轮缩放（以光标为锚）
+	// 滚轮缩放（以光标为锚，锚点用 CTM 转的 viewBox 坐标）
 	const onWheel = (ev: React.WheelEvent) => {
-		const svg = svgRef.current;
-		if (!svg) return;
-		const rect = svg.getBoundingClientRect();
-		const px = ((ev.clientX - rect.left) / rect.width) * W;
-		const py = ((ev.clientY - rect.top) / rect.height) * H;
+		const vb = toViewBox(ev.clientX, ev.clientY);
 		const factor = Math.exp(-ev.deltaY * 0.0012);
 		setView((v) => {
 			const ns = Math.max(0.3, Math.min(3, v.scale * factor));
 			const k = ns / v.scale;
-			return { scale: ns, tx: px - (px - v.tx) * k, ty: py - (py - v.ty) * k };
+			return { scale: ns, tx: vb.x - (vb.x - v.tx) * k, ty: vb.y - (vb.y - v.ty) * k };
 		});
 	};
 	// 空白处拖拽平移
@@ -159,7 +157,7 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 		if (dragRef.current !== null) return;
 		const vb = toViewBox(ev.clientX, ev.clientY);
 		panRef.current = { px: vb.x, py: vb.y };
-		(ev.currentTarget as Element).setPointerCapture(ev.pointerId);
+		svgRef.current?.setPointerCapture(ev.pointerId);
 	};
 	const onMove = (ev: React.PointerEvent) => {
 		if (dragRef.current !== null) {
@@ -186,15 +184,14 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 	const [hover, setHover] = useState<RelationshipEdge | null>(null);
 	const [hoverNode, setHoverNode] = useState<string | null>(null);
 
-	// 节点拖拽按下：记录偏移（鼠标与节点中心的差），保证跟手
+	// 节点拖拽按下：记录偏移（鼠标与节点中心的差），保证跟手；捕获到 svg（move 事件统一走 svg）
 	const onNodeDown = (idx: number, ev: React.PointerEvent) => {
-		ev.stopPropagation();
 		const w = toWorld(ev.clientX, ev.clientY);
 		const n = nodes[idx];
 		if (!n) return;
 		dragRef.current = idx;
 		dragOffsetRef.current = { dx: n.x - w.x, dy: n.y - w.y };
-		(ev.currentTarget as Element).setPointerCapture(ev.pointerId);
+		svgRef.current?.setPointerCapture(ev.pointerId);
 	};
 
 	if (edges.length === 0) {
