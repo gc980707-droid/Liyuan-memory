@@ -115,6 +115,9 @@ import {
 import { createAssistantHost, type AssistantHost, type StoryBridge } from "./assistant.ts";
 import {
 	buildStatusBarValueSlots,
+	cardTextSources,
+	defaultStatusBarTemplate,
+	detectStatusPlaceholder,
 	extractStatusBarSkin,
 	extractStatusBarTemplate,
 	parseStatusBarBlock,
@@ -581,12 +584,12 @@ const statusBarTemplateFor = (): import("../src/statusbar.ts").StatusBarTemplate
 			const cardPath = isAbsolute(cardRel) ? cardRel : join(cwd, cardRel);
 			const card = loadCardFile(cardPath);
 			statusTemplateCharName = card.name;
-			template = extractStatusBarTemplate([
-				card.firstMes,
-				...(Array.isArray(card.alternateGreetings) ? card.alternateGreetings : []),
-				card.description,
-				card.personality,
-			]);
+			template = extractStatusBarTemplate(cardTextSources(card));
+			// 无卡模板但有状态栏意图（<Tag/> 占位符）→ 通用模板兜底（与 materials 同规则）
+			if (!template) {
+				const placeholder = detectStatusPlaceholder(cardTextSources(card));
+				if (placeholder) template = defaultStatusBarTemplate();
+			}
 			// 皮肤：卡自带美化模板（regex_scripts 的 replaceString HTML 链）
 			// 学习映射：用卡示例块跑一次 findRegex，组值 ↔ 示例字段值对齐
 			try {

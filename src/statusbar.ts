@@ -104,6 +104,71 @@ export function stripStatusBarText(text: string): string {
 	return extractStatusBarBlocks(text).cleaned;
 }
 
+// ---------------- 通用状态栏模板（无卡模板时 harness 兜底） ----------------
+// 卡有状态栏意图（<Tag/> 占位符等）但没有 Status_block 示例时，用内置通用模板：
+// head（日期/时间/位置）+ 通用剧情字段，harness 照样按角色生成状态栏。
+
+const GENERIC_FIELDS = ["📝 当前行动", "💭 当前内心", "🏷️ 状态", "💞 关系"];
+
+/** 内置通用模板（行骨架与真实模板同构，渲染/皮肤管道共用） */
+export function defaultStatusBarTemplate(): StatusBarTemplate {
+	const rows: StatusBarTemplate["rows"] = [];
+	rows.push({ kind: "static", text: "<details><summary>[状态]</summary>", indent: "", label: "", sample: "" });
+	for (const label of GENERIC_FIELDS) {
+		rows.push({ kind: "field", text: `  - ${label}：`, indent: "  ", label, sample: "" });
+	}
+	rows.push({ kind: "static", text: "</details>", indent: "", label: "", sample: "" });
+	return {
+		raw: "<Status_block>\n『📅 日期：7月15日 | ⏰ 时间：14:30 | 📍 位置：未知』\n<details><summary>[状态]</summary>\n</details>\n</Status_block>",
+		head: "『📅 日期：7月15日 | ⏰ 时间：14:30 | 📍 位置：未知』",
+		rows,
+		fieldLabels: [...GENERIC_FIELDS],
+	};
+}
+
+/** 状态栏意图检测：文本里的自闭合占位标签（<Tag/>，非 HTML 标准标签） */
+const HTML_SELF_CLOSE = new Set([
+	"br", "hr", "img", "input", "meta", "link", "wbr", "area", "base", "col", "embed", "source", "track",
+]);
+export function detectStatusPlaceholder(texts: string[]): string | null {
+	for (const t of texts) {
+		if (!t) continue;
+		for (const m of t.matchAll(/<([A-Za-z_][\w.-]*)\s*\/\s*>/g)) {
+			const tag = m[1].toLowerCase();
+			if (HTML_SELF_CLOSE.has(tag)) continue;
+			// 排除明显非状态栏的（如 HTML 模板变量占位 <slot/> <template/>）
+			if (["slot", "template", "component", "view"].includes(tag)) continue;
+			return m[1];
+		}
+	}
+	return null;
+}
+
+/** 卡的全部文本字段（状态栏检测/模板/图池的共享文本源） */
+export function cardTextSources(card: {
+	firstMes?: string;
+	alternateGreetings?: string[];
+	description?: string;
+	personality?: string;
+	scenario?: string;
+	mesExample?: string;
+	systemPrompt?: string;
+	postHistoryInstructions?: string;
+	creatorNotes?: string;
+}): string[] {
+	return [
+		card.firstMes ?? "",
+		...(Array.isArray(card.alternateGreetings) ? card.alternateGreetings : []),
+		card.description ?? "",
+		card.personality ?? "",
+		card.scenario ?? "",
+		card.mesExample ?? "",
+		card.systemPrompt ?? "",
+		card.postHistoryInstructions ?? "",
+		card.creatorNotes ?? "",
+	];
+}
+
 /** 取最新快照（最后一个块）；无块返回 null */
 export function latestStatusBarSnapshot(text: string): StatusBarSnapshot | null {
 	if (!text) return null;

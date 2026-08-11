@@ -98,6 +98,16 @@ export async function runScribeTurn(deps: ScribeRunDeps, input: ScribeRunInput):
  * 只合并 status_fields；失败只跳过生成（渲染端无字段角色自然不显示）。
  * 同场记：叶守卫——调用期间树动过则整体丢弃。
  */
+/** 状态栏快照的 STATE_ENTRY_TYPE 已在顶部定义 */
+
+/** 上一拍状态栏用过的配图（进程内；用于避免连续同图） */
+let lastStatusImg = "";
+
+/**
+ * 状态栏生成（harness 读正文）：每拍为出场角色生成完整状态栏字段。
+ * 只合并 status_fields；失败只跳过生成（渲染端无字段角色自然不显示）。
+ * 同场记：叶守卫——调用期间树动过则整体丢弃。
+ */
 export async function runStatusBarCompletion(
 	deps: ScribeRunDeps,
 	input: ScribeRunInput & {

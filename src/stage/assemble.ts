@@ -268,7 +268,9 @@ export function buildStatusBarPrompt(
 	const placeholders = statusBarFormats.filter(isPlaceholderStatusFormat);
 	const panels = statusBarFormats.filter((f) => !isPlaceholderStatusFormat(f));
 	const parts: string[] = [];
-	if (placeholders.length > 0) {
+	// 占位符型：无字段清单时才是「模型输出占位符」；有字段（通用模板兜底）→ 系统生成
+	const hasFields = !!statusBarFields && statusBarFields.length > 0;
+	if (placeholders.length > 0 && !hasFields) {
 		parts.push(
 			`本卡用占位符渲染状态栏界面：每拍在正文之后**原样输出** ${placeholders.join("；")}（自闭合标签，` +
 				`不要展开成成对写法、不要往里填内容——界面由卡自动渲染）`,
@@ -577,7 +579,7 @@ export function buildStageInjection({
 	if (statusBarFormats && statusBarFormats.length > 0) {
 		const placeholders = statusBarFormats.filter(isPlaceholderStatusFormat);
 		const panels = statusBarFormats.filter((f) => !isPlaceholderStatusFormat(f));
-		if (placeholders.length > 0 && panels.length === 0) {
+		if (placeholders.length > 0 && panels.length === 0 && !(statusBarFields && statusBarFields.length > 0)) {
 			blocks.push(
 				`【状态栏】本卡扮演的一部分：本拍所有剧情（含续写与 ask）完成后，原样输出 ${placeholders.join(" 或 ")}（自闭合占位符，界面由卡渲染）。状态栏意味着本拍结束——它必须是最后的产出，漏写即未完成本拍。`,
 			);

@@ -13,7 +13,12 @@ import { isAbsolute, join } from "node:path";
 
 import { loadCardFile, readCardRawJson } from "../card.ts";
 import { cardStatusBarFormats } from "../cardfront.ts";
-import { extractStatusBarTemplate } from "../statusbar.ts";
+import {
+	cardTextSources,
+	defaultStatusBarTemplate,
+	detectStatusPlaceholder,
+	extractStatusBarTemplate,
+} from "../statusbar.ts";
 import { stripAuditLines } from "../draft.ts";
 import {
 	applyDisabledLore,
@@ -125,19 +130,23 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 			card.personality,
 		]);
 		statusBarFields = template?.fieldLabels ?? [];
+		// 无卡模板但有状态栏意图（<Tag/> 占位符）→ 通用模板兜底（harness 照常按角色生成）
+		if (!template) {
+			const cardTexts = cardTextSources(card);
+			const placeholder = detectStatusPlaceholder(cardTexts);
+			if (placeholder) {
+				template = defaultStatusBarTemplate();
+				statusBarFields = template.fieldLabels;
+				if (statusBarFormats.length === 0) statusBarFormats = [`\`<${placeholder}/>\``];
+			}
+		}
 		statusBarSamples = {};
 		for (const label of statusBarFields) {
 			const sample = template?.rows.find((r) => r.kind === "field" && r.label === label)?.sample;
 			if (sample) statusBarSamples[label] = sample;
 		}
-		// 卡图池：开场白/说明里的 [IMG:url|desc] 素材（配推文时场记选用）
-		for (const t of [
-			card.firstMes,
-			...(Array.isArray(card.alternateGreetings) ? card.alternateGreetings : []),
-			card.description,
-			card.personality,
-			card.mesExample,
-		]) {
+		// 卡图池：卡全部文本字段 + 世界书条目里的 [IMG:url|desc] 素材（配推文时场记选用）
+		for (const t of cardTextSources(card)) {
 			if (!t) continue;
 			for (const m of t.matchAll(/\[IMG:([^\s|]+)\|([^\]]*)\]/g)) {
 				statusBarImagePool.push(`${m[1]}|${m[2].trim()}`);
