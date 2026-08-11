@@ -38,6 +38,16 @@ function affinityLabel(a: number): string {
 
 export function RelGraphPanel({ state, charName, userName }: { state: WorldState | null; charName: string; userName: string }) {
 	const edges = state?.relationships ?? [];
+	// 去重边（同对角色取 affinity 绝对值大者）——必须无条件执行（hooks 顺序稳定）
+	const uniqEdges = useMemo(() => {
+		const m = new Map<string, RelationshipEdge>();
+		for (const e of edges) {
+			const key = [e.a, e.b].sort().join("\u0000");
+			const prev = m.get(key);
+			if (!prev || Math.abs(e.affinity) > Math.abs(prev.affinity)) m.set(key, e);
+		}
+		return [...m.values()];
+	}, [edges]);
 	// 节点 = 所有关系里出现的角色 + 主角/用户
 	const names = useMemo(() => {
 		const set = new Set<string>();
@@ -137,17 +147,6 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 	if (edges.length === 0) {
 		return <div className="sp-empty">尚无人物关系——剧情互动后自动生成。</div>;
 	}
-
-	// 去重边（同对角色取 affinity 绝对值大者）
-	const uniqEdges = useMemo(() => {
-		const m = new Map<string, RelationshipEdge>();
-		for (const e of edges) {
-			const key = [e.a, e.b].sort().join("\u0000");
-			const prev = m.get(key);
-			if (!prev || Math.abs(e.affinity) > Math.abs(prev.affinity)) m.set(key, e);
-		}
-		return [...m.values()];
-	}, [edges]);
 
 	return (
 		<div className="relgraph">
