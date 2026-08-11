@@ -25,6 +25,7 @@ import {
 import { addFoldTags, addHistoryStripTags, discoverFoldTagsFromTexts, resetDisplayTagExtras } from "../postprocess.ts";
 import { createMacroEnv, evalPresetMacros } from "../preset-macro.ts";
 import { stripProtocolEntries, type ProtocolDrop } from "../protocol-detect.ts";
+import { stripAllStatusBarArtifacts } from "../statusbar.ts";
 import {
 	findSplitTable,
 	lookupBlockRule,
@@ -117,6 +118,10 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 	);
 	const entries = protocolFiltered.entries;
 	const protocolDrops = protocolFiltered.dropped;
+	// 世界书条目也剥离状态栏残留（卡作者在条目里写的 <Status_block> 示例/占位符——模型会从设定里学写状态栏）
+	for (const e of entries) {
+		if (e.content) e.content = stripAllStatusBarArtifacts(e.content);
+	}
 
 	// 预设：工作草稿（preset-override.json）优先，与预设页签热编辑一致
 	let preset: RpPreset | null = null;

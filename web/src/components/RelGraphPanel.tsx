@@ -123,6 +123,8 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 	const dragRef = useRef<number | null>(null);
 	const dragOffsetRef = useRef({ dx: 0, dy: 0 });
 	const panRef = useRef<{ px: number; py: number } | null>(null);
+	/** 按下时的世界坐标（用于区分点击 vs 拖拽：位移 < 8px 视为点击） */
+	const downWorldRef = useRef<{ x: number; y: number } | null>(null);
 
 	/** 屏幕坐标 → viewBox 坐标（getScreenCTM 逆变换，自动处理 preserveAspectRatio 留白） */
 	const toViewBox = (clientX: number, clientY: number): { x: number; y: number } => {
@@ -157,6 +159,7 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 		if (dragRef.current !== null) return;
 		const vb = toViewBox(ev.clientX, ev.clientY);
 		panRef.current = { px: vb.x, py: vb.y };
+		downWorldRef.current = toWorld(ev.clientX, ev.clientY);
 		svgRef.current?.setPointerCapture(ev.pointerId);
 	};
 	const onMove = (ev: React.PointerEvent) => {
@@ -176,16 +179,18 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 		}
 	};
 	const onUp = (ev: React.PointerEvent) => {
-		const wasPan = panRef.current !== null;
-		const wasNodeDrag = dragRef.current !== null;
+		const w = toWorld(ev.clientX, ev.clientY);
+		const down = downWorldRef.current;
+		downWorldRef.current = null;
+		// 位移 < 8px 视为点击（按下抬起未拖动）
+		const wasClick = down ? Math.hypot(w.x - down.x, w.y - down.y) < 8 : false;
+		const onNode = dragRef.current !== null;
 		dragRef.current = null;
 		panRef.current = null;
-		// 非拖拽的点击：命中检测选中角色（拖过节点/平移过视口不算点击）
-		if (!wasPan && !wasNodeDrag) {
-			const w = toWorld(ev.clientX, ev.clientY);
+		if (wasClick) {
 			const hit = nodes.find((n) => Math.hypot(n.x - w.x, n.y - w.y) <= NODE_R + 6);
-			if (hit) setSelected((cur) => (cur === hit.name ? null : hit.name));
-			else setSelected(null);
+			if (hit && onNode) setSelected((cur) => (cur === hit.name ? null : hit.name));
+			else if (!onNode) setSelected(null);
 		}
 	};
 
@@ -202,6 +207,7 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 		if (!n) return;
 		dragRef.current = idx;
 		dragOffsetRef.current = { dx: n.x - w.x, dy: n.y - w.y };
+		downWorldRef.current = w;
 		svgRef.current?.setPointerCapture(ev.pointerId);
 	};
 
