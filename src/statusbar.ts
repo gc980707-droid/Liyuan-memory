@@ -576,19 +576,66 @@ export function renderStatusBarHtml(
 				const segs = tweetVal.split("|").map((s) => s.trim());
 				let tTime = "";
 				let tTweet = "";
+				let tLikes = "";
+				let tReposts = "";
+				let tViews = "";
+				const tComments: Array<{ name: string; text: string }> = [];
 				for (const seg of segs) {
-					if (seg.startsWith("⏱️")) tTime = seg.replace(/^⏱️\s*[：:]\s*/, "").trim();
-					else if (seg.startsWith("推文")) tTweet = seg.replace(/^推文\s*[：:]\s*/, "").trim();
-					else if (!tTweet) tTweet = seg;
+					if (seg.startsWith("⏱️")) {
+						tTime = seg.replace(/^⏱️\s*(?:时间)?\s*[：:]?\s*/, "").trim();
+					} else if (seg.startsWith("推文")) {
+						tTweet = seg.replace(/^推文\s*[：:]\s*/, "").trim();
+					} else if (seg.startsWith("💗")) {
+						const lm = /💗\s*([^转]*?)\s*转发\s*([^浏]*?)\s*浏览\s*(\S+)/.exec(seg);
+						if (lm) {
+							tLikes = lm[1].trim();
+							tReposts = lm[2].trim();
+							tViews = lm[3].trim();
+						} else {
+							tLikes = seg.replace(/^💗\s*/, "").trim();
+						}
+					} else if (seg.startsWith("💬")) {
+						const body = seg.replace(/^💬\s*/, "");
+						for (const c of body.split("/")) {
+							const ci = c.indexOf("：");
+							const ci2 = c.indexOf(":");
+							const idx = ci < 0 ? ci2 : ci2 < 0 ? ci : Math.min(ci, ci2);
+							if (idx > 0 && tComments.length < 3) {
+								tComments.push({ name: c.slice(0, idx).trim(), text: c.slice(idx + 1).trim() });
+							}
+						}
+					} else if (!tTweet) {
+						tTweet = seg;
+					}
 				}
-				// 模板结构定位：flj-tm（时间）前的 $n / flj-tx（推文）前的 $n
-				const tmG = /<i class="flj-tm">[^$]*\$(\d+)/.exec(script.template);
-				const txG = /<div class="flj-tx">[^$]*\$(\d+)/.exec(script.template);
-				if (tmG && tTime && script.mapping[Number(tmG[1]) - 1] < 0) {
-					slotValues[Number(tmG[1]) - 1] = tTime;
+				// 模板结构定位各子组：flj-tm（时间）/ flj-tx（推文）/ 🔁（转发）/ ❤️（点赞）/ 📊（浏览）/ 评论
+				const tpl = script.template;
+				const gOf = (re: RegExp): number => {
+					const mm = re.exec(tpl);
+					return mm ? Number(mm[1]) - 1 : -1;
+				};
+				const tmG = gOf(/<i class="flj-tm">[^$]*\$(\d+)/);
+				const txG = gOf(/<div class="flj-tx">[^$]*\$(\d+)/);
+				const rpG = gOf(/<span class="flj-a rp">[^$]*\$(\d+)/);
+				const lkG = gOf(/<span class="flj-a lk">[^$]*\$(\d+)/);
+				const vwG = gOf(/<span class="flj-vw">[^$]*\$(\d+)/);
+				const cmnG = [...tpl.matchAll(/<div class="flj-rpn">\$(\d+)/g)].map((mm) => Number(mm[1]) - 1);
+				const cmtG = [...tpl.matchAll(/<div class="flj-rpt">\$(\d+)/g)].map((mm) => Number(mm[1]) - 1);
+				const put = (g: number, v: string) => {
+					if (g >= 0 && g < script.groupCount && script.mapping[g] < 0) slotValues[g] = v;
+				};
+				put(tmG, tTime);
+				put(txG, tTweet);
+				put(lkG, tLikes);
+				put(rpG, tReposts);
+				put(vwG, tViews);
+				for (let i = 0; i < Math.min(3, tComments.length); i++) {
+					put(cmnG[i], tComments[i].name);
+					put(cmtG[i], tComments[i].text);
 				}
-				if (txG && tTweet && script.mapping[Number(txG[1]) - 1] < 0) {
-					slotValues[Number(txG[1]) - 1] = tTweet;
+				// 清掉误映射到推文字段的组（示例值匹配到「2.4k」之类把整段串填进点赞位）
+				for (let g = 0; g < script.groupCount; g++) {
+					if (script.mapping[g] === tweetIdx && g !== txG) slotValues[g] = "";
 				}
 			}
 		}
