@@ -85,8 +85,40 @@ export function stripStatusPlaceholders(text: string): string {
 	});
 }
 
-/** 卡/正文的完整状态栏清理：成对块 + 自闭合占位符（导入时与上屏时共用） */
+/** 卡/正文的完整状态栏清理：成对块 + 自闭合占位符 + 文末纯文本状态栏段（导入时与上屏时共用） */
 export function stripAllStatusBarArtifacts(text: string): string {
 	if (!text) return text;
-	return stripStatusPlaceholders(stripStatusBarText(text));
+	return stripTrailingStatusBar(stripStatusPlaceholders(stripStatusBarText(text)));
+}
+
+/**
+ * 文末纯文本状态栏段剥离：模型可能输出无标签的状态栏（`- 苏小棉的状态`、
+ * `📅 日期：…`、`💬 评论：…` 等 emoji 键行），成对块/占位符正则抓不到。
+ * 规则：从文末反复剥「段内含状态栏特征键」的独立段落（段落间空行分隔）。
+ */
+const STATUS_BAR_SEG_RE =
+	/(📅 日期：|📱\s*@|📍 位置：|⏰ 时间：|粉丝数：|福利度：|推特日记：|💬 评论：|📝 推文|基础信息|核心数值)/;
+
+export function stripTrailingStatusBar(text: string): string {
+	let t = text.trim();
+	for (;;) {
+		const segs = t.split(/\n\s*\n/);
+		if (segs.length < 2) {
+			// 整段就是状态栏
+			if (segs.length === 1 && STATUS_BAR_SEG_RE.test(segs[0]) && /(^-\s*\S+的状态|📅|📱|💬)/.test(segs[0])) return "";
+			return t;
+		}
+		const last = segs[segs.length - 1].trim();
+		// 末段含状态栏特征键且形态像状态栏（emoji 键 / 「X 的状态」/ 分隔线开头）
+		if (
+			STATUS_BAR_SEG_RE.test(last) &&
+			(/^(-\s*\S+的状态|📱|📅|---)/m.test(last) || STATUS_BAR_SEG_RE.test(last.slice(0, 60)))
+		) {
+			segs.pop();
+			t = segs.join("\n\n").trim();
+			continue;
+		}
+		break;
+	}
+	return t;
 }
