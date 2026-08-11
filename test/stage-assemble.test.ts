@@ -125,53 +125,14 @@ const card = {
 };
 const config: RpConfig = { ...DEFAULT_CONFIG, userName: "沈舟" };
 
-test("system prompt：状态栏提示词分型——占位符型不引导展开成对写法", () => {
-	// 占位符型（自闭合 <Tag/>：界面由卡渲染）：模型只该原样输出占位符，不得填内容
-	const placeholder = buildStageSystemPrompt({
-		card,
-		config,
-		constantLore: [],
-		statusBarFormats: ["`<StatusPlaceHolderImpl/>`"],
-	});
-	assert.ok(placeholder.includes("占位符渲染状态栏界面"), "占位符语义说明在场");
-	assert.ok(placeholder.includes("原样输出"), "要求原样输出");
-	assert.ok(placeholder.includes("不要展开成成对写法"), "明确禁止展开成对（8/05：模型写成对标签导致卡正则打空）");
-	assert.ok(placeholder.includes("不要往里填内容"), "明确禁止填内容");
-	assert.ok(!placeholder.includes("包住整块写出"), "占位符型不得沿用面板型措辞");
 
-	// 面板型（成对 <state1>…</state1>）：主演零负担——系统读正文自动生成
-	const panel = buildStageSystemPrompt({ card, config, constantLore: [], statusBarFormats: ["`<state1>…</state1>`"] });
-	assert.ok(panel.includes("不需要输出任何状态栏格式块"), "面板型：模型不再输出格式块");
-	assert.ok(panel.includes("自动生成"), "面板型：读正文自动生成语义在场");
 
-	// 有字段清单时提示字段名（记账 key 依据）
-	const withFields = buildStageSystemPrompt({
-		card,
-		config,
-		constantLore: [],
-		statusBarFormats: ["`<state1>…</state1>`"],
-		statusBarFields: ["👤 姓名", "📝 当前行动"],
-	});
-	assert.ok(withFields.includes("👤 姓名"), "字段清单在场");
-
-	// 末端导演备注同样分型（buildStageInjection）
-	const inj = buildStageInjection({
-		state: { time: "", location: "", characters: {}, inventory: [], flags: {}, plot_threads: [] },
-		activatedLore: [],
-		card,
-		config,
-		statusBarFormats: ["`<StatusPlaceHolderImpl/>`"],
-	});
-	assert.ok(inj.includes("自闭合占位符"), "导演备注：占位符语义");
-});
-
-test("system prompt：字节稳定、宏替换、主权红线随预设让位", () => {	const opts = { card, config, constantLore: [], statusBarFormats: ["state1"] };
+test("system prompt：字节稳定、宏替换、主权红线随预设让位", () => {	const opts = { card, config, constantLore: [] };
 	const a = buildStageSystemPrompt(opts);
 	const b = buildStageSystemPrompt(opts);
 	assert.equal(a, b, "同素材两次装配必须逐字节一致");
 	assert.ok(a.includes("沈舟的同门师姐"), "{{user}} 宏应替换");
 	assert.ok(a.includes("绝不替 沈舟 说话、行动"), "无预设：harness 兜底纪律在场（叙事与文风节）");
-	assert.ok(a.includes("状态栏由剧场读你的正文自动生成"), "状态栏读正文自动生成语义在场");
 	assert.ok(a.includes("停在 沈舟 可以接话"), "演完即停是 harness 缺省（正面祈使句）");
 	assert.ok(a.includes("一场长篇沉浸式角色扮演"), "舞台只声明角色扮演（不抢预设身份工作）");
 

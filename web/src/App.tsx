@@ -57,7 +57,6 @@ import {
 	IconSend,
 	IconSessions,
 	IconSettings,
-	IconStatus,
 	IconStop,
 	IconUploads,
 	IconWorldline,
@@ -94,7 +93,6 @@ import { SettingsPanel } from "./components/SettingsPanel.tsx";
 import { SessionStatsBar, StatusStrip } from "./components/StatusStrip.tsx";
 import { UploadsPanel } from "./components/UploadsPanel.tsx";
 import { StoreModal, WorldlinePanel } from "./components/WorldlinePanel.tsx";
-import { StatusRail } from "./components/StatusRail.tsx";
 import { useWire, type ConnState } from "./ws.ts";
 import type {
 	AssistantModelInfo,
@@ -148,8 +146,7 @@ type PanelId =
 	| "persona"
 	| "roster"
 	| "uploads"
-	| "assistant"
-	| "status";
+	| "assistant";
 
 /** agent 自建面板的右栏选择 id（柱 2）：`agent:` + 面板名，页签随 panels 帧动态长出 */
 type AgentPanelId = `agent:${string}`;
@@ -162,7 +159,7 @@ const agentId = (name: string): AgentPanelId => `agent:${name}`;
  * - 右 4：角色卡 / 世界书 / 知识库 / 用户角色
  * 会话在底栏。
  */
-const LEFT_PANELS: PanelId[] = ["connect", "preset", "powers", "uploads", "status"];
+const LEFT_PANELS: PanelId[] = ["connect", "preset", "powers", "uploads"];
 const RIGHT_PANELS: PanelId[] = ["card", "lorebook", "codex", "persona"];
 /** 右栏可开面板全集：顶栏 4 入口 + 助手（入口在输入框发送钮右侧，不占顶栏） */
 const RIGHT_OPENABLE: PanelId[] = [...RIGHT_PANELS, "assistant"];
@@ -184,7 +181,6 @@ const PANEL_LABEL: Record<PanelId, string> = {
 	roster: "登场名录",
 	uploads: "上传区",
 	assistant: "助手",
-	status: "状态",
 };
 
 /** 顶栏图标(收纳入口的关键:图标承载识别,文字进 tooltip/aria-label) */
@@ -202,7 +198,6 @@ const PANEL_ICON: Record<PanelId, (p: { size?: number }) => React.JSX.Element> =
 	roster: IconRoster,
 	uploads: IconUploads,
 	assistant: IconAssistant,
-	status: IconStatus,
 };
 
 type CenterMenu = "settings" | "panels" | null;
@@ -262,8 +257,6 @@ export default function App() {
 	const [stats, setStats] = useState<WireStats | null>(null);
 	const [warnings, setWarnings] = useState<WarnEntry[]>([]);
 	const [bellOpen, setBellOpen] = useState(false);
-	/** 左栏「当前状态」快照（hello / statusbar 帧驱动；无状态栏的卡为 null） */
-	const [statusBar, setStatusBar] = useState<import("./wire.ts").StatusBarSnapshot | null>(null);
 	// 决策门禁（Phase 4 柱 1）：当前挂起的选择卡（live 交互；应答后收敛，留痕由重放消息渲染）
 	const [activeChoice, setActiveChoice] = useState<{ id: string; question: string; options: string[]; placeholder?: string } | null>(null);
 	// agent 自建面板（柱 2）：server 推送的活跃面板全量（页签序）；入口在面板坞，展开到左栏
@@ -633,7 +626,6 @@ export default function App() {
 					);
 					setMsgEdit(null); // 会话对齐后关闭内联编辑
 					setWorldState(frame.state);
-					setStatusBar(frame.statusbar ?? null);
 					setStats(frame.stats);
 					// 一档皮肤:优先用 hello 同帧载荷(与消息同步),杜绝 REST 缓存/时序导致的漏皮
 					if (frame.cardfront) {
@@ -801,12 +793,6 @@ export default function App() {
 					break;
 				case "state":
 					setWorldState(frame.state);
-					break;
-				case "statusbar":
-					console.log(
-						`[ws:statusbar] 收到帧：${frame.snapshot ? `${frame.snapshot.characters.length} 角色` : "null"}`,
-					);
-					setStatusBar(frame.snapshot ?? null);
 					break;
 				case "panels": {
 					// agent 自建面板（柱 2）：新面板自动展开到左栏（agent 持有前端，建了就给用户看）；
@@ -1488,8 +1474,6 @@ export default function App() {
 						}}
 					/>
 				);
-			case "status":
-				return <StatusRail snapshot={statusBar} panel />;
 			case "assistant":
 				return (
 					<AssistantPanel
@@ -1561,7 +1545,7 @@ export default function App() {
 		const agent = headId.startsWith("agent:") ? agentPanels.find((p) => agentId(p.name) === headId) : undefined;
 		if (headId.startsWith("agent:") && !agent && open) return null;
 		const HeadIcon = agent ? IconDock : PANEL_ICON[headId as PanelId];
-		const refreshable = !agent && id !== "status";
+		const refreshable = !agent;
 		const doRefresh = () => {
 			if (id === "sessions") {
 				ws.send({ type: "sessions" });

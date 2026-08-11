@@ -17,16 +17,11 @@ import { isBackstageText } from "../src/stance.ts";
 import { applyDraftOps, type DraftMsgLike } from "../src/draft.ts";
 import type { RpPanel } from "../src/panels.ts";
 import type { WorldState } from "../src/types.ts";
-import {
-	latestStatusBarSnapshot,
-	stripStatusBarText,
-	type StatusBarCharacter,
-	type StatusBarSnapshot,
-} from "../src/statusbar.ts";
+import { stripStatusBarText } from "../src/statusbar.ts";
 
 export type { DisplaySkin };
 
-export type { WorldState, RpPanel, StatusBarCharacter, StatusBarSnapshot };
+export type { WorldState, RpPanel };
 export { isBackstageText };
 
 export type WireChannel =
@@ -241,12 +236,8 @@ export type ServerFrame =
 				charName: string;
 				userName: string;
 			};
-			/** 最新状态栏快照（左栏「当前状态」面板数据源；无则 null） */
-			statusbar: StatusBarSnapshot | null;
 	  }
 	| { type: "message"; message: WireMsg }
-	/** 状态栏快照更新（新拍定稿后推送最新一份） */
-	| { type: "statusbar"; snapshot: StatusBarSnapshot | null }
 	/** draft=true：该 text 增量是 draft_write 参数的转发（替换语义——重交原地更新，不叠加）；reset=true：本次调用的首个分片 */
 	| { type: "delta"; kind: "text" | "thinking"; delta: string; draft?: boolean; reset?: boolean }
 	/** 稿件分段重同步（修复/重交后）：前端把屏上全部稿段原位替换为 segments（按空行切段） */
@@ -436,13 +427,6 @@ function textOf(content: unknown): string {
 		)
 		.filter(Boolean)
 		.join("\n");
-}
-
-/** 从原始消息（MsgLike）提取最新状态栏快照；无状态栏返回 null */
-export function statusBarSnapshotOf(m: unknown): StatusBarSnapshot | null {
-	if (!m || typeof m !== "object") return null;
-	const text = textOf((m as { content?: unknown }).content);
-	return text ? latestStatusBarSnapshot(text) : null;
 }
 
 /** 提取 thinking 块文本（主演思考过程，UI 折叠显示） */

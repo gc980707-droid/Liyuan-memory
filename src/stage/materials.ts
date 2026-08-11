@@ -12,13 +12,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 
 import { loadCardFile, readCardRawJson } from "../card.ts";
-import { cardStatusBarFormats } from "../cardfront.ts";
-import {
-	cardTextSources,
-	defaultStatusBarTemplate,
-	detectStatusPlaceholder,
-	extractStatusBarTemplate,
-} from "../statusbar.ts";
 import { stripAuditLines } from "../draft.ts";
 import {
 	applyDisabledLore,
@@ -77,14 +70,6 @@ export interface StageMaterials {
 	presetVarSnapshot: Map<string, string>;
 	/** 任一渠道有启用块——扮演规范让位给预设的判定依据 */
 	presetActive: boolean;
-	/** 卡作者状态栏格式（StatusBlock / state1…）；空=卡未设计，勿硬造 */
-	statusBarFormats: string[];
-	/** 卡状态栏模板字段清单（场记生成 status_fields 的 key 依据；空=无模板） */
-	statusBarFields: string[];
-	/** 卡状态栏模板字段的设定值（label → 示例值；场记正文未提及时照抄，禁止编造） */
-	statusBarSamples: Record<string, string>;
-	/** 卡图池（开场白/说明里的 [IMG:url|desc] 素材；场记配推文时选用） */
-	statusBarImagePool: string[];
 	/** 宏求值遇到的清单外宏名（供引擎降级告警） */
 	macroWarnings: string[];
 	/** 句级过滤摘掉的验算/格式栈指令行数（可观测性） */
@@ -115,62 +100,6 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 
 	const cardAbs = resolvePath(cwd, config.card);
 	const card = loadCardFile(cardAbs);
-	let statusBarFormats: string[] = [];
-	let statusBarFields: string[] = [];
-	let statusBarSamples: Record<string, string> = {};
-	let statusBarImagePool: string[] = [];
-	try {
-		const rawCard = readCardRawJson(cardAbs).raw;
-		statusBarFormats = cardStatusBarFormats(rawCard);
-		// 状态栏模板字段（工具管道：场记据此生成 status_fields，系统渲染）
-		const template = extractStatusBarTemplate([
-			card.firstMes,
-			...(Array.isArray(card.alternateGreetings) ? card.alternateGreetings : []),
-			card.description,
-			card.personality,
-		]);
-		statusBarFields = template?.fieldLabels ?? [];
-		// 无卡模板但有状态栏意图（<Tag/> 占位符）→ 通用模板兜底（harness 照常按角色生成）
-		if (!template) {
-			const cardTexts = cardTextSources(card);
-			const placeholder = detectStatusPlaceholder(cardTexts);
-			if (placeholder) {
-				template = defaultStatusBarTemplate();
-				statusBarFields = template.fieldLabels;
-				if (statusBarFormats.length === 0) statusBarFormats = [`\`<${placeholder}/>\``];
-			}
-		}
-		statusBarSamples = {};
-		for (const label of statusBarFields) {
-			const sample = template?.rows.find((r) => r.kind === "field" && r.label === label)?.sample;
-			if (sample) statusBarSamples[label] = sample;
-		}
-		// 卡图池：卡全部文本字段 + 世界书条目里的 [IMG:url|desc] 素材（配推文时场记选用）
-		for (const t of cardTextSources(card)) {
-			if (!t) continue;
-			for (const m of t.matchAll(/\[IMG:([^\s|]+)\|([^\]]*)\]/g)) {
-				statusBarImagePool.push(`${m[1]}|${m[2].trim()}`);
-			}
-		}
-		statusBarImagePool = [...new Set(statusBarImagePool)];
-		// 导入诊断：抓到的状态栏信息全量打点（字段/设定值/图池/格式）
-		console.log(
-			`[statusbar-import] 卡「${card.name}」抓取结果：` +
-				`格式=${statusBarFormats.length ? statusBarFormats.join("、") : "（未检测到）"} | ` +
-				`字段=${statusBarFields.length ? statusBarFields.join("、") : "（无）"} | ` +
-				`设定值=${Object.keys(statusBarSamples).length} 项 | 图池=${statusBarImagePool.length} 张`,
-		);
-		if (statusBarImagePool.length) {
-			console.log(`[statusbar-import] 图池前 8 张：${statusBarImagePool.slice(0, 8).join(" ; ")}`);
-		}
-	} catch {
-		statusBarFormats = [];
-		statusBarFields = [];
-		statusBarSamples = {};
-		statusBarImagePool = [];
-		console.log(`[statusbar-import] 卡「${card.name}」抓取失败（异常）`);
-	}
-
 	// 世界书：已挂载独立书（0..N）+ 补充设定集 overlay；卡内 character_book 不自动进上下文
 	const fileGroups: LorebookEntry[][] = [];
 	for (const rel of mountedLorebookPaths(config)) {
@@ -188,17 +117,6 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 	);
 	const entries = protocolFiltered.entries;
 	const protocolDrops = protocolFiltered.dropped;
-	// 世界书条目里的图片素材并入状态栏图池（卡的图常在世界书里，不只开场白）
-	if (statusBarImagePool.length < 60) {
-		for (const e of entries) {
-			if (!e.content) continue;
-			for (const m of e.content.matchAll(/\[IMG:([^\s|]+)\|([^\]]*)\]/g)) {
-				statusBarImagePool.push(`${m[1]}|${m[2].trim()}`);
-			}
-			if (statusBarImagePool.length >= 60) break;
-		}
-		statusBarImagePool = [...new Set(statusBarImagePool)];
-	}
 
 	// 预设：工作草稿（preset-override.json）优先，与预设页签热编辑一致
 	let preset: RpPreset | null = null;
@@ -345,10 +263,6 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 		presetRuleTexts,
 		presetVarSnapshot: macroEnv.vars,
 		presetActive,
-		statusBarFormats,
-		statusBarFields,
-		statusBarSamples,
-		statusBarImagePool,
 		macroWarnings: [...unsupported],
 		auditLinesDropped,
 		protocolDrops,

@@ -102,7 +102,6 @@ import {
 	assistantMediaOfToolResult,
 	isBackstageText,
 	parseCardFromSessionHead,
-	statusBarSnapshotOf,
 	summarizeToolResult,
 	toAssistantHistory,
 	toWireHistory,
@@ -113,17 +112,6 @@ import {
 	type WireStats,
 } from "./wire.ts";
 import { createAssistantHost, type AssistantHost, type StoryBridge } from "./assistant.ts";
-import {
-	buildStatusBarValueSlots,
-	cardTextSources,
-	defaultStatusBarTemplate,
-	detectStatusPlaceholder,
-	extractStatusBarSkin,
-	extractStatusBarTemplate,
-	parseStatusBarBlock,
-	renderStatusBarFromState,
-	renderStatusBarHtml,
-} from "../src/statusbar.ts";
 import { registerAssistantRunner } from "../src/assistant-gateway.ts";
 import { sameCardPath } from "../src/paths.ts";
 import { toggleDisabledLore } from "../src/lorebook.ts";
@@ -384,12 +372,7 @@ watch(stateDir, (_evt, filename) => {
 	clearTimeout(stateDebounce);
 	stateDebounce = setTimeout(() => {
 		try {
-			const st = currentState();
-			broadcast({ type: "state", state: st });
-			// 状态栏快照随账本更新推送（场记生成后账本落盘即触发——message_end
-			// 先于场记完成，只有这里能保证「场记更新 → 左栏立即刷新」）
-			const snap = attachSkinHtml(renderStatusBarSnapshot());
-			if (snap) broadcast({ type: "statusbar", snapshot: snap });
+			broadcast({ type: "state", state: currentState() });
 		} catch {
 			// 读取竞态（写入未完成）：下次事件再推
 		}
@@ -550,165 +533,6 @@ const branchMessages = (): unknown[] => {
 };
 
 /** 从分支消息逆序取最新一条含状态栏的原始消息 → 快照（会话级，天然随树正确） */
-const statusBarSnapshotOfLatest = (): import("./wire.ts").StatusBarSnapshot | null => {
-	for (const m of [...branchMessages()].reverse()) {
-		const snap = statusBarSnapshotOf(m);
-		if (snap) return snap;
-	}
-	return null;
-};
-
-// ---- 状态栏彻底工具化：模板（卡）+ 账本 → 渲染快照 ----
-let statusTemplateCache: { key: string; template: import("../src/statusbar.ts").StatusBarTemplate | null } | null = null;
-/** 模板对应的卡名（主角；角色序排第一） */
-let statusTemplateCharName = "";
-/** 卡自带美化模板（皮肤）：同 key 缓存 */
-let statusSkinCache: { key: string; skin: import("../src/statusbar.ts").StatusBarSkin | null } | null = null;
-
-const statusBarTemplateFor = (): import("../src/statusbar.ts").StatusBarTemplate | null => {
-	let cardRel = "";
-	try {
-		const configPath = resolveConfigPath(cwd);
-		if (existsSync(configPath)) {
-			const cfg = JSON.parse(readFileSync(configPath, "utf8")) as { card?: unknown };
-			if (typeof cfg.card === "string") cardRel = cfg.card;
-		}
-	} catch {
-		/* default */
-	}
-	const key = resolveConfigPath(cwd) + "\u0000" + cardRel;
-	if (statusTemplateCache && statusTemplateCache.key === key) return statusTemplateCache.template;
-	let template: import("../src/statusbar.ts").StatusBarTemplate | null = null;
-	try {
-		if (cardRel) {
-			const cardPath = isAbsolute(cardRel) ? cardRel : join(cwd, cardRel);
-			const card = loadCardFile(cardPath);
-			statusTemplateCharName = card.name;
-			template = extractStatusBarTemplate(cardTextSources(card));
-			// 无卡模板但有状态栏意图（<Tag/> 占位符）→ 通用模板兜底（与 materials 同规则）
-			if (!template) {
-				const placeholder = detectStatusPlaceholder(cardTextSources(card));
-				if (placeholder) template = defaultStatusBarTemplate();
-			}
-			// 皮肤：卡自带美化模板（regex_scripts 的 replaceString HTML 链）
-			// 学习映射：用卡示例块跑一次 findRegex，组值 ↔ 示例字段值对齐
-			try {
-				const rawCard = readCardRawJson(cardPath).raw;
-				const fieldSamples = template
-					? [
-							...template.head.split("|").map((seg) => {
-								const s = seg.trim();
-								const ci = s.indexOf("：");
-								const ci2 = s.indexOf(":");
-								const idx = ci < 0 ? ci2 : ci2 < 0 ? ci : Math.min(ci, ci2);
-								return idx > 0 ? s.slice(idx + 1).replace(/[』」」\]]+$/, "").trim() : "";
-							}),
-							...template.fieldLabels
-								.map((l) => template.rows.find((r) => r.kind === "field" && r.label === l)?.sample ?? "")
-								.filter((x) => x),
-						]
-					: undefined;
-				statusSkinCache = {
-					key,
-					skin: extractStatusBarSkin(rawCard, template?.raw, fieldSamples),
-				};
-			} catch {
-				statusSkinCache = { key, skin: null };
-			}
-		}
-	} catch {
-		template = null;
-	}
-	statusTemplateCache = { key, template };
-	return template;
-};
-
-const statusSkinFor = (): import("../src/statusbar.ts").StatusBarSkin | null => {
-	statusBarTemplateFor(); // 确保缓存就位
-	if (!statusSkinCache || statusSkinCache.key !== statusTemplateCache?.key) return null;
-	return statusSkinCache.skin;
-};
-
-const templateCharName = (): string => statusTemplateCharName;
-
-/** 模板 + 账本 → 状态栏快照（多角色；无模板或无字段则 null） */
-const renderStatusBarSnapshot = (): import("./wire.ts").StatusBarSnapshot | null => {
-	const template = statusBarTemplateFor();
-	if (!template) {
-		console.log("[stage-statusbar] 渲染：模板为空（卡无状态栏示例？）");
-		return null;
-	}
-	const state = currentState();
-	if (!state) {
-		console.log("[stage-statusbar] 渲染：账本为空");
-		return null;
-	}
-	const buckets = state.status_fields ?? {};
-	if (Object.keys(buckets).length === 0 && !state.time && !state.location) {
-		console.log("[stage-statusbar] 渲染：账本无 status_fields 字段");
-		return null;
-	}
-	const skin = statusSkinFor();
-	// 角色序：账本出场序（characters 键优先），主角（卡名）排第一
-	const names = [...new Set([templateCharName(), ...Object.keys(buckets)])];
-	const characters: import("./wire.ts").StatusBarCharacter[] = [];
-	for (const name of names) {
-		const bucket = buckets[name];
-		if (!bucket || Object.keys(bucket).length === 0) continue;
-		const text = renderStatusBarFromState(template, state, bucket);
-		const snap = parseStatusBarBlock(text, name);
-		if (!snap.characters[0]) continue;
-		const ch = snap.characters[0];
-		// 卡自带美化模板：值槽填充 → HTML（模板填充，非正则脚本）
-		if (skin) {
-			const slots = buildStatusBarValueSlots(template, state, bucket);
-			// 配图回填：账本字段里可能含 [IMG:...]（子字段/合并文本）
-			for (const v of Object.values(bucket)) {
-				if (v && v.includes("[IMG:")) slots.push(v);
-			}
-			ch.html = renderStatusBarHtml(skin, slots, template);
-		}
-		characters.push(ch);
-	}
-	if (characters.length === 0) return null;
-	return { characters, raw: characters.map((c) => c.name).join("、") };
-};
-
-/** 快照统一补皮肤 HTML：无论来源（账本渲染 / 历史回退），有皮肤模板就生成 html */
-const attachSkinHtml = (snap: import("./wire.ts").StatusBarSnapshot | null): import("./wire.ts").StatusBarSnapshot | null => {
-	if (!snap) return snap;
-	const template = statusBarTemplateFor();
-	const skin = statusSkinFor();
-	if (!template || !skin) return snap;
-	const state = currentState();
-	for (const ch of snap.characters) {
-		const values: Record<string, string> = {};
-		// head 段（📅 日期：x | ⏰ 时间：y…）解析成值
-		for (const seg of ch.head.split("|")) {
-			const s = seg.trim();
-			const ci = s.indexOf("：");
-			const ci2 = s.indexOf(":");
-			const idx = ci < 0 ? ci2 : ci2 < 0 ? ci : Math.min(ci, ci2);
-			if (idx <= 0) continue;
-			const label = s.slice(0, idx).trim();
-			const val = s.slice(idx + 1).replace(/[』」」\]]+$/, "").trim();
-			if (label && val) values[label] = val;
-		}
-		for (const f of ch.fields) values[f.label] = f.value;
-		const slots = buildStatusBarValueSlots(template, state ?? {}, values);
-		// 配图回填：子字段（如 📸 配图）里的 [IMG:...] 也要进扫描范围
-		for (const v of Object.values(values)) {
-			if (v && v.includes("[IMG:")) slots.push(v);
-		}
-		ch.html = renderStatusBarHtml(skin, slots, template);
-	}
-	return snap;
-};
-
-/** hello / message_end 共用的快照来源：渲染优先（工具化），无则回退历史扫描（老格式兼容） */
-const statusBarSnapshotFor = (): import("./wire.ts").StatusBarSnapshot | null =>
-	attachSkinHtml(renderStatusBarSnapshot() ?? statusBarSnapshotOfLatest());
-
 const helloFrame = (): ServerFrame => {
 	const cardfront = loadCardFrontSnapshot(cwd);
 	const skin =
@@ -730,7 +554,6 @@ const helloFrame = (): ServerFrame => {
 		panels: currentPanels(),
 		// 一档皮肤与消息同帧:首屏不得依赖二次 REST(缓存/竞态会让 StatusBlock 回落统一面板)
 		cardfront,
-		statusbar: statusBarSnapshotFor(),
 	};
 };
 
@@ -1133,9 +956,6 @@ const bindSession = async () => {
 					// 中间 tool 轮 / 纯工具轮被过滤：清掉前端流式半成品，整轮只保留一个角色气泡
 					broadcast({ type: "stream", state: "clear" });
 				}
-				// 状态栏快照：渲染优先（模板+账本，工具化）；无渲染结果回退本拍消息原文（老格式兼容）
-				const snap = renderStatusBarSnapshot() ?? statusBarSnapshotOf(event.message);
-				if (snap) broadcast({ type: "statusbar", snapshot: snap });
 				break;
 			}
 			case "tool_execution_start": {
@@ -2327,14 +2147,6 @@ const stage = new StageEngine({
 		onStreamClear: () => broadcast({ type: "stream", state: "clear" }),
 		onNotify: (level, text) => broadcast({ type: "notify", level, text }),
 		onActivity: (detail) => broadcast({ type: "activity", activity: { kind: "note", name: "stage", detail } }),
-		// 状态栏字段更新完成：确定性广播最新快照（不依赖 fs.watch——容器卷环境不可靠）
-		onStatusBarUpdated: () => {
-			const snap = attachSkinHtml(renderStatusBarSnapshot());
-			console.log(
-				`[stage-statusbar] 推送：${snap ? `快照（${snap.characters.length} 角色）` : "renderStatusBarSnapshot 返回 null"}`,
-			);
-			if (snap) broadcast({ type: "statusbar", snapshot: snap });
-		},
 		onTurnEnd: (info) => {
 			broadcast({ type: "agent", state: "end" });
 			// reroll/编辑输入后无产出（aborted 无落树 / error）：回退到 reroll 前的旧叶——

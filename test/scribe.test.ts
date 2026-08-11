@@ -1,14 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-	buildLoreAliasPrompt,
-	buildScribeTurnPrompt,
-	buildStatusBarCompletionPrompt,
-	parseLoreAliases,
-	parseScribeResult,
-	parseStatusBarCompletion,
-} from "../src/scribe.ts";
+import { buildLoreAliasPrompt, buildScribeTurnPrompt, parseLoreAliases, parseScribeResult } from "../src/scribe.ts";
 import { withAliases } from "../src/lorebook.ts";
 import { defaultState } from "../src/state.ts";
 import type { LorebookEntry } from "../src/types.ts";
@@ -103,36 +96,6 @@ test("withAliases：合入去重、不改原条目", () => {
 	assert.deepEqual(src[0].keys, ["gloomhound"], "原条目不可变");
 });
 
-test("状态栏生成：prompt 读正文生成、设定字段照抄、图池配图", () => {
-	const { systemPrompt, userText } = buildStatusBarCompletionPrompt({
-		fieldLabels: ["👤 姓名", "📝 当前行动", "💭 当前内心"],
-		current: { 苏小棉: { "👤 姓名": "苏小棉" } },
-		sampleFields: { "🆔 账号": "@mianbao_JK ✔", "📊 粉丝数": "28.5万" },
-		imagePool: ["https://files.catbox.moe/luuh50.png|俯拍角度，JK百褶裙"],
-		knownCharacters: ["苏小棉", "旅人"],
-		userText: "我走进包厢。",
-		assistantText: "她假装伸懒腰。",
-		charName: "苏小棉",
-		userName: "旅人",
-	});
-	assert.ok(systemPrompt.includes("👤 姓名"), "字段清单在场");
-	assert.ok(systemPrompt.includes("正文写了什么，状态栏就是什么"), "读正文生成语义在场");
-	assert.ok(systemPrompt.includes("禁止编造"), "设定字段照抄纪律在场");
-	assert.ok(systemPrompt.includes("@mianbao_JK ✔"), "卡设定值在场");
-	assert.ok(systemPrompt.includes("卡图池"), "图池在场");
-	assert.ok(systemPrompt.includes("luuh50.png"), "图池素材在场");
-	assert.ok(systemPrompt.includes("根据本拍剧情虚构一条符合角色人设"), "推文生成纪律在场");
-	assert.ok(userText.includes("旅人（用户）：我走进包厢。"), "用户输入归属正确");
-	assert.ok(userText.includes("苏小棉：她假装伸懒腰。"), "正文归属主角");
-});
 
-test("状态栏生成：解析多角色 status_fields", () => {
-	const r = parseStatusBarCompletion(`好的，以下是生成：
-\`\`\`json
-{"status_fields": {"苏小棉": {"👤 姓名": "苏小棉（棉棉喵）", "📝 当前行动": "假装伸懒腰"}, "旅人": {"👤 姓名": "旅人"}}}
-\`\`\``);
-	assert.ok(r);
-	assert.equal(r?.statusFields["苏小棉"]["👤 姓名"], "苏小棉（棉棉喵）");
-	assert.equal(r?.statusFields["旅人"]["👤 姓名"], "旅人");
-	assert.equal(parseStatusBarCompletion("无法解析"), null);
-});
+
+

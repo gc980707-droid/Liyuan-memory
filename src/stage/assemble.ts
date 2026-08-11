@@ -239,9 +239,6 @@ export interface StageSystemOptions {
 	/** writing_guide 可用主题（skill 包非空才有；空＝工具未挂，只字不提） */
 	skillTopics?: string[];
 	presetActive?: boolean;
-	statusBarFormats?: string[];
-	/** 卡状态栏模板的字段清单（工具化渲染：模型据此记账 status_fields） */
-	statusBarFields?: string[];
 	/** false = 不声明检索工具（M1 前过渡形态；M3 起默认开） */
 	tools?: boolean;
 	/**
@@ -252,42 +249,6 @@ export interface StageSystemOptions {
 }
 
 /** 状态栏格式条目是否占位符型（自闭合 <Tag/>——界面由卡渲染，模型只留占位） */
-export function isPlaceholderStatusFormat(f: string): boolean {
-	return /\/>\s*$/.test(f.trim().replace(/^`|`$/g, ""));
-}
-
-/**
- * 状态栏提示词（harness 读正文生成）：
- * - 占位符型（自闭合 <Tag/>）：界面由卡渲染，模型只留占位符——维持原语义。
- * - 面板型（成对）：主演零负担——不写格式块、不记账状态栏；harness 读正文生成。
- */
-export function buildStatusBarPrompt(
-	statusBarFormats: string[],
-	statusBarFields?: string[],
-): string {
-	const placeholders = statusBarFormats.filter(isPlaceholderStatusFormat);
-	const panels = statusBarFormats.filter((f) => !isPlaceholderStatusFormat(f));
-	const parts: string[] = [];
-	// 占位符型：无字段清单时才是「模型输出占位符」；有字段（通用模板兜底）→ 系统生成
-	const hasFields = !!statusBarFields && statusBarFields.length > 0;
-	if (placeholders.length > 0 && !hasFields) {
-		parts.push(
-			`本卡用占位符渲染状态栏界面：每拍在正文之后**原样输出** ${placeholders.join("；")}（自闭合标签，` +
-				`不要展开成成对写法、不要往里填内容——界面由卡自动渲染）`,
-		);
-	}
-	if (panels.length > 0) {
-		const fieldHint =
-			statusBarFields && statusBarFields.length > 0
-				? `——字段：${statusBarFields.slice(0, 24).join("、")}${statusBarFields.length > 24 ? ` 等共 ${statusBarFields.length} 项` : ""}`
-				: "";
-		parts.push(
-			`状态栏由剧场读你的正文自动生成${fieldHint}——你不需要输出任何状态栏格式块、也不需要记账状态字段。`,
-		);
-	}
-	return `${parts.join("；")}——这是卡作者设计的一部分，不依赖预设是否开启。`;
-}
-
 export function buildStageSystemPrompt({
 	card,
 	config,
@@ -295,8 +256,6 @@ export function buildStageSystemPrompt({
 	presetResident,
 	skillTopics,
 	presetActive,
-	statusBarFormats,
-	statusBarFields,
 	tools,
 	mcpTools,
 }: StageSystemOptions): string {
@@ -343,13 +302,7 @@ ${
 
 # 输出结构
 1. **正文**：纯剧情叙事与对白。不要把正文包进 \`<content>\` 之类的分析标签，不要写 HTML 注释式导演旁注。篇幅：有用户预设则跟预设；无预设时可见正文约 800–1500 字（短打约 400）。
-2. **状态栏**：${
-			statusBarFormats && statusBarFormats.length > 0
-				? `本卡定义了状态栏。${buildStatusBarPrompt(statusBarFormats, statusBarFields)}`
-				: `本卡未检测到状态栏格式；**不要硬造**状态栏。若卡作者在说明里另有约定，按卡作者格式执行。`
-		}`,
-	);
-
+	`);
 	if (tools !== false) {
 		sections.push(
 			`# 怎么演这一拍
@@ -452,9 +405,6 @@ export interface StageInjectionOptions {
 	/** M-C：postHistory 通道的预设常驻内容（引擎每拍按真实求值内容拆层产出） */
 	presetTail?: PresetResidentContent;
 	presetActive?: boolean;
-	statusBarFormats?: string[];
-	/** 卡状态栏模板的字段清单（工具化渲染：模型据此记账 status_fields） */
-	statusBarFields?: string[];
 	/** 上一拍语言错误（自动检测，harness 注入） */
 	languageMismatch?: boolean;
 	/** 活跃面板全文快照（formatPanelSnapshot 产出）或一行速览 */
@@ -482,8 +432,6 @@ export function buildStageInjection({
 	config,
 	presetTail,
 	presetActive,
-	statusBarFormats,
-	statusBarFields,
 	languageMismatch,
 	panelIndex,
 	rehearsalGuard,
@@ -573,26 +521,6 @@ export function buildStageInjection({
 	notes.push(`演完本拍即停，停在 ${config.userName} 可接话处；不连演多拍，不写总结式收场白。`);
 	blocks.push(`【导演备注】\n${notes.join("\n")}`);
 
-	// 状态栏独立成块（P9：一个提醒一件事，不挤进导演备注）。
-	// 彻底工具化（8/10）：面板型状态栏由系统在拍末自动渲染——模型只记账，不写格式块。
-	// 占位符型（自闭合 <Tag/>）仍由模型输出占位符（界面由卡渲染）。
-	if (statusBarFormats && statusBarFormats.length > 0) {
-		const placeholders = statusBarFormats.filter(isPlaceholderStatusFormat);
-		const panels = statusBarFormats.filter((f) => !isPlaceholderStatusFormat(f));
-		if (placeholders.length > 0 && panels.length === 0 && !(statusBarFields && statusBarFields.length > 0)) {
-			blocks.push(
-				`【状态栏】本卡扮演的一部分：本拍所有剧情（含续写与 ask）完成后，原样输出 ${placeholders.join(" 或 ")}（自闭合占位符，界面由卡渲染）。状态栏意味着本拍结束——它必须是最后的产出，漏写即未完成本拍。`,
-			);
-		} else {
-			const fieldHint =
-				statusBarFields && statusBarFields.length > 0
-					? `（字段：${statusBarFields.slice(0, 24).join("、")}${statusBarFields.length > 24 ? ` 等共 ${statusBarFields.length} 项` : ""}）`
-					: "";
-			blocks.push(
-				`【状态栏】本卡的状态栏由剧场读你的正文自动生成${fieldHint}——**你不需要输出任何状态栏标签或格式块**，也不需要记账状态字段。正文写的是什么，状态栏就是什么。`,
-			);
-		}
-	}
 	if (languageMismatch) {
 		blocks.push(
 			`【语言纠正】你上一拍使用了错误的语言。从本拍起，全部叙事与对白必须使用${config.language}（专有名词可保留原文）。这是硬性要求，立即纠正。`,

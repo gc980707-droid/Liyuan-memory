@@ -60,7 +60,7 @@ import {
 	type CompactOutcome,
 	type RpSummaryData,
 } from "./compact.ts";
-import { runScribeTurn, runStatusBarCompletion, STATE_ENTRY_TYPE } from "./scribe-run.ts";
+import { runScribeTurn, STATE_ENTRY_TYPE } from "./scribe-run.ts";
 import {
 	MAX_ROUNDS,
 	runStageTool,
@@ -185,8 +185,6 @@ export interface StageEvents {
 	onNotify?: (level: "info" | "warning" | "error", text: string) => void;
 	/** 过程条短句（验收/修订进度；kind:"note" 形态，无需工具名） */
 	onActivity?: (detail: string) => void;
-	/** 状态栏字段更新完成（场记落账后确定性回调——不依赖 fs.watch，容器/卷环境可靠） */
-	onStatusBarUpdated?: () => void;
 }
 
 export interface StageEngineDeps {
@@ -316,9 +314,9 @@ function roundCardFor(
 	}
 	// 谢幕卡（8/09 review）：已封笔后不再催演/催构思——sealed 语境下回看/续写/
 	// 收笔评估卡全部失效（实弹：seal 后的记账轮被回看卡催「构思下一段」）。
-	// 封笔后的剩余正务只有记账与谢幕：状态栏由 harness 读正文自动生成（主演零负担）。
+	// 封笔后的剩余正务只有记账与谢幕。
 	if (ws.appends > 0 && ws.sealed) {
-		return `【谢幕】已封笔，不要再写正文。世界有变动（时间/地点/关系/物品/伏笔）就先 \`world_state_update\` 记账；状态栏会自动生成，不需要你输出、也不需要记账状态栏字段。没有要记的直接停笔。`;
+		return `【谢幕】已封笔，不要再写正文。世界有变动（时间/地点/关系/物品/伏笔）就先 \`world_state_update\` 记账；没有要记的直接停笔。`;
 	}
 	if (ws.appends > 0 && ws.plan.some((s) => !s.done)) {
 		return (
@@ -344,7 +342,7 @@ function roundCardFor(
 				`承接刚写下的，续写这一拍的自然下文——设定/世界书里的下一步（如「润墨之后的试墨」）。一段一段演。\n` +
 				`续写中涉及 ${userName} 的行动或选择，用 \`ask\` 停下来问；` +
 				`写到字数达标、戏到停点，用 \`draft_seal\` 收笔。` +
-				`收笔后状态栏自动生成，你只写正文、只记账世界事实，不需要输出任何格式块。思考全程用中文。`
+				`你只写正文、只记账世界事实，不需要输出任何格式块。思考全程用中文。`
 			);
 		}
 		// 收笔评估卡（8/09 卡序纠正）：ask/续写判断必须在 seal **之前**——旧卡把
@@ -592,7 +590,6 @@ export class StageEngine {
 		const wsDeps: WorkspaceDeps = {
 			rules: extractDraftRules(
 				[...materials.presetRuleTexts, ...phAll.map((b) => b.content)],
-				materials.statusBarFormats,
 			),
 			userName: config.userName,
 			charName: card.name,
@@ -611,8 +608,6 @@ export class StageEngine {
 			},
 			skillTopics,
 			presetActive: materials.presetActive,
-			statusBarFormats: materials.statusBarFormats,
-			statusBarFields: materials.statusBarFields,
 			tools: tools.length > 0,
 			// MCP 外设索引进 system（不进每拍注入）：会话内字节稳定，不破前缀缓存。
 			// 与旧 director.ts 同一位置——工具清单里有 mcp__ 工具，这里说明它们是什么。
@@ -625,8 +620,6 @@ export class StageEngine {
 			config,
 			presetTail: phTail,
 			presetActive: materials.presetActive,
-			statusBarFormats: materials.statusBarFormats,
-			statusBarFields: materials.statusBarFields,
 			languageMismatch,
 			panelIndex,
 			// P14：rehearsalGuard 默认开——「思考的用法」是轮次纪律的一部分（只读题、
@@ -865,45 +858,6 @@ export class StageEngine {
 			sm.flush();
 		}
 
-		// 状态栏生成（harness 读正文）：卡有状态栏模板 → 每拍必调一次旁侧模型，
-		// 基于**最新账本**（主演 patches + 场记补账）写 status_fields，不被后续覆盖。
-		if (entryId && !aborted && finalText && materials.statusBarFields.length > 0) {
-			const knownCharacters = [
-				...(Object.keys(ledgerState.characters).length ? Object.keys(ledgerState.characters) : [materials.card.name]),
-				materials.config.userName,
-			];
-			ev.onActivity?.(`状态栏生成（读正文 · ${materials.statusBarFields.length} 字段）`);
-			const r = await runStatusBarCompletion(
-				{
-					sideText: (sp, ut) => this.#sideText(model, sp, ut, { apiKey, headers }, 4096),
-					appendStateEntry: (s) => sm.appendCustomEntry(STATE_ENTRY_TYPE, s),
-					getLeafId: () => sm.getLeafId(),
-					stateFile: this.#deps.getStateFile?.(sm.getSessionId()),
-					onActivity: (d) => ev.onActivity?.(d),
-				},
-				{
-					state: ledgerState,
-					userText: lastUserText,
-					assistantText: finalText,
-					charName: materials.card.name,
-					userName: materials.config.userName,
-					fieldLabels: materials.statusBarFields,
-					knownCharacters,
-					sampleFields: materials.statusBarSamples,
-					imagePool: materials.statusBarImagePool,
-				},
-			);
-			console.log(`[stage-statusbar] 结果：${r.kind}${r.kind === "failed" ? " · " + r.error : ""}`);
-			if (r.kind === "failed") console.error(`[stage-statusbar] 生成跳过：${r.error}`);
-			// 确定性推送：账本已更新，通知 server 广播最新快照（fs.watch 在容器卷上不可靠）
-			if (r.kind === "applied" || r.kind === "stale") ev.onStatusBarUpdated?.();
-			sm.flush();
-		} else if (materials.statusBarFields.length > 0) {
-			console.log(
-				`[stage-statusbar] 未调用：entryId=${!!entryId} aborted=${aborted} finalText=${!!finalText} fields=${materials.statusBarFields.length}`,
-			);
-		}
-
 		// M4 长局压缩：攒够拍数就把早期剧情摘要成 rp-summary（装配时回读为【前情提要】）。
 		// 放在谢幕前的最后一步——记账已落，摘要能读到最新账本；叶守卫在 runCompaction 内。
 		// 压缩失败/未到期都只是跳过，下一拍会再判一次。
@@ -1120,7 +1074,7 @@ export class StageEngine {
 									`你的正文已被代收为 draft_write（正文本应经此工具提交）。验收报告：\n${r.text}\n` +
 									(o.ws.plan.length > 0
 											? `你列了路标却把整拍一次直出——已代收，不推倒重来。接下来自决：` +
-												`戏还没演完就用 draft_append 接着演；演完了就收笔（状态栏由系统自动生成）。`
+												`戏还没演完就用 draft_append 接着演；演完了就收笔。`
 											: `如需修改请调用 draft_write 重新提交完整正文；无需修改则直接结束。`),
 							},
 						],
@@ -1396,7 +1350,7 @@ export class StageEngine {
 			// 散场，状态栏没了）。8/10 工具化：状态栏由系统自动生成，只需提醒记账收场。
 			convo.push(
 				nowMsg(
-					`【收场】本拍轮次已达上限，工具已收起。世界/状态有变先 \`world_state_update\` 记账（时间/地点/关系/物品/伏笔）；状态栏会自动生成。就此收场，不要再写正文。`,
+					`【收场】本拍轮次已达上限，工具已收起。世界/状态有变先 \`world_state_update\` 记账（时间/地点/关系/物品/伏笔）；就此收场，不要再写正文。`,
 				),
 			);
 			}

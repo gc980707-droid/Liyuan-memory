@@ -4,7 +4,6 @@ import { test } from "node:test";
 import {
 	foldTurnNarratives,
 	parseCardFromSessionHead,
-	statusBarSnapshotOf,
 	summarizeToolResult,
 	toWireHistory,
 	toWireMsg,
@@ -135,16 +134,9 @@ test("显示层剥预设脚手架：draft_notes/content/HTML 注释；假思维�
 	assert.ok(!w?.text.includes("分析要点"));
 	assert.ok(!w?.text.includes("<content>"));
 	assert.ok(!w?.text.includes("Prism"));
-	// 状态栏工具管道：正文剥离，快照单独提取（左栏「当前状态」数据源）
+	// 状态栏剥离：格式块不出现在正文（防御）
 	assert.ok(!w?.text.includes("StatusBlock"), "状态栏不出现在正文");
 	assert.ok(!w?.text.includes("地点:御书房"), "状态栏不出现在正文");
-	const snap = statusBarSnapshotOf(msg);
-	assert.ok(snap, "快照可提取");
-	assert.ok(
-		snap?.characters[0]?.head.includes("地点:御书房") ||
-			snap?.characters[0]?.fields.some((f) => f.label.includes("地点")),
-		"快照含状态栏内容",
-	);
 	assert.ok(w?.thinking?.includes("分析要点"), "草稿进折叠思维链");
 });
 

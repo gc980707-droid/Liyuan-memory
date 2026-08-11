@@ -223,11 +223,9 @@ export function writeTools(language: string): StageTool[] {
 			description:
 				"提交世界状态账本补丁（合并语义）：time/location 字符串整体替换；characters 按角色名合并字段" +
 				"（affinity 数值/status/notes，传 null 删除该角色）；flags 按键合并（null 删除）；" +
-				"inventory/plot_threads 传**字符串数组**整体替换（如 [\"补气丹（已服用）\"]，元素不能是对象）；" +
-				"status_fields 按字段键合并（null 删除）——**卡状态栏字段**记在这里，键用卡定义的字段名" +
-				"（如 \"👤 姓名\"/\"📝 当前行动\"/\"💭 当前内心\"），系统会在拍末自动渲染状态栏。" +
+				"inventory/plot_threads 传**字符串数组**整体替换（如 [\"补气丹（已服用）\"]，元素不能是对象）。" +
 				"本拍剧情改变了世界（时间流逝/移动/关系变化/" +
-				"获得失去物品/剧情推进/状态栏字段变化）就在定稿前提交——你是唯一知道现场发生了什么的人，不提交账本就会漂移。",
+				"获得失去物品/剧情推进）就在定稿前提交——你是唯一知道现场发生了什么的人，不提交账本就会漂移。",
 			parameters: {
 				type: "object",
 				properties: {
