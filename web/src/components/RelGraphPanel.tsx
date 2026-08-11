@@ -175,17 +175,25 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 			panRef.current = { px: vb.x, py: vb.y };
 		}
 	};
-	const onUp = () => {
+	const onUp = (ev: React.PointerEvent) => {
+		const wasPan = panRef.current !== null;
+		const wasNodeDrag = dragRef.current !== null;
 		dragRef.current = null;
 		panRef.current = null;
+		// 非拖拽的点击：命中检测选中角色（拖过节点/平移过视口不算点击）
+		if (!wasPan && !wasNodeDrag) {
+			const w = toWorld(ev.clientX, ev.clientY);
+			const hit = nodes.find((n) => Math.hypot(n.x - w.x, n.y - w.y) <= NODE_R + 6);
+			if (hit) setSelected((cur) => (cur === hit.name ? null : hit.name));
+			else setSelected(null);
+		}
 	};
 
 	// 悬停详情
 	const [hover, setHover] = useState<RelationshipEdge | null>(null);
 	const [hoverNode, setHoverNode] = useState<string | null>(null);
-	// 选中角色（点击节点弹出信息卡）
+	// 选中角色（点击节点弹出信息卡，pointerup 命中检测设置）
 	const [selected, setSelected] = useState<string | null>(null);
-	const selectNode = (name: string) => setSelected((cur) => (cur === name ? null : name));
 
 	// 节点拖拽按下：记录偏移（鼠标与节点中心的差），保证跟手；捕获到 svg（move 事件统一走 svg）
 	const onNodeDown = (idx: number, ev: React.PointerEvent) => {
@@ -276,7 +284,6 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 									className="relgraph-node"
 									transform={`translate(${n.x},${n.y})`}
 									onPointerDown={(ev) => onNodeDown(idx, ev)}
-									onClick={() => selectNode(n.name)}
 									onMouseEnter={() => setHoverNode(n.name)}
 									onMouseLeave={() => setHoverNode(null)}
 									style={{ cursor: "grab" }}

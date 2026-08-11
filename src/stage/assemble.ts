@@ -16,6 +16,7 @@ import { applyDraftOps, type DraftMsgLike } from "../draft.ts";
 import { cleanAssistantText } from "../postprocess.ts";
 import { formatState, defaultState } from "../state.ts";
 import { isBackstageText } from "../stance.ts";
+import { stripAllStatusBarArtifacts } from "../statusbar.ts";
 import type { PresetBlock } from "../preset.ts";
 import type { CharacterCard, LorebookEntry, MacroContext, RpConfig, WorldState } from "../types.ts";
 
@@ -160,6 +161,9 @@ export function rebuildHistory(branch: BranchEntryLike[]): RebuiltHistory {
 		const role = (m as { _role?: "user" | "assistant" })._role ?? (m.role === "user" ? "user" : "assistant");
 		let text = textOf(m.content);
 		if (role === "assistant") text = cleanAssistantText(text);
+		// 历史上下文剥离状态栏（旧拍模型输出的 <Status_block>/占位符残留——显示层已剥，
+		// 上下文也剥，模型不再从历史学写状态栏）
+		text = stripAllStatusBarArtifacts(text);
 		text = text.trim();
 		if (!text) continue;
 		const prev = history[history.length - 1];
