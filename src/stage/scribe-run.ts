@@ -100,9 +100,15 @@ export async function runScribeTurn(deps: ScribeRunDeps, input: ScribeRunInput):
  */
 export async function runStatusBarCompletion(
 	deps: ScribeRunDeps,
-	input: ScribeRunInput & { fieldLabels: string[]; knownCharacters: string[]; sampleFields: Record<string, string> },
+	input: ScribeRunInput & {
+		fieldLabels: string[];
+		knownCharacters: string[];
+		sampleFields: Record<string, string>;
+		imagePool: string[];
+	},
 ): Promise<ScribeRunOutcome> {
-	const { state, userText, assistantText, charName, userName, fieldLabels, knownCharacters, sampleFields } = input;
+	const { state, userText, assistantText, charName, userName, fieldLabels, knownCharacters, sampleFields, imagePool } =
+		input;
 	if (fieldLabels.length === 0) return { kind: "skipped", reason: "no-fields" };
 	if (!assistantText.trim()) return { kind: "skipped", reason: "no-text" };
 
@@ -111,6 +117,7 @@ export async function runStatusBarCompletion(
 		fieldLabels,
 		current: state.status_fields ?? {},
 		sampleFields,
+		imagePool,
 		knownCharacters,
 		userText,
 		assistantText,

@@ -78,6 +78,8 @@ export interface StageMaterials {
 	statusBarFields: string[];
 	/** 卡状态栏模板字段的设定值（label → 示例值；场记正文未提及时照抄，禁止编造） */
 	statusBarSamples: Record<string, string>;
+	/** 卡图池（开场白/说明里的 [IMG:url|desc] 素材；场记配推文时选用） */
+	statusBarImagePool: string[];
 	/** 宏求值遇到的清单外宏名（供引擎降级告警） */
 	macroWarnings: string[];
 	/** 句级过滤摘掉的验算/格式栈指令行数（可观测性） */
@@ -111,6 +113,7 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 	let statusBarFormats: string[] = [];
 	let statusBarFields: string[] = [];
 	let statusBarSamples: Record<string, string> = {};
+	let statusBarImagePool: string[] = [];
 	try {
 		const rawCard = readCardRawJson(cardAbs).raw;
 		statusBarFormats = cardStatusBarFormats(rawCard);
@@ -127,10 +130,24 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 			const sample = template?.rows.find((r) => r.kind === "field" && r.label === label)?.sample;
 			if (sample) statusBarSamples[label] = sample;
 		}
+		// 卡图池：开场白/说明里的 [IMG:url|desc] 素材（配推文时场记选用）
+		for (const t of [
+			card.firstMes,
+			...(Array.isArray(card.alternateGreetings) ? card.alternateGreetings : []),
+			card.description,
+			card.personality,
+		]) {
+			if (!t) continue;
+			for (const m of t.matchAll(/\[IMG:([^\s|]+)\|([^\]]*)\]/g)) {
+				statusBarImagePool.push(`${m[1]}|${m[2].trim()}`);
+			}
+		}
+		statusBarImagePool = [...new Set(statusBarImagePool)];
 	} catch {
 		statusBarFormats = [];
 		statusBarFields = [];
 		statusBarSamples = {};
+		statusBarImagePool = [];
 	}
 
 	// 世界书：已挂载独立书（0..N）+ 补充设定集 overlay；卡内 character_book 不自动进上下文
@@ -299,6 +316,7 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 		statusBarFormats,
 		statusBarFields,
 		statusBarSamples,
+		statusBarImagePool,
 		macroWarnings: [...unsupported],
 		auditLinesDropped,
 		protocolDrops,
