@@ -1,7 +1,7 @@
 /**
  * 人物关系图（左栏面板）：SVG 力导向图。
  * 数据源：账本 WorldState.relationships（harness 每拍从正文提取）。
- * 精细呈现：好感度着色连线、关系标签、节点光晕、拖拽、悬停详情、图例。
+ * 交互：滚轮缩放（以光标为锚）、拖拽平移、节点拖拽（跟手）、悬停详情、图例。
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -62,7 +62,6 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 
 	// 力导向布局（Fruchterman-Reingold 简化：斥力 + 弹簧 + 中心引力）
 	const [nodes, setNodes] = useState<NodePos[]>([]);
-	const dragRef = useRef<number | null>(null);
 	useEffect(() => {
 		if (names.length === 0) return;
 		const seed: NodePos[] = names.map((name, i) => {
@@ -71,11 +70,9 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 			return { name, x: W / 2 + Math.cos(ang) * rad, y: H / 2 + Math.sin(ang) * rad, fx: null, fy: null };
 		});
 		const pos = new Map(seed.map((n) => [n.name, n]));
-		const edgeList = edges.length ? edges : [];
 		const ITER = 160;
 		for (let it = 0; it < ITER; it++) {
 			const k = 0.55;
-			// 斥力
 			for (let i = 0; i < seed.length; i++) {
 				for (let j = i + 1; j < seed.length; j++) {
 					const a = seed[i];
@@ -93,8 +90,7 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 					b.y -= dy;
 				}
 			}
-			// 弹簧（关系边）
-			for (const e of edgeList) {
+			for (const e of edges) {
 				const a = pos.get(e.a);
 				const b = pos.get(e.b);
 				if (!a || !b) continue;
@@ -110,7 +106,6 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 				b.x -= dx;
 				b.y -= dy;
 			}
-			// 中心引力 + 边界
 			for (const n of seed) {
 				if (n.fx === null) n.x += (W / 2 - n.x) * 0.012;
 				if (n.fy === null) n.y += (H / 2 - n.y) * 0.012;
@@ -120,28 +115,86 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 		}
 		setNodes(seed);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [names.join("|"), edges.length]);
+	}, [names.join("|")]);
+
+	// 视口变换（缩放 + 平移）
+	const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 });
+	const svgRef = useRef<SVGSVGElement>(null);
+	const dragRef = useRef<number | null>(null);
+	const dragOffsetRef = useRef({ dx: 0, dy: 0 });
+	const panRef = useRef<{ px: number; py: number } | null>(null);
+
+	/** 屏幕坐标 → viewBox 坐标（含缩放平移） */
+	const toViewBox = (clientX: number, clientY: number): { x: number; y: number } => {
+		const svg = svgRef.current;
+		if (!svg) return { x: 0, y: 0 };
+		const rect = svg.getBoundingClientRect();
+		return {
+			x: ((clientX - rect.left) / rect.width) * W,
+			y: ((clientY - rect.top) / rect.height) * H,
+		};
+	};
+	/** 屏幕坐标 → 世界坐标（viewBox 变换前） */
+	const toWorld = (clientX: number, clientY: number): { x: number; y: number } => {
+		const vb = toViewBox(clientX, clientY);
+		return { x: (vb.x - view.tx) / view.scale, y: (vb.y - view.ty) / view.scale };
+	};
+
+	// 滚轮缩放（以光标为锚）
+	const onWheel = (ev: React.WheelEvent) => {
+		const svg = svgRef.current;
+		if (!svg) return;
+		const rect = svg.getBoundingClientRect();
+		const px = ((ev.clientX - rect.left) / rect.width) * W;
+		const py = ((ev.clientY - rect.top) / rect.height) * H;
+		const factor = Math.exp(-ev.deltaY * 0.0012);
+		setView((v) => {
+			const ns = Math.max(0.3, Math.min(3, v.scale * factor));
+			const k = ns / v.scale;
+			return { scale: ns, tx: px - (px - v.tx) * k, ty: py - (py - v.ty) * k };
+		});
+	};
+	// 空白处拖拽平移
+	const onPanDown = (ev: React.PointerEvent) => {
+		if (dragRef.current !== null) return;
+		const vb = toViewBox(ev.clientX, ev.clientY);
+		panRef.current = { px: vb.x, py: vb.y };
+		(ev.currentTarget as Element).setPointerCapture(ev.pointerId);
+	};
+	const onMove = (ev: React.PointerEvent) => {
+		if (dragRef.current !== null) {
+			const w = toWorld(ev.clientX, ev.clientY);
+			const off = dragOffsetRef.current;
+			const x = w.x + off.dx;
+			const y = w.y + off.dy;
+			setNodes((ns) => ns.map((n, i) => (i === dragRef.current ? { ...n, x, y, fx: x, fy: y } : n)));
+			return;
+		}
+		if (panRef.current) {
+			const vb = toViewBox(ev.clientX, ev.clientY);
+			const pan = panRef.current;
+			setView((v) => ({ ...v, tx: v.tx + (vb.x - pan.px), ty: v.ty + (vb.y - pan.py) }));
+			panRef.current = { px: vb.x, py: vb.y };
+		}
+	};
+	const onUp = () => {
+		dragRef.current = null;
+		panRef.current = null;
+	};
 
 	// 悬停详情
 	const [hover, setHover] = useState<RelationshipEdge | null>(null);
 	const [hoverNode, setHoverNode] = useState<string | null>(null);
 
-	// 拖拽
-	const onPointerDown = (idx: number, ev: React.PointerEvent) => {
+	// 节点拖拽按下：记录偏移（鼠标与节点中心的差），保证跟手
+	const onNodeDown = (idx: number, ev: React.PointerEvent) => {
+		ev.stopPropagation();
+		const w = toWorld(ev.clientX, ev.clientY);
+		const n = nodes[idx];
+		if (!n) return;
 		dragRef.current = idx;
-		ev.currentTarget.setPointerCapture(ev.pointerId);
-	};
-	const onPointerMove = (ev: React.PointerEvent) => {
-		if (dragRef.current === null) return;
-		const rect = (ev.currentTarget as SVGSVGElement).getBoundingClientRect();
-		const x = ((ev.clientX - rect.left) / rect.width) * W;
-		const y = ((ev.clientY - rect.top) / rect.height) * H;
-		setNodes((ns) =>
-			ns.map((n, i) => (i === dragRef.current ? { ...n, x, y, fx: x, fy: y } : n)),
-		);
-	};
-	const onPointerUp = () => {
-		dragRef.current = null;
+		dragOffsetRef.current = { dx: n.x - w.x, dy: n.y - w.y };
+		(ev.currentTarget as Element).setPointerCapture(ev.pointerId);
 	};
 
 	if (edges.length === 0) {
@@ -152,86 +205,98 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 		<div className="relgraph">
 			<div className="relgraph-canvas">
 				<svg
+					ref={svgRef}
 					viewBox={`0 0 ${W} ${H}`}
 					preserveAspectRatio="xMidYMid meet"
 					className="relgraph-svg"
-					onPointerMove={onPointerMove}
-					onPointerUp={onPointerUp}
+					onWheel={onWheel}
+					onPointerDown={onPanDown}
+					onPointerMove={onMove}
+					onPointerUp={onUp}
+					onPointerCancel={onUp}
 				>
-					{/* 连线 */}
-					{uniqEdges.map((e, i) => {
-						const a = nodes.find((n) => n.name === e.a);
-						const b = nodes.find((n) => n.name === e.b);
-						if (!a || !b) return null;
-						const mx = (a.x + b.x) / 2;
-						const my = (a.y + b.y) / 2;
-						const col = affinityColor(e.affinity);
-						return (
-							<g key={i} className="relgraph-edge" onMouseEnter={() => setHover(e)} onMouseLeave={() => setHover(null)}>
-								<line
-									x1={a.x}
-									y1={a.y}
-									x2={b.x}
-									y2={b.y}
-									stroke={col}
-									strokeWidth={2 + Math.abs(e.affinity) / 30}
-									strokeOpacity={0.75}
-								/>
-								{e.relation && (
-									<g transform={`translate(${mx},${my})`}>
-										<rect
-											x={-e.relation.length * 7 - 6}
-											y={-10}
-											width={e.relation.length * 14 + 12}
-											height={20}
-											rx={10}
-											fill="#1e293b"
-											stroke={col}
-											strokeOpacity={0.5}
-										/>
-										<text className="relgraph-relation" textAnchor="middle" dy={4}>
-											{e.relation}
-										</text>
-									</g>
-								)}
-							</g>
-						);
-					})}
-					{/* 节点 */}
-					{nodes.map((n, idx) => {
-						const isUser = n.name === userName;
-						const isMain = n.name === charName;
-						const nodeEdges = uniqEdges.filter((e) => e.a === n.name || e.b === n.name);
-						const avg = nodeEdges.length
-							? nodeEdges.reduce((s, e) => s + (e.a === n.name ? -e.affinity : e.affinity), 0) / nodeEdges.length
-							: 0;
-						const halo = avg > 15 ? "#22c55e" : avg < -15 ? "#ef4444" : "#38bdf8";
-						return (
-							<g
-								key={n.name}
-								className="relgraph-node"
-								transform={`translate(${n.x},${n.y})`}
-								onPointerDown={(ev) => onPointerDown(idx, ev)}
-								onMouseEnter={() => setHoverNode(n.name)}
-								onMouseLeave={() => setHoverNode(null)}
-								style={{ cursor: "grab" }}
-							>
-								<circle r={NODE_R + 6} fill={halo} opacity={hoverNode === n.name ? 0.5 : 0.22} />
-								<circle
-									r={NODE_R}
-									fill={isUser ? "#0ea5e9" : isMain ? "#f59e0b" : "#334155"}
-									stroke="#e2e8f0"
-									strokeWidth={isUser || isMain ? 2.5 : 1.5}
-								/>
-								<text className="relgraph-node-char" textAnchor="middle" dy={5}>
-									{n.name.slice(0, 1)}
-								</text>
-								<text className="relgraph-node-name" textAnchor="middle" dy={NODE_R + 16}>
-									{n.name}
-								</text>
-							</g>
-						);
-					})}
+					<g transform={`translate(${view.tx},${view.ty}) scale(${view.scale})`}>
+						{/* 连线 */}
+						{uniqEdges.map((e, i) => {
+							const a = nodes.find((n) => n.name === e.a);
+							const b = nodes.find((n) => n.name === e.b);
+							if (!a || !b) return null;
+							const mx = (a.x + b.x) / 2;
+							const my = (a.y + b.y) / 2;
+							const col = affinityColor(e.affinity);
+							return (
+								<g
+									key={i}
+									className="relgraph-edge"
+									onMouseEnter={() => setHover(e)}
+									onMouseLeave={() => setHover(null)}
+								>
+									<line
+										x1={a.x}
+										y1={a.y}
+										x2={b.x}
+										y2={b.y}
+										stroke={col}
+										strokeWidth={2 + Math.abs(e.affinity) / 30}
+										strokeOpacity={0.75}
+									/>
+									{e.relation && (
+										<g transform={`translate(${mx},${my})`}>
+											<rect
+												x={-e.relation.length * 7 - 6}
+												y={-10}
+												width={e.relation.length * 14 + 12}
+												height={20}
+												rx={10}
+												fill="#1e293b"
+												stroke={col}
+												strokeOpacity={0.5}
+											/>
+											<text className="relgraph-relation" textAnchor="middle" dy={4}>
+												{e.relation}
+											</text>
+										</g>
+									)}
+								</g>
+							);
+						})}
+						{/* 节点 */}
+						{nodes.map((n, idx) => {
+							const isUser = n.name === userName;
+							const isMain = n.name === charName;
+							const nodeEdges = uniqEdges.filter((e) => e.a === n.name || e.b === n.name);
+							const avg = nodeEdges.length
+								? nodeEdges.reduce((s, e) => s + (e.a === n.name ? -e.affinity : e.affinity), 0) /
+									nodeEdges.length
+								: 0;
+							const halo = avg > 15 ? "#22c55e" : avg < -15 ? "#ef4444" : "#38bdf8";
+							return (
+								<g
+									key={n.name}
+									className="relgraph-node"
+									transform={`translate(${n.x},${n.y})`}
+									onPointerDown={(ev) => onNodeDown(idx, ev)}
+									onMouseEnter={() => setHoverNode(n.name)}
+									onMouseLeave={() => setHoverNode(null)}
+									style={{ cursor: "grab" }}
+								>
+									<circle r={NODE_R + 6} fill={halo} opacity={hoverNode === n.name ? 0.5 : 0.22} />
+									<circle
+										r={NODE_R}
+										fill={isUser ? "#0ea5e9" : isMain ? "#f59e0b" : "#334155"}
+										stroke="#e2e8f0"
+										strokeWidth={isUser || isMain ? 2.5 : 1.5}
+									/>
+									<text className="relgraph-node-char" textAnchor="middle" dy={5}>
+										{n.name.slice(0, 1)}
+									</text>
+									<text className="relgraph-node-name" textAnchor="middle" dy={NODE_R + 16}>
+										{n.name}
+									</text>
+								</g>
+							);
+						})}
+					</g>
 				</svg>
 				{hover && (
 					<div className="relgraph-tip">
@@ -254,7 +319,7 @@ export function RelGraphPanel({ state, charName, userName }: { state: WorldState
 				<span style={{ color: "#94a3b8" }}>中立</span>
 				<span style={{ color: "#84cc16" }}>友善</span>
 				<span style={{ color: "#22c55e" }}>亲近</span>
-				<span className="relgraph-hint">拖拽节点调整布局 · 悬停连线看详情</span>
+				<span className="relgraph-hint">滚轮缩放 · 空白拖拽平移 · 拖节点调整</span>
 			</div>
 		</div>
 	);
