@@ -845,6 +845,7 @@ export class StageEngine {
 				...(Object.keys(nextState.characters).length ? Object.keys(nextState.characters) : [materials.card.name]),
 				materials.config.userName,
 			];
+			ev.onActivity?.(`状态栏生成（读正文 · ${materials.statusBarFields.length} 字段）`);
 			const r = await runStatusBarCompletion(
 				{
 					sideText: (sp, ut) => this.#sideText(model, sp, ut, { apiKey, headers }, 2048),
@@ -863,8 +864,13 @@ export class StageEngine {
 					knownCharacters,
 				},
 			);
+			console.log(`[stage-statusbar] 结果：${r.kind}${r.kind === "failed" ? " · " + r.error : ""}`);
 			if (r.kind === "failed") console.error(`[stage-statusbar] 生成跳过：${r.error}`);
 			sm.flush();
+		} else {
+			console.log(
+				`[stage-statusbar] 未调用：entryId=${!!entryId} aborted=${aborted} finalText=${!!finalText} fields=${materials.statusBarFields.length}`,
+			);
 		}
 
 		// 场记兜底（D5）：模型本拍没调 world_state_update 才旁路补账，M-B 视实弹数据决定退役。
