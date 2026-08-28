@@ -56,9 +56,11 @@ export function applyCardSkin(
 	text: string,
 	rules: DisplayRule[],
 	macros: { charName: string; userName: string },
+	depth = 0,
 ): string {
 	let out = text;
 	for (const r of rules) {
+		if ((r.minDepth !== undefined && depth < r.minDepth) || (r.maxDepth !== undefined && depth > r.maxDepth)) continue;
 		try {
 			const re = new RegExp(substMacros(r.source, macros, true), r.flags);
 			const template = substMacros(r.replace, macros, false);

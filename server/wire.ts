@@ -457,7 +457,7 @@ function hasToolCall(content: unknown): boolean {
  * opts.backstage：该轮用户以 // 开头（幕后轮），助手回复走 backstage 通道
  * （PLAN-PHASE3 §6.1 显示通道——排版区隔，非上下文切割）。
  */
-export type ToWireOpts = { backstage?: boolean; skin?: DisplaySkin | null; showStatusBar?: boolean };
+export type ToWireOpts = { backstage?: boolean; skin?: DisplaySkin | null; showStatusBar?: boolean; depth?: number };
 
 const STATUS_PLACEHOLDER_RE = /StatusPlaceHolderImpl/i;
 
@@ -499,7 +499,7 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 		// narrative：先卡显示正则再策略；backstage 仍纯文本策略（不套角色卡皮肤）
 		const display = text
 			? channel === "narrative"
-				? prepareDisplayText(text, skin)
+				? prepareDisplayText(text, skin, opts?.depth ?? 0)
 				: prepareDisplayText(text, null)
 			: "";
 
@@ -542,7 +542,7 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 							seg.kind === "text"
 								? {
 										...seg,
-										text: prepareDisplayText(projectStatusPlaceholder(seg.text, tlSkin, showStatusBar && index === lastText), tlSkin),
+										text: prepareDisplayText(projectStatusPlaceholder(seg.text, tlSkin, showStatusBar && index === lastText), tlSkin, opts?.depth ?? 0),
 									}
 								: seg,
 						);
@@ -573,7 +573,7 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 			return {
 				channel: "greeting",
 				name: names.charName,
-				text: prepareDisplayText(text, skin),
+				text: prepareDisplayText(text, skin, opts?.depth ?? 0),
 				...(index !== undefined && total !== undefined && total > 0
 					? { greetingPick: { index, total } }
 					: {}),
@@ -581,10 +581,10 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 		}
 		/** 用户手改后的角色回复：显示同叙事通道 */
 		if (msg.customType === "rp-edited-reply") {
-			return text ? { channel: "narrative", name: names.charName, text: prepareDisplayText(text, skin) } : null;
+			return text ? { channel: "narrative", name: names.charName, text: prepareDisplayText(text, skin, opts?.depth ?? 0) } : null;
 		}
 		if (msg.customType === "rp-import") {
-			return text ? { channel: "import", text: prepareDisplayText(text, skin) } : null;
+			return text ? { channel: "import", text: prepareDisplayText(text, skin, opts?.depth ?? 0) } : null;
 		}
 		// 用户气泡「配音」写入的可展示音频（details.rpAudio；正文尽量不进 LLM 注意力，见 convert 侧仍可能带短标记）
 		if (msg.customType === "rp-audio") {
@@ -697,7 +697,7 @@ export function toWireHistory(
 		if (role === "user") {
 			backstage = isBackstageText(textOf((m as MsgLike).content));
 		}
-		const w = toWireMsg(m, names, { backstage, skin, showStatusBar: i === latestStatusIndex });
+		const w = toWireMsg(m, names, { backstage, skin, showStatusBar: i === latestStatusIndex, depth: patched.length - 1 - i });
 		if (w) out.push(w);
 	}
 	return foldTurnNarratives(out);

@@ -322,6 +322,25 @@ test("wire + skin: narrative 先正则后策略，state 变成 HTML 载荷", () 
 	assert.ok(w!.text.includes("```html") || w!.text.includes("<!DOCTYPE html>"));
 });
 
+test("toWireHistory: 卡皮肤按消息相对深度应用", () => {
+	const skin = {
+		rules: [{ name: "深度", source: "TOKEN", flags: "g", replace: "旧层", minDepth: 1 }],
+		charName: "青梧",
+		userName: "旅人",
+	};
+	const out = toWireHistory(
+		[
+			{ role: "assistant", content: [{ type: "text", text: "TOKEN" }] },
+			{ role: "user", content: "继续" },
+			{ role: "assistant", content: [{ type: "text", text: "TOKEN" }] },
+		],
+		names,
+		{ skin },
+	);
+	assert.equal(out[0]?.text, "旧层");
+	assert.equal(out.at(-1)?.text, "TOKEN");
+});
+
 test("toolResult 与未知类型跳过；字符串与内容块数组两种 content 都可读", () => {
 	assert.equal(toWireMsg({ role: "toolResult", content: [{ type: "text", text: "lore" }] }, names), null);
 	assert.equal(toWireMsg({ role: "bashExecution", content: "ls" }, names), null);

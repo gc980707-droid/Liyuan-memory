@@ -38,6 +38,14 @@ test("空规则原文返回", () => {
 	assert.equal(applyCardSkin("原文", [], M), "原文");
 });
 
+test("深度限定: 只在 ST 规则指定的消息深度应用", () => {
+	const rule = { ...wrapOpen, minDepth: 1, maxDepth: 2 };
+	const source = "<StatusBlock>状态</StatusBlock>";
+	assert.equal(applyCardSkin(source, [rule], M, 0), source);
+	assert.ok(applyCardSkin(source, [rule], M, 1).includes('<div style="x"><status>'));
+	assert.equal(applyCardSkin(source, [rule], M, 3), source);
+});
+
 test("字面量 $' 不得被 String.replace 特殊序列吃掉（程序卡 '$' 字符）", () => {
 	// 模拟凡人修仙 TILE 字符表：'|','$','T'
 	const rule = {

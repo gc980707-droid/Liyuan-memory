@@ -404,11 +404,11 @@ function protectSkinDivs(text: string): { text: string; stash: string[] } {
  * 4) 皮肤 div 与叙事混排 → div 占位保护后照常过滤（thinking/注释不得因皮肤漏网），再还原
  * 5) 其余 displayAssistantText（fold/panel/unwrap）
  */
-export function prepareDisplayText(text: string, skin?: DisplaySkin | null): string {
+export function prepareDisplayText(text: string, skin?: DisplaySkin | null, depth = 0): string {
 	if (!text) return "";
 	let t = hideGreetingInitvar(text);
 	if (skin?.rules?.length) {
-		t = applyCardSkin(t, skin.rules, { charName: skin.charName, userName: skin.userName });
+		t = applyCardSkin(t, skin.rules, { charName: skin.charName, userName: skin.userName }, depth);
 	}
 	// 整段就是界面（前后无叙事）：原样交出，不拆
 	if (isFullPageHtmlPayload(t) && isBareFullPagePayload(t)) {
