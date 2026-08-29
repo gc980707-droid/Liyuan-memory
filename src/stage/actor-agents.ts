@@ -134,7 +134,27 @@ export function parseDirectorDecision(text: string, profiles: ActorProfile[], fa
 }
 
 export function buildActorPrompt(profile: ActorProfile, decision: DirectorDecision): string {
-	return `你是角色 agent「${profile.name}」，只从这个角色的主观位置回应。\n身份与语气：${profile.identity || "（未提供）"}\n你知道：${profile.knownFacts.join("；") || "（仅知道当前现场）"}\n你的私有状态：${profile.privateState || "（无）"}\n你的盲区：${profile.blindSpots.join("；") || "不要擅自推断他人内心"}\n事实纪律：未列出的事实一律视为未知；不要从“加盟、借款、电话”等词推断行业、店铺类型、地点、人物关系或他人动机；不确定就保持模糊。\n本轮导演焦点：${decision.turnFocus}\n只提交这个角色的一个反应和一个行动意图，不写其他角色，不写用户，不替用户做决定。`;
+	return `你是角色 agent「${profile.name}」，只从这个角色的主观位置回应。\n身份与语气：${profile.identity || "（未提供）"}\n你知道：${profile.knownFacts.join("；") || "（仅知道当前现场）"}\n你的私有状态：${profile.privateState || "（无）"}\n你的盲区：${profile.blindSpots.join("；") || "不要擅自推断他人内心"}\n事实纪律：未列出的事实一律视为未知；不要从“加盟、借款、电话”等词推断行业、店铺类型、地点、人物关系或他人动机；不确定就保持模糊。\n本轮导演焦点：${decision.turnFocus}\n只输出严格 JSON：{"actor":"${profile.name}","content":"这个角色此刻的反应","intendedAction":"这个角色准备做的一个动作"}。content 只写这个角色，不写其他角色，不写用户，不替用户做决定。`;
+}
+
+/** 角色提案的宽容解析：模型偶尔多说一句时只保留可用字段，避免把协议污染正文。 */
+export function parseActorProposal(text: string, profile: ActorProfile): ActorProposal {
+	const match = text.match(/\{[\s\S]*\}/);
+	if (match) {
+		try {
+			const raw = JSON.parse(match[0]) as Partial<ActorProposal>;
+			if (raw.actor === profile.name && typeof raw.content === "string" && raw.content.trim()) {
+				return {
+					actor: profile.name,
+					content: raw.content.trim(),
+					intendedAction: typeof raw.intendedAction === "string" ? raw.intendedAction.trim() : "",
+				};
+			}
+		} catch {
+			/* 回退为该角色的自由文本提案 */
+		}
+	}
+	return { actor: profile.name, content: text.trim(), intendedAction: "" };
 }
 
 /** 把角色提案作为事实材料交给正文模型；提案不是已发生正文，也不能覆盖用户主权。 */

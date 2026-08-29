@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { actorProfilesFromState, buildActorPrompt, buildDirectorPrompt, buildDirectorSelectionPrompt, parseDirectorDecision, runActorAgents, selectActiveActors } from "../src/stage/actor-agents.ts";
+import { actorProfilesFromState, buildActorPrompt, buildDirectorPrompt, buildDirectorSelectionPrompt, parseActorProposal, parseDirectorDecision, runActorAgents, selectActiveActors } from "../src/stage/actor-agents.ts";
 import type { CharacterCard, WorldState } from "../src/types.ts";
 
 const card: CharacterCard = {
@@ -52,6 +52,15 @@ test("导演提示只列活跃角色，角色提示带盲区且不接管用户",
 	assert.match(buildActorPrompt(profiles[0]!, decision), /不写用户/);
 	assert.match(buildActorPrompt(profiles[0]!, decision), /未列出的事实一律视为未知/);
 	assert.match(buildActorPrompt(profiles[0]!, decision), /不要从.*加盟.*借款.*电话.*推断/);
+	assert.match(buildActorPrompt(profiles[0]!, decision), /严格 JSON/);
+});
+
+test("角色提案按 JSON 校验，错误格式只回退为该角色文本", () => {
+	const profile = actorProfilesFromState(card, state)[0]!;
+	assert.deepEqual(parseActorProposal('{"actor":"阿梨","content":"把杯子推过去","intendedAction":"倒水"}', profile), {
+		actor: "阿梨", content: "把杯子推过去", intendedAction: "倒水",
+	});
+	assert.equal(parseActorProposal('{"actor":"老周","content":"越权"}', profile).actor, "阿梨");
 });
 
 test("导演 agent JSON 只允许选择名录角色，非法结果回退", () => {

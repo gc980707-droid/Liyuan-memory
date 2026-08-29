@@ -40,6 +40,7 @@ import {
 	buildActorPrompt,
 	buildDirectorSelectionPrompt,
 	formatActorProposals,
+	parseActorProposal,
 	parseDirectorDecision,
 	runActorAgents,
 	selectActiveActors,
@@ -948,8 +949,8 @@ export class StageEngine {
 					{ ...options, ...actorAuth, reasoning: "off", maxTokens: 800 },
 				);
 				const result = await actorStream.result();
-				const content = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n").trim();
-				return { actor: profile.name, content, intendedAction: "" };
+				const content = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n");
+				return parseActorProposal(content, profile);
 			},
 		}));
 		if (this.#deps.actorAgents && actorAgents.length > 0) {
