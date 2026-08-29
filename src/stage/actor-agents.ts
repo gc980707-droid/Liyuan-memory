@@ -55,10 +55,17 @@ export function actorProfilesFromState(
 	const names = [card.name, ...Object.keys(state.characters).filter((n) => n !== card.name)];
 	return names.map((name) => ({
 		name,
-		identity: name === card.name ? [card.personality, card.scenario].filter(Boolean).join("\n") : "（角色档案待补充）",
-		knownFacts: [...(knownFactsByActor[name] ?? [])],
-		privateState: privateStateByActor[name] ?? "",
-		blindSpots: [],
+		identity:
+			name === card.name
+				? [card.description, card.personality, card.scenario].filter(Boolean).join("\n")
+				: state.roster?.characters?.[name] || "（角色档案待补充）",
+		knownFacts: [
+			...(knownFactsByActor[name] ?? []),
+			...(state.characters[name]?.status ? [`当前状态：${state.characters[name].status}`] : []),
+			...(state.characters[name]?.notes ? [`已记录事项：${state.characters[name].notes}`] : []),
+		],
+		privateState: privateStateByActor[name] ?? state.characters[name]?.notes ?? "",
+		blindSpots: ["不知道其他角色未公开的内心、秘密和决定"],
 		...(state.characters[name] ? { state: state.characters[name] } : {}),
 	}));
 }

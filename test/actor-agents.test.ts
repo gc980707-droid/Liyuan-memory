@@ -30,7 +30,8 @@ test("角色档案隔离共享时空与私有信息", () => {
 	assert.deepEqual(profiles.map((p) => p.name), ["阿梨", "老周"]);
 	assert.equal(profiles[0]!.state?.status, "擦杯子");
 	assert.equal(profiles[1]!.privateState, "不想让阿梨知道自己在等人");
-	assert.deepEqual(profiles[1]!.blindSpots, []);
+	assert.match(profiles[1]!.blindSpots[0]!, /不知道其他角色/);
+	assert.match(profiles[1]!.knownFacts.join("；"), /看见门外的马车/);
 });
 
 test("导演点名优先、未点名只让主角色承接、最多两名", () => {

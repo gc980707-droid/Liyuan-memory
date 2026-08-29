@@ -217,6 +217,8 @@ export interface StageEngineDeps {
 	getAuth: (model: StageModelLike) => Promise<{ apiKey?: string; headers?: Record<string, string> }>;
 	/** 开启导演筛选后的独立角色 agent 提案；省略时保持单模型回合兼容行为。 */
 	actorAgents?: boolean;
+	/** 可选角色模型路由；未提供时所有角色 agent 使用当前剧情模型，但上下文仍独立。 */
+	getActorModel?: (actorName: string, fallback: StageModelLike) => StageModelLike | undefined;
 	/** 会话当前思考档（用户自由，引擎透传） */
 	getThinking?: () => string | undefined;
 	/** 账本磁盘缓存路径（.liyuan-state/<sessionId>.json）；给出则场记落盘（fs.watch → state 帧） */
@@ -911,13 +913,15 @@ export class StageEngine {
 		const actorAgents = actorProfiles.map((profile) => ({
 			profile,
 			respond: async (input: { userText: string; recentText: string; sharedState: { time: string; location: string } }) => {
+				const actorModel = this.#deps.getActorModel?.(profile.name, model) ?? model;
+				const actorAuth = actorModel === model ? { apiKey, headers } : await this.#deps.getAuth(actorModel);
 				const actorStream = this.#deps.streamFn(
-					model,
+					actorModel,
 					{
 						systemPrompt: buildActorPrompt(profile, directorDecision),
 						messages: [{ role: "user", content: [{ type: "text", text: `时间：${input.sharedState.time}\n地点：${input.sharedState.location}\n最近正文：${input.recentText || "（无）"}\n用户最新输入：${input.userText}` }] }],
 					},
-					{ ...options, reasoning: "off", maxTokens: 800 },
+					{ ...options, ...actorAuth, reasoning: "off", maxTokens: 800 },
 				);
 				const result = await actorStream.result();
 				const content = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n").trim();
