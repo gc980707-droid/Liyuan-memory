@@ -11,10 +11,11 @@
  * 依赖全部注入（SessionManager / 模型 / 流函数），可用 faux provider 离线整测。
  */
 
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 
 import { applyProjectedSamplers } from "../samplers.ts";
+import { loadCardFile } from "../card.ts";
 import { loadActorProfileOverrides } from "../actor-profiles.ts";
 import { extractDraftRules } from "../draft.ts";
 import {
@@ -790,6 +791,16 @@ export class StageEngine {
 		// 导演层先做确定性调度：只把本轮真正有发言权的角色送入动态上下文。
 		// 角色 agent 的真实调用仍是可选的下一阶段，默认回落现有单次模型回合。
 		const actorProfiles = actorProfilesFromState(card, state, {}, {}, materials.entries, loadActorProfileOverrides(cwd));
+		for (const profile of actorProfiles) {
+			if (!profile.cardPath) continue;
+			try {
+				const actorCard = loadCardFile(isAbsolute(profile.cardPath) ? profile.cardPath : join(cwd, profile.cardPath));
+				profile.identity = [actorCard.description, actorCard.personality, actorCard.scenario].filter(Boolean).join("\n") || profile.identity;
+				profile.knownFacts = [...profile.knownFacts, ...(actorCard.scenario ? [`角色卡场景：${actorCard.scenario}`] : [])];
+			} catch (error) {
+				ev.onActivity?.(`角色卡装载失败（${profile.name}）：${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
 		let directorDecision = selectActiveActors(actorProfiles, lastUserText, lastNarrativeText);
 
 		const systemPrompt = buildStageSystemPrompt({

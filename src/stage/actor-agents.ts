@@ -9,6 +9,8 @@ import type { CharacterCard, CharacterState, LorebookEntry, WorldState } from ".
 
 export interface ActorProfile {
 	name: string;
+	/** 可选独立角色卡路径（相对项目根）；缺省使用主卡/档案字段。 */
+	cardPath?: string;
 	/** 角色卡/世界书提供的稳定身份与说话基调 */
 	identity: string;
 	/** 角色当前知道的事实；不等于共享世界全量事实 */
@@ -77,7 +79,8 @@ export function actorProfilesFromState(
 		privateState: privateStateByActor[name] ?? state.characters[name]?.notes ?? "",
 		blindSpots: ["不知道其他角色未公开的内心、秘密和决定"],
 		...(state.characters[name] ? { state: state.characters[name] } : {}),
-		...(override.identity !== undefined ? { identity: override.identity } : {}),
+			...(override.identity !== undefined ? { identity: override.identity } : {}),
+			...(override.card ? { cardPath: override.card } : {}),
 		...(override.privateState !== undefined ? { privateState: override.privateState } : {}),
 		...(override.blindSpots !== undefined ? { blindSpots: override.blindSpots } : {}),
 		};

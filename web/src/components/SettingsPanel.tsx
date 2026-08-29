@@ -715,6 +715,7 @@ function BackupSection({ toast }: { toast: (level: "info" | "warning" | "error",
 
 export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "error", text: string) => void }) {
 	const { data, error, loading, reload } = usePanelData(() => apiGet<{ config: RpConfigView }>("/api/config"), { cacheKey: "/api/config" });
+	const actorData = usePanelData(() => apiGet<{ actors: Record<string, unknown> }>("/api/actor-profiles"), { cacheKey: "/api/actor-profiles" });
 	const { busy, run } = useAction(toast);
 
 	const [scanDepth, setScanDepth] = useState(4);
@@ -724,6 +725,7 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 	const [askMode, setAskMode] = useState(false);
 	const [dirty, setDirty] = useState(false);
 	const [dark, setDark] = useState(() => getTheme() === "dark");
+	const [actorJson, setActorJson] = useState("{}");
 
 	useEffect(() => {
 		if (data) {
@@ -735,6 +737,9 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 			setDirty(false);
 		}
 	}, [data]);
+	useEffect(() => {
+		if (actorData.data) setActorJson(JSON.stringify(actorData.data.actors, null, 2));
+	}, [actorData.data]);
 
 	const touch = () => setDirty(true);
 
@@ -773,6 +778,17 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 			<AccessSection toast={toast} />
 			<BackupSection toast={toast} />
 			<MemorySection toast={toast} />
+			<section className="sp-section">
+				<h4>独立角色档案</h4>
+				<div className="field-hint">每个角色一份身份、已知事实、私有状态和盲区；保存后下轮生效。未填写的角色仍从当前状态与世界书补全。</div>
+				<textarea className="settings-textarea" value={actorJson} onChange={(e) => setActorJson(e.target.value)} rows={8} spellCheck={false} />
+				<button type="button" className="drawer-btn" disabled={busy || actorData.loading} onClick={() => run(async () => {
+					const actors = JSON.parse(actorJson) as unknown;
+					if (!actors || typeof actors !== "object" || Array.isArray(actors)) throw new Error("请输入角色对象 JSON");
+					await apiPut("/api/actor-profiles", { actors });
+					await actorData.reload();
+				}, "角色档案已保存")}>保存角色档案</button>
+			</section>
 			{data && (
 				<>
 					<section className="sp-section">
