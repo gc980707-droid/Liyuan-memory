@@ -50,6 +50,8 @@ test("导演提示只列活跃角色，角色提示带盲区且不接管用户",
 	assert.doesNotMatch(dp, /老周/);
 	assert.match(buildActorPrompt(profiles[0]!, decision), /不知道你为何连夜赶来/);
 	assert.match(buildActorPrompt(profiles[0]!, decision), /不写用户/);
+	assert.match(buildActorPrompt(profiles[0]!, decision), /未列出的事实一律视为未知/);
+	assert.match(buildActorPrompt(profiles[0]!, decision), /不要从.*加盟.*借款.*电话.*推断/);
 });
 
 test("角色 agent 只按导演顺序调用活跃角色", async () => {

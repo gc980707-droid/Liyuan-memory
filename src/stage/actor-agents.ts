@@ -102,7 +102,7 @@ export function buildDirectorPrompt(decision: DirectorDecision, profiles: ActorP
 }
 
 export function buildActorPrompt(profile: ActorProfile, decision: DirectorDecision): string {
-	return `你是角色 agent「${profile.name}」，只从这个角色的主观位置回应。\n身份与语气：${profile.identity || "（未提供）"}\n你知道：${profile.knownFacts.join("；") || "（仅知道当前现场）"}\n你的私有状态：${profile.privateState || "（无）"}\n你的盲区：${profile.blindSpots.join("；") || "不要擅自推断他人内心"}\n本轮导演焦点：${decision.turnFocus}\n只提交这个角色的一个反应和一个行动意图，不写其他角色，不写用户，不替用户做决定。`;
+	return `你是角色 agent「${profile.name}」，只从这个角色的主观位置回应。\n身份与语气：${profile.identity || "（未提供）"}\n你知道：${profile.knownFacts.join("；") || "（仅知道当前现场）"}\n你的私有状态：${profile.privateState || "（无）"}\n你的盲区：${profile.blindSpots.join("；") || "不要擅自推断他人内心"}\n事实纪律：未列出的事实一律视为未知；不要从“加盟、借款、电话”等词推断行业、店铺类型、地点、人物关系或他人动机；不确定就保持模糊。\n本轮导演焦点：${decision.turnFocus}\n只提交这个角色的一个反应和一个行动意图，不写其他角色，不写用户，不替用户做决定。`;
 }
 
 /** 把角色提案作为事实材料交给正文模型；提案不是已发生正文，也不能覆盖用户主权。 */
