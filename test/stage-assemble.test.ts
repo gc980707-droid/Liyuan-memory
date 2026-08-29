@@ -147,6 +147,8 @@ test("system prompt：默认对话优先，限制小说式一口气交稿", () =
 	assert.ok(p.includes("# 对话感（默认优先）"));
 	assert.ok(p.includes("先回应用户刚说的具体内容和情绪"));
 	assert.ok(p.includes("不要替多个角色连续演完整场戏"));
+	assert.ok(p.includes("活人式交流优先于“显得有用”"));
+	assert.ok(p.includes("不要为了讨好用户而无条件赞同"));
 	assert.ok(p.includes("不替用户补台词、动作、想法或决定"));
 });
 
