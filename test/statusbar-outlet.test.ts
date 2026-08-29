@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { classifyTag } from "../src/postprocess.ts";
-import { dedupeIdenticalBlocks, formatTailStart, mergeFinalText } from "../src/stage/engine.ts";
+import { dedupeIdenticalBlocks, dedupeLatestStatusBlocks, formatTailStart, mergeFinalText } from "../src/stage/engine.ts";
 import { splitStatusParts } from "../web/src/statusBlocks.ts";
 
 // ---------- ① mergeFinalText：尾巴只取格式块 ----------
@@ -95,6 +95,13 @@ test("mergeFinalText：尾巴里的重复状态栏在定稿中只留一份", () 
 	const merged = mergeFinalText(draft, `${sb}\n<catsay>喵</catsay>${sb}`);
 	assert.ok(merged.startsWith(draft));
 	assert.equal((merged.match(/<StatusBlock>/g) ?? []).length, 1);
+});
+
+test("dedupeLatestStatusBlocks：同标签只留最后一份，不同 state 标签不互删", () => {
+	const out = dedupeLatestStatusBlocks("<state1>旧</state1>\n<state2>人物</state2>\n<state1>新</state1>");
+	assert.equal((out.match(/<state1>/g) ?? []).length, 1);
+	assert.ok(out.includes("<state1>新</state1>"));
+	assert.equal((out.match(/<state2>/g) ?? []).length, 1);
 });
 
 // ---------- ② stateN 渲染两端对齐（吐源码的渲染半截） ----------
