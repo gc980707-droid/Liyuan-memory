@@ -431,6 +431,21 @@ export const dedupeIdenticalBlocks = (s: string): string => {
 		.trim();
 };
 
+/** 同一状态标签在一轮多次续写时只保留最后一份；不同 state1/state2 仍各自保留。 */
+export const dedupeLatestStatusBlocks = (s: string): string => {
+	const re = /<(StatusBlock|status_block|status|statusbar|normal_status|special_status|state_?\d+)(?:\s[^>]*)?>[\s\S]*?<\/\1\s*>/gi;
+	const blocks: Array<{ start: number; end: number; tag: string }> = [];
+	let m: RegExpExecArray | null;
+	while ((m = re.exec(s)) !== null) blocks.push({ start: m.index, end: re.lastIndex, tag: m[1]!.toLowerCase().replace(/_/g, "") });
+	const latest = new Map<string, number>();
+	for (const block of blocks) latest.set(block.tag, block.start);
+	let out = s;
+	for (const block of [...blocks].reverse()) {
+		if (latest.get(block.tag) !== block.start) out = `${out.slice(0, block.start)}${out.slice(block.end)}`;
+	}
+	return out.replace(/\n{3,}/g, "\n\n").trim();
+};
+
 /**
  * 尾巴里 `<content>` 块以正文结尾文字开头（模型按卡格式在 `<content>` 里重述正文）时，
  * 裁掉重复前缀——正文以稿件为准，定稿不得出现两遍。
@@ -453,7 +468,7 @@ const trimContentBodyRepeat = (body: string, inner: string): string => {
 export const mergeFinalText = (draft: string, text: string): string => {
 	const d = draft.trim();
 	const t = stripDsmlToolCalls(text.trim());
-	if (!d) return dedupeIdenticalBlocks(t);
+	if (!d) return dedupeLatestStatusBlocks(dedupeIdenticalBlocks(t));
 	if (!t || d === t) return d;
 	// 有稿时普通 text 通道只可能是格式尾巴；模型的收笔闲聊、旁路 JSON
 	// 或协议残片不能再被当成续写拼进正文。真正的续写已在 agentLoop
@@ -476,7 +491,7 @@ export const mergeFinalText = (draft: string, text: string): string => {
 			const trimmed = trimContentBodyRepeat(d, inner);
 			return trimmed ? `<content>${trimmed}</content>` : "";
 		});
-	return dedupeIdenticalBlocks([d, tailPart].filter(Boolean).join("\n\n"));
+	return dedupeLatestStatusBlocks(dedupeIdenticalBlocks([d, tailPart].filter(Boolean).join("\n\n")));
 };
 
 /**
