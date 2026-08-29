@@ -1,9 +1,7 @@
 /**
  * 导演层 + 角色 agent 的最小协议。
  *
- * 第一阶段只负责拆分职责和收集角色提案，不直接替现有 StageEngine 落正文：
- * 导演决定谁有发言权，角色 agent 只提交「我会怎么回应」，最后仍由正文工件
- * 流程统一合成和验收。这样可以先验证角色边界，再接入真实的多次模型调用。
+ * 角色 agent 只提交「我会怎么回应」，最后仍由正文工件流程统一合成和验收。
  */
 
 import type { CharacterCard, CharacterState, WorldState } from "../types.ts";
@@ -98,6 +96,14 @@ export function buildDirectorPrompt(decision: DirectorDecision, profiles: ActorP
 
 export function buildActorPrompt(profile: ActorProfile, decision: DirectorDecision): string {
 	return `你是角色 agent「${profile.name}」，只从这个角色的主观位置回应。\n身份与语气：${profile.identity || "（未提供）"}\n你知道：${profile.knownFacts.join("；") || "（仅知道当前现场）"}\n你的私有状态：${profile.privateState || "（无）"}\n你的盲区：${profile.blindSpots.join("；") || "不要擅自推断他人内心"}\n本轮导演焦点：${decision.turnFocus}\n只提交这个角色的一个反应和一个行动意图，不写其他角色，不写用户，不替用户做决定。`;
+}
+
+/** 把角色提案作为事实材料交给正文模型；提案不是已发生正文，也不能覆盖用户主权。 */
+export function formatActorProposals(proposals: ActorProposal[]): string {
+	if (proposals.length === 0) return "";
+	return `【角色 agent 提案】\n${proposals
+		.map((p) => `- ${p.actor}：${p.content}${p.intendedAction ? `（行动意图：${p.intendedAction}）` : ""}`)
+		.join("\n")}\n以上只是各角色的主观提案；正文模型负责取舍和落稿，不把提案当成用户已做出的动作或决定。`;
 }
 
 export async function runActorAgents(

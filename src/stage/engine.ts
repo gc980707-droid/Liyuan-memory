@@ -35,7 +35,14 @@ import { splitWithManifest } from "../preset-skill.ts";
 import { formatRosterIndex, formatState, saveState } from "../state.ts";
 import { isBackstageText } from "../stance.ts";
 import type { LorebookEntry } from "../types.ts";
-import { actorProfilesFromState, selectActiveActors } from "./actor-agents.ts";
+import {
+	actorProfilesFromState,
+	buildActorPrompt,
+	formatActorProposals,
+	runActorAgents,
+	selectActiveActors,
+	type ActorProposal,
+} from "./actor-agents.ts";
 import {
 	buildStageInjection,
 	buildStageSystemPrompt,
@@ -208,6 +215,8 @@ export interface StageEngineDeps {
 	getSessionManager: () => StageSessionManager;
 	getModel: () => StageModelLike | undefined;
 	getAuth: (model: StageModelLike) => Promise<{ apiKey?: string; headers?: Record<string, string> }>;
+	/** 开启导演筛选后的独立角色 agent 提案；省略时保持单模型回合兼容行为。 */
+	actorAgents?: boolean;
 	/** 会话当前思考档（用户自由，引擎透传） */
 	getThinking?: () => string | undefined;
 	/** 账本磁盘缓存路径（.liyuan-state/<sessionId>.json）；给出则场记落盘（fs.watch → state 帧） */
@@ -788,6 +797,7 @@ export class StageEngine {
 			// 与旧 director.ts 同一位置——工具清单里有 mcp__ 工具，这里说明它们是什么。
 			mcpTools: mcpTools.map((t) => ({ name: t.name, description: t.description })),
 		});
+		let actorProposals: ActorProposal[] = [];
 		const injection = buildStageInjection({
 			state,
 			activatedLore: activated,
@@ -894,6 +904,41 @@ export class StageEngine {
 					api: typeof m.api === "string" ? m.api : undefined,
 				});
 			};
+		}
+
+		// 每个活跃角色单独调用一次模型，只产出该角色的主观提案；正文仍由
+		// 下方主回合模型统一合成，因此不会出现角色 agent 直接绕过稿纸落正文。
+		const actorAgents = actorProfiles.map((profile) => ({
+			profile,
+			respond: async (input: { userText: string; recentText: string; sharedState: { time: string; location: string } }) => {
+				const actorStream = this.#deps.streamFn(
+					model,
+					{
+						systemPrompt: buildActorPrompt(profile, directorDecision),
+						messages: [{ role: "user", content: [{ type: "text", text: `时间：${input.sharedState.time}\n地点：${input.sharedState.location}\n最近正文：${input.recentText || "（无）"}\n用户最新输入：${input.userText}` }] }],
+					},
+					{ ...options, reasoning: "off", maxTokens: 800 },
+				);
+				const result = await actorStream.result();
+				const content = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n").trim();
+				return { actor: profile.name, content, intendedAction: "" };
+			},
+		}));
+		if (this.#deps.actorAgents && actorAgents.length > 0) {
+			try {
+				actorProposals = await runActorAgents(directorDecision, actorAgents, {
+					userText: lastUserText,
+					recentText: lastNarrativeText,
+					sharedState: { time: state.time, location: state.location },
+				});
+				const actorContext = formatActorProposals(actorProposals);
+				if (actorContext) {
+					const tail = messages[messages.length - 1] as { content?: Array<{ type: string; text?: string }> };
+					if (Array.isArray(tail.content) && tail.content[0]) tail.content[0].text = `${actorContext}\n\n${tail.content[0].text ?? ""}`;
+				}
+			} catch (error) {
+				ev.onActivity?.(`角色 agent 提案失败，回落正文模型：${error instanceof Error ? error.message : String(error)}`);
+			}
 		}
 
 		const s = this.#deps.streamFn(model, { systemPrompt, messages, tools }, options);

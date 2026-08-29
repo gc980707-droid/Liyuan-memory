@@ -2185,6 +2185,8 @@ const stage = new StageEngine({
 		return fingerprints.length;
 	},
 	streamFn: streamSimple as unknown as StageStreamFn,
+	// 导演先调度，再为每个活跃角色单独取一份主观提案；正文仍由台上主回合合成。
+	actorAgents: true,
 	events: {
 		onTurnStart: () => broadcast({ type: "agent", state: "start" }),
 		onDelta: (kind, delta, draft, reset) =>
