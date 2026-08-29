@@ -226,6 +226,19 @@ test("末端注入：字数一行纯事实（§2.2）；无目标不出行", () 
 	assert.ok(!none.includes("800–1500"), "无预设兜底数字随 D1 迁出（默认预设数据承接）");
 });
 
+test("末端注入：自动召回记忆独立成块，并标注为旧事实", () => {
+	const inj = buildStageInjection({
+		state: defaultState(),
+		activatedLore: [],
+		card,
+		config,
+		memoryHits: [{ text: "三年前她曾替你保管一枚玉佩。", score: 0.9, meta: { title: "早期剧情归档" } }],
+	});
+	assert.match(inj, /【自动召回的剧情记忆】/);
+	assert.match(inj, /早期剧情归档/);
+	assert.match(inj, /不是本轮新发生的事实/);
+});
+
 test("detectsLanguageMismatch：中文目标才判、样本要够长", () => {
 	const en = "The moon hangs over the courtyard while she waits in silence for a long time tonight.";
 	assert.equal(detectsLanguageMismatch(en, "中文"), true);

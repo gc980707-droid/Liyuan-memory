@@ -240,6 +240,8 @@ export interface StageEngineDeps {
 	declareContract?: boolean;
 	/** 剧情库检索（memory_search 工具用）；未注入 = 该工具恒返回无命中 */
 	searchMemory?: (sessionId: string, query: string) => Promise<MemoryHitLike[]>;
+	/** 每轮自动召回当前会话记忆；未注入或关闭时不增加任何检索调用。 */
+	recallMemory?: (sessionId: string, query: string) => Promise<MemoryHitLike[]>;
 	/**
 	 * 向量库写侧三件（M-D3）。均由宿主按「当前对话 + 当前卡」绑定 MemoryScope 后注入——
 	 * **作用域不经模型**（PLAN-RP-TOOLING M-D3：scope 全隐藏），引擎只透传 sessionId。
@@ -707,6 +709,18 @@ export class StageEngine {
 			.map((m) => m.text)
 			.join("\n");
 		const activated = scanEntries(materials.entries, windowText, config.maxLoreInjections);
+		let memoryHits: MemoryHitLike[] = [];
+		if (this.#deps.recallMemory) {
+			try {
+				const query = [lastUserText, state.location && `地点：${state.location}`, state.time && `时间：${state.time}`]
+					.filter(Boolean)
+					.join("\n");
+				memoryHits = await this.#deps.recallMemory(sm.getSessionId(), query);
+				if (memoryHits.length > 0) ev.onActivity?.(`自动召回 ${memoryHits.length} 条剧情记忆`);
+			} catch (error) {
+				ev.onActivity?.(`自动召回失败，继续使用当前上下文：${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
 
 		// 面板快照（M1 读磁盘缓存；写侧与分支化随 M3）
 		let panelIndex: string | undefined;
@@ -830,6 +844,7 @@ export class StageEngine {
 			...(wsDeps.rules.wordRange ? { wordRange: wsDeps.rules.wordRange } : {}),
 			loreIndex: formatLoreIndex(materials.entries),
 			rosterIndex: formatRosterIndex(state),
+			...(memoryHits.length > 0 ? { memoryHits } : {}),
 		});
 
 		// §4.B 输出合约：v1 供数＝装载期一次性模型声明（M-R4 首件，指纹缓存，换卡/改预设即重声明）；

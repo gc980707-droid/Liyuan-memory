@@ -18,6 +18,7 @@ import { projectMvuToWorldState } from "../mvu.ts";
 import { formatState, defaultState } from "../state.ts";
 import { isBackstageText } from "../stance.ts";
 import type { CharacterCard, LorebookEntry, MacroContext, RpConfig, WorldState } from "../types.ts";
+import type { MemoryHitLike } from "../tools/memory.ts";
 import { buildDirectorPrompt, type ActorProfile, type DirectorDecision } from "./actor-agents.ts";
 
 // ---------------- 分支 → 历史 ----------------
@@ -422,6 +423,8 @@ export interface StageInjectionOptions {
 	loreIndex?: string;
 	/** 登场名录索引行（formatRosterIndex 产出） */
 	rosterIndex?: string;
+	/** 每轮自动召回的记忆命中；只作事实参考，不覆盖当前账本。 */
+	memoryHits?: MemoryHitLike[];
 	/** 本轮导演调度结果；缺省时保持旧的单角色流程。 */
 	director?: { decision: DirectorDecision; profiles: ActorProfile[] };
 }
@@ -444,6 +447,7 @@ export function buildStageInjection({
 	wordRange,
 	loreIndex,
 	rosterIndex,
+	memoryHits,
 	director,
 }: StageInjectionOptions): string {
 	const macro: MacroContext = { charName: card.name, userName: config.userName };
@@ -472,6 +476,13 @@ export function buildStageInjection({
 
 	if (loreIndex) {
 		blocks.push(`【设定集索引】${loreIndex}`);
+	}
+
+	if (memoryHits && memoryHits.length > 0) {
+		const memory = memoryHits
+			.map((h) => `- ${h.text}${h.meta?.title ? `（来源：${h.meta.title}）` : ""}`)
+			.join("\n");
+		blocks.push(`【自动召回的剧情记忆】\n${memory}\n以上是检索命中，不是本轮新发生的事实；与当前账本冲突时以当前账本和本轮已落稿内容为准。`);
 	}
 
 	// 预设末端内容：原文直通，零归拢零引导语（M-R1）
