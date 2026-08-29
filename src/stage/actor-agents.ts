@@ -4,7 +4,7 @@
  * 角色 agent 只提交「我会怎么回应」，最后仍由正文工件流程统一合成和验收。
  */
 
-import type { CharacterCard, CharacterState, WorldState } from "../types.ts";
+import type { CharacterCard, CharacterState, LorebookEntry, WorldState } from "../types.ts";
 
 export interface ActorProfile {
 	name: string;
@@ -51,9 +51,14 @@ export function actorProfilesFromState(
 	state: WorldState,
 	knownFactsByActor: Record<string, string[]> = {},
 	privateStateByActor: Record<string, string> = {},
+	loreEntries: LorebookEntry[] = [],
 ): ActorProfile[] {
 	const names = [card.name, ...Object.keys(state.characters).filter((n) => n !== card.name)];
-	return names.map((name) => ({
+	return names.map((name) => {
+		const loreFacts = [...card.book, ...loreEntries]
+			.filter((entry) => `${entry.comment}\n${entry.content}`.includes(name))
+			.map((entry) => `设定事实：${entry.comment ? `【${entry.comment}】` : ""}${entry.content}`);
+		return {
 		name,
 		identity:
 			name === card.name
@@ -61,13 +66,15 @@ export function actorProfilesFromState(
 				: state.roster?.characters?.[name] || "（角色档案待补充）",
 		knownFacts: [
 			...(knownFactsByActor[name] ?? []),
+			...loreFacts,
 			...(state.characters[name]?.status ? [`当前状态：${state.characters[name].status}`] : []),
 			...(state.characters[name]?.notes ? [`已记录事项：${state.characters[name].notes}`] : []),
 		],
 		privateState: privateStateByActor[name] ?? state.characters[name]?.notes ?? "",
 		blindSpots: ["不知道其他角色未公开的内心、秘密和决定"],
 		...(state.characters[name] ? { state: state.characters[name] } : {}),
-	}));
+		};
+	});
 }
 
 /**
@@ -99,6 +106,31 @@ export function buildDirectorPrompt(decision: DirectorDecision, profiles: ActorP
 		.map((p) => `- ${p.name}：${p.identity || "（无身份摘要）"}`)
 		.join("\n");
 	return `你是本轮剧情导演，只负责调度，不写正文。\n当前焦点：${decision.turnFocus}\n本轮可回应角色：\n${roster || "- （无）"}\n只让上述角色回应；停在：${decision.stopAt}。用户角色的台词、动作、想法和决定永远由用户本人提供。`;
+}
+
+export function buildDirectorSelectionPrompt(profiles: ActorProfile[]): string {
+	const roster = profiles.map((p) => `- ${p.name}：${p.identity || "（无身份摘要）"}`).join("\n");
+	return `你是剧情导演，只负责本轮调度，不写正文。\n角色名录：\n${roster || "- （无角色）"}\n根据用户最新输入和最近正文，选择本轮真正需要回应的角色（最多两个）。输出严格 JSON：{"activeActors":["角色名"],"turnFocus":"本轮焦点","stopAt":"停点"}。只能选择名录中的角色；不能替用户做决定。`;
+}
+
+export function parseDirectorDecision(text: string, profiles: ActorProfile[], fallback: DirectorDecision): DirectorDecision {
+	const match = text.match(/\{[\s\S]*\}/);
+	if (!match) return fallback;
+	try {
+		const raw = JSON.parse(match[0]) as Partial<DirectorDecision>;
+		const names = new Set(profiles.map((p) => p.name));
+		const activeActors = Array.isArray(raw.activeActors)
+			? raw.activeActors.filter((n): n is string => typeof n === "string" && names.has(n)).slice(0, 2)
+			: [];
+		if (activeActors.length === 0) return fallback;
+		return {
+			activeActors,
+			turnFocus: typeof raw.turnFocus === "string" && raw.turnFocus.trim() ? raw.turnFocus : fallback.turnFocus,
+			stopAt: typeof raw.stopAt === "string" && raw.stopAt.trim() ? raw.stopAt : fallback.stopAt,
+		};
+	} catch {
+		return fallback;
+	}
 }
 
 export function buildActorPrompt(profile: ActorProfile, decision: DirectorDecision): string {

@@ -38,7 +38,9 @@ import type { LorebookEntry } from "../types.ts";
 import {
 	actorProfilesFromState,
 	buildActorPrompt,
+	buildDirectorSelectionPrompt,
 	formatActorProposals,
+	parseDirectorDecision,
 	runActorAgents,
 	selectActiveActors,
 	type ActorProposal,
@@ -219,6 +221,8 @@ export interface StageEngineDeps {
 	actorAgents?: boolean;
 	/** 可选角色模型路由；未提供时所有角色 agent 使用当前剧情模型，但上下文仍独立。 */
 	getActorModel?: (actorName: string, fallback: StageModelLike) => StageModelLike | undefined;
+	/** 用同一剧情模型先做一次导演调度；失败时回退确定性筛选。 */
+	directorAgent?: boolean;
 	/** 会话当前思考档（用户自由，引擎透传） */
 	getThinking?: () => string | undefined;
 	/** 账本磁盘缓存路径（.liyuan-state/<sessionId>.json）；给出则场记落盘（fs.watch → state 帧） */
@@ -783,8 +787,8 @@ export class StageEngine {
 		};
 		// 导演层先做确定性调度：只把本轮真正有发言权的角色送入动态上下文。
 		// 角色 agent 的真实调用仍是可选的下一阶段，默认回落现有单次模型回合。
-		const actorProfiles = actorProfilesFromState(card, state);
-		const directorDecision = selectActiveActors(actorProfiles, lastUserText, lastNarrativeText);
+		const actorProfiles = actorProfilesFromState(card, state, {}, {}, materials.entries);
+		let directorDecision = selectActiveActors(actorProfiles, lastUserText, lastNarrativeText);
 
 		const systemPrompt = buildStageSystemPrompt({
 			card,
@@ -907,6 +911,26 @@ export class StageEngine {
 				});
 			};
 		}
+		if (this.#deps.directorAgent) {
+			try {
+				const directorStream = this.#deps.streamFn(
+					model,
+					{
+						systemPrompt: buildDirectorSelectionPrompt(actorProfiles),
+						messages: [{ role: "user", content: [{ type: "text", text: `用户最新输入：${lastUserText}\n最近正文：${lastNarrativeText || "（无）"}` }] }],
+					},
+					{ ...options, reasoning: "off", maxTokens: 300 },
+				);
+				const result = await directorStream.result();
+				const text = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n");
+				directorDecision = parseDirectorDecision(text, actorProfiles, directorDecision);
+			} catch (error) {
+				ev.onActivity?.(`导演 agent 调度失败，回落规则调度：${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+		const directorContext = `【导演 agent 决定】本轮活跃角色：${directorDecision.activeActors.join("、")}；焦点：${directorDecision.turnFocus}；停点：${directorDecision.stopAt}`;
+		const tail = messages[messages.length - 1] as { content?: Array<{ type: string; text?: string }> };
+		if (Array.isArray(tail.content) && tail.content[0]) tail.content[0].text = `${directorContext}\n\n${tail.content[0].text ?? ""}`;
 
 		// 每个活跃角色单独调用一次模型，只产出该角色的主观提案；正文仍由
 		// 下方主回合模型统一合成，因此不会出现角色 agent 直接绕过稿纸落正文。
