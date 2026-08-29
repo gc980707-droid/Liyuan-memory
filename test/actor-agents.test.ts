@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { actorProfilesFromState, buildActorPrompt, buildDirectorPrompt, buildDirectorSelectionPrompt, parseActorProposal, parseDirectorDecision, runActorAgents, selectActiveActors } from "../src/stage/actor-agents.ts";
+import { actorProfilesFromState, buildActorPrompt, buildDirectorPrompt, buildDirectorSelectionPrompt, findProposalConflicts, formatActorProposals, parseActorProposal, parseDirectorDecision, runActorAgents, selectActiveActors } from "../src/stage/actor-agents.ts";
 import type { CharacterCard, WorldState } from "../src/types.ts";
 
 const card: CharacterCard = {
@@ -70,6 +70,22 @@ test("导演 agent JSON 只允许选择名录角色，非法结果回退", () =>
 	assert.deepEqual(parseDirectorDecision('{"activeActors":["不存在的人"],"turnFocus":"门口","stopAt":"停下"}', profiles, fallback), fallback);
 	const picked = parseDirectorDecision('{"activeActors":["阿梨"],"turnFocus":"照看客人","stopAt":"交还用户"}', profiles, fallback);
 	assert.deepEqual(picked.activeActors, ["阿梨"]);
+	const paced = parseDirectorDecision('{"activeActors":["阿梨"],"turnFocus":"照看客人","stopAt":"交还用户","sceneGoal":"让客人先表态","tension":9}', profiles, fallback);
+	assert.equal(paced.sceneGoal, "让客人先表态");
+	assert.equal(paced.tension, 5);
+	assert.match(buildDirectorPrompt(paced, profiles), /冲突强度：5\/5/);
+});
+
+test("角色提案冲突只提醒、不替正文模型做决定", () => {
+	const conflicts = findProposalConflicts([
+		{ actor: "阿梨", content: "她留下", intendedAction: "留下" },
+		{ actor: "老周", content: "他转身", intendedAction: "离开" },
+	]);
+	assert.equal(conflicts.length, 1);
+	assert.match(formatActorProposals([
+		{ actor: "阿梨", content: "她留下", intendedAction: "留下" },
+		{ actor: "老周", content: "他转身", intendedAction: "离开" },
+	]), /提案冲突提醒/);
 });
 
 test("角色 agent 只按导演顺序调用活跃角色", async () => {

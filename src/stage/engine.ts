@@ -43,6 +43,7 @@ import {
 	buildDirectorPrompt,
 	buildDirectorSelectionPrompt,
 	formatActorProposals,
+	findProposalConflicts,
 	parseActorProposal,
 	parseDirectorDecision,
 	runActorAgents,
@@ -937,6 +938,7 @@ export class StageEngine {
 				const result = await directorStream.result();
 				const text = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n");
 				directorDecision = parseDirectorDecision(text, actorProfiles, directorDecision);
+				ev.onActivity?.(`导演调度：${directorDecision.activeActors.join("、") || "无角色"} · ${directorDecision.turnFocus}`);
 			} catch (error) {
 				ev.onActivity?.(`导演 agent 调度失败，回落规则调度：${error instanceof Error ? error.message : String(error)}`);
 			}
@@ -972,6 +974,8 @@ export class StageEngine {
 					recentText: lastNarrativeText,
 					sharedState: { time: state.time, location: state.location },
 				});
+				const conflicts = findProposalConflicts(actorProposals);
+				if (conflicts.length > 0) ev.onActivity?.(`角色提案冲突：${conflicts.join("；")}`);
 				const actorContext = formatActorProposals(actorProposals);
 				if (actorContext) {
 					const tail = messages[messages.length - 1] as { content?: Array<{ type: string; text?: string }> };
