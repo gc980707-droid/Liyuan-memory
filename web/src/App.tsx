@@ -12,6 +12,7 @@ import {
 	apiGetCacheClear,
 	apiGetCacheClearForPanel,
 	apiPost,
+	apiPut,
 	personaAvatarUrl,
 	prefetchPanelApis,
 	uploadFile,
@@ -1226,6 +1227,38 @@ export default function App() {
 			runCommand: (cmd) => {
 				if (connRef.current !== "open") return;
 				ws.send({ type: "prompt", text: cmd });
+			},
+			updateWorldbook: async (name, updater) => {
+				// 角色卡按酒馆世界书名找对应文件；更新统一走梨园 REST，避免只在
+				// iframe 内改数组、刷新后又丢失。
+				const listed = await apiGet<{ books: Array<{ path: string; name: string }> }>("/api/lorebooks");
+				const book = listed.books?.find((b) => b.name === name || b.path.replace(/\.json$/i, "").endsWith(`/${name}`));
+				if (!book) throw new Error(`世界书不存在：${name}`);
+				const view = await apiGet<{ entries: Array<{ fingerprint: string; comment: string; keys: string[]; secondaryKeys: string[]; constant: boolean; selective: boolean; order: number; }> }>(
+					`/api/lorebook?path=${encodeURIComponent(book.path)}`,
+				);
+				const current = await Promise.all(view.entries.map(async (e) => ({
+					...e,
+					content: (await apiGet<{ content: string }>(`/api/lorebook/entry?fp=${encodeURIComponent(e.fingerprint)}`)).content,
+				})));
+				const next = await updater(current);
+				if (!Array.isArray(next)) throw new Error("世界书更新结果不是数组");
+				for (let i = 0; i < next.length; i++) {
+					const entry = next[i] as Record<string, unknown> | undefined;
+					const old = current[i];
+					if (!entry || !old) continue;
+					await apiPut("/api/lorebook/entry", {
+						fingerprint: old.fingerprint,
+						comment: typeof entry.comment === "string" ? entry.comment : old.comment,
+						content: typeof entry.content === "string" ? entry.content : old.content,
+						keys: Array.isArray(entry.keys) ? entry.keys : old.keys,
+						secondaryKeys: Array.isArray(entry.secondaryKeys) ? entry.secondaryKeys : old.secondaryKeys,
+						constant: typeof entry.constant === "boolean" ? entry.constant : old.constant,
+						selective: typeof entry.selective === "boolean" ? entry.selective : old.selective,
+						order: typeof entry.order === "number" ? entry.order : old.order,
+					});
+				}
+				return next;
 			},
 		});
 		return () => registerTavernChatBridge(null);

@@ -291,7 +291,15 @@ export function buildSrcDoc(html: string, scripts: boolean, seamless: boolean): 
 		: `default-src 'none'; style-src 'unsafe-inline' https: http: data:; img-src data: blob: https: http:; font-src data: https: http:; media-src data: blob: https: http:`;
 	const seamlessCss = isFull ? (takeover ? TAKEOVER_DOC_CSS : SEAMLESS_DOC_CSS) : SEAMLESS_FRAGMENT_CSS;
 	// 脚本帧：垫片桥必须先于卡脚本，保证 eventOn / TavernHelper / jQuery / 变量系统在初始化时已存在
-	const bridge = scripts ? IFRAME_TAVERN_BRIDGE_SNIPPET + IFRAME_TAVERN_GLOBALS_SNIPPET : "";
+	// 卡脚本通常把世界书名写在 TARGET_WORLDBOOK_NAME 常量里；把它带进 iframe
+	// 垫片，避免用某一张测试卡的旧名称硬编码，导致按钮误报「世界书不存在」。
+	const worldbookNames = scripts
+		? [...html.matchAll(/TARGET_WORLDBOOK_NAME\s*=\s*["'`]([^"'`]+)["'`]/g)].map((m) => m[1]).filter(Boolean)
+		: [];
+	const worldbookSeed = scripts
+		? `<script>window.__liyuanWorldbookNames=${JSON.stringify(worldbookNames)};</script>`
+		: "";
+	const bridge = scripts ? IFRAME_TAVERN_BRIDGE_SNIPPET + worldbookSeed + IFRAME_TAVERN_GLOBALS_SNIPPET : "";
 	const head =
 		`<meta charset="utf-8">` +
 		`<meta http-equiv="Content-Security-Policy" content="${csp}">` +

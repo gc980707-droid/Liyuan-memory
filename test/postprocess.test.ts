@@ -223,6 +223,11 @@ test("prepareDisplayText：开场变量更新区隐藏，保留作者状态栏�
 	assert.equal(out, "开场剧情。\n\n<StatusPlaceHolderImpl/>");
 });
 
+test("prepareDisplayText：常见 MVU 初始化别名也不混入开场正文", () => {
+	const out = prepareDisplayText("开场剧情\n\n初始状态\n{\"时间\":\"乱码协议\"}\n<StatusPlaceHolderImpl/>");
+	assert.equal(out, "开场剧情\n\n<StatusPlaceHolderImpl/>");
+});
+
 test("prepareDisplayText: 开场前缀+占位符经皮肤成围栏文档", () => {	const raw = `【开场 · LWS】\n【本世界身份认证】`;
 	const html = `<!doctype html>\n<html><head></head><body><h1>性别</h1><script>1</script></body></html>`;
 	const skin = {
