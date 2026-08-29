@@ -352,6 +352,10 @@ export const IFRAME_TAVERN_GLOBALS_SNIPPET = `<script>(function(){
   if(typeof g.getAllVariables!=="function"){
     g.getAllVariables=function(){var v=g.__liyuanVariables||null;return v&&typeof v==="object"?v:{stat_data:{}};};
   }
+  // 酒馆卡 HTML 常用这两个只读接口回看当前楼层；显示正则已把原始匹配
+  // 内容注入 __liyuanMessageText，因此这里返回真实文本而不是空壳。
+  if(typeof g.getCurrentMessageId!=="function")g.getCurrentMessageId=function(){return 0;};
+  if(typeof g.getChatMessages!=="function")g.getChatMessages=function(){return [{message:String(g.__liyuanMessageText||"")}];};
   if(typeof g.addEventListener==="function"){
     g.addEventListener("message",function(ev){
       var d=ev&&ev.data;

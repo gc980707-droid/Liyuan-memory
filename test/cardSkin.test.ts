@@ -28,6 +28,18 @@ test("{{match}} 映射整段命中", () => {
 	assert.equal(applyCardSkin("**重要**", [rule], M), "<mark>**重要**</mark>");
 });
 
+test("酒馆消息读取兼容：心声 HTML 带上被正则匹配的 inner 原文", () => {
+	const rule = {
+		name: "心声",
+		source: "<inner>[\\s\\S]*?</inner>",
+		flags: "g",
+		replace: "```html\n<script>const x=getChatMessages(getCurrentMessageId());</script>\n```",
+	};
+	const out = applyCardSkin("正文\n<inner>[沈云熙：我想回家。]</inner>", [rule], M);
+	assert.match(out, /__liyuanMessageText=/);
+	assert.match(out, /沈云熙/);
+});
+
 test("单条规则运行期出错不影响其余规则", () => {
 	// flags 合法但 source 在应用期构造失败的场景难造,退一步:构造期抛错由 try/catch 吞掉
 	const bad = { name: "坏", source: "(?<", flags: "g", replace: "x" };
