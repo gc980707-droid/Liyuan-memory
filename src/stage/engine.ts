@@ -35,6 +35,7 @@ import { splitWithManifest } from "../preset-skill.ts";
 import { formatRosterIndex, formatState, saveState } from "../state.ts";
 import { isBackstageText } from "../stance.ts";
 import type { LorebookEntry } from "../types.ts";
+import { actorProfilesFromState, selectActiveActors } from "./actor-agents.ts";
 import {
 	buildStageInjection,
 	buildStageSystemPrompt,
@@ -769,6 +770,10 @@ export class StageEngine {
 			charName: card.name,
 			baseState: state,
 		};
+		// 导演层先做确定性调度：只把本轮真正有发言权的角色送入动态上下文。
+		// 角色 agent 的真实调用仍是可选的下一阶段，默认回落现有单次模型回合。
+		const actorProfiles = actorProfilesFromState(card, state);
+		const directorDecision = selectActiveActors(actorProfiles, lastUserText, lastNarrativeText);
 
 		const systemPrompt = buildStageSystemPrompt({
 			card,
@@ -794,6 +799,7 @@ export class StageEngine {
 			...(wsDeps.rules.wordRange ? { wordRange: wsDeps.rules.wordRange } : {}),
 			loreIndex: formatLoreIndex(materials.entries),
 			rosterIndex: formatRosterIndex(state),
+			director: { decision: directorDecision, profiles: actorProfiles },
 		});
 
 		// §4.B 输出合约：v1 供数＝装载期一次性模型声明（M-R4 首件，指纹缓存，换卡/改预设即重声明）；

@@ -18,6 +18,7 @@ import { projectMvuToWorldState } from "../mvu.ts";
 import { formatState, defaultState } from "../state.ts";
 import { isBackstageText } from "../stance.ts";
 import type { CharacterCard, LorebookEntry, MacroContext, RpConfig, WorldState } from "../types.ts";
+import { buildDirectorPrompt, type ActorProfile, type DirectorDecision } from "./actor-agents.ts";
 
 // ---------------- 分支 → 历史 ----------------
 
@@ -416,6 +417,8 @@ export interface StageInjectionOptions {
 	loreIndex?: string;
 	/** 登场名录索引行（formatRosterIndex 产出） */
 	rosterIndex?: string;
+	/** 本轮导演调度结果；缺省时保持旧的单角色流程。 */
+	director?: { decision: DirectorDecision; profiles: ActorProfile[] };
 }
 
 /**
@@ -436,11 +439,16 @@ export function buildStageInjection({
 	wordRange,
 	loreIndex,
 	rosterIndex,
+	director,
 }: StageInjectionOptions): string {
 	const macro: MacroContext = { charName: card.name, userName: config.userName };
 	const blocks: string[] = [];
 
 	blocks.push(`【世界状态】\n${formatState(state)}`);
+
+	if (director) {
+		blocks.push(`【导演调度】\n${buildDirectorPrompt(director.decision, director.profiles)}`);
+	}
 
 	if (rosterIndex) {
 		blocks.push(`【登场名录】${rosterIndex}`);
