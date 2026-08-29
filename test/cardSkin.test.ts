@@ -28,6 +28,18 @@ test("{{match}} 映射整段命中", () => {
 	assert.equal(applyCardSkin("**重要**", [rule], M), "<mark>**重要**</mark>");
 });
 
+test("酒馆消息读取兼容：心声 HTML 带上被正则匹配的 inner 原文", () => {
+	const rule = {
+		name: "心声",
+		source: "<inner>[\\s\\S]*?</inner>",
+		flags: "g",
+		replace: "```html\n<script>const x=getChatMessages(getCurrentMessageId());</script>\n```",
+	};
+	const out = applyCardSkin("正文\n<inner>[沈云熙：我想回家。]</inner>", [rule], M);
+	assert.match(out, /__liyuanMessageText=/);
+	assert.match(out, /沈云熙/);
+});
+
 test("单条规则运行期出错不影响其余规则", () => {
 	// flags 合法但 source 在应用期构造失败的场景难造,退一步:构造期抛错由 try/catch 吞掉
 	const bad = { name: "坏", source: "(?<", flags: "g", replace: "x" };
@@ -36,6 +48,14 @@ test("单条规则运行期出错不影响其余规则", () => {
 
 test("空规则原文返回", () => {
 	assert.equal(applyCardSkin("原文", [], M), "原文");
+});
+
+test("深度限定: 只在 ST 规则指定的消息深度应用", () => {
+	const rule = { ...wrapOpen, minDepth: 1, maxDepth: 2 };
+	const source = "<StatusBlock>状态</StatusBlock>";
+	assert.equal(applyCardSkin(source, [rule], M, 0), source);
+	assert.ok(applyCardSkin(source, [rule], M, 1).includes('<div style="x"><status>'));
+	assert.equal(applyCardSkin(source, [rule], M, 3), source);
 });
 
 test("字面量 $' 不得被 String.replace 特殊序列吃掉（程序卡 '$' 字符）", () => {

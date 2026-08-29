@@ -79,6 +79,7 @@ import {
 	updateStoreConfig,
 } from "../src/memory/index.ts";
 import { resolveConfigPath } from "../src/paths.ts";
+import { loadActorProfileOverrides, saveActorProfileOverrides, type ActorProfileOverrides } from "../src/actor-profiles.ts";
 import { ensurePresetSkills, presetSkillDir, presetSkillSlug } from "../src/preset-skill.ts";
 import { ensureSortResult, loadSortResult, sortFingerprint, type SortDeps } from "../src/preset-sort.ts";
 import { scanSkillFiles } from "../src/stage/materials.ts";
@@ -2147,6 +2148,25 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 				if (!body.patch || typeof body.patch !== "object") throw new Error("缺少 patch");
 				const r = await host.applyStatePatch(body.patch);
 				sendJson(res, 200, r);
+				return true;
+			}
+
+			// ---- 独立角色 agent 档案（项目级，不随单次会话状态丢失） ----
+			case "GET /api/actor-profiles": {
+				sendJson(res, 200, { version: 1, actors: loadActorProfileOverrides(host.cwd) });
+				return true;
+			}
+			case "PUT /api/actor-profiles": {
+				if (refuseWhileStreaming()) return true;
+				const body = JSON.parse(await readBody(req)) as { actors?: unknown };
+				if (!body.actors || typeof body.actors !== "object" || Array.isArray(body.actors)) throw new Error("角色档案必须是对象");
+				const actors: Record<string, ActorProfileOverrides> = {};
+				for (const [name, value] of Object.entries(body.actors as Record<string, unknown>)) {
+					if (!value || typeof value !== "object" || !name.trim()) continue;
+					actors[name] = value as ActorProfileOverrides;
+				}
+				saveActorProfileOverrides(host.cwd, actors);
+				sendJson(res, 200, { ok: true, actors: loadActorProfileOverrides(host.cwd) });
 				return true;
 			}
 

@@ -9,6 +9,7 @@ import {
 	formatPlan,
 	MAX_STEPS,
 	MAX_STEP_LEN,
+	findStatePatchConflicts,
 	projectedState,
 	recordSegment,
 	runWriteTool,
@@ -394,6 +395,20 @@ test("world_state_update：角色键在投影上归一（大小写变体不裂�
 	assert.deepEqual(Object.keys(proj.characters), ["Alice"]);
 	assert.equal(proj.characters.Alice.affinity, 10);
 	assert.equal(proj.characters.Alice.status, "警惕");
+});
+
+test("world_state_update：同拍同字段冲突给出提醒并按顺序保留", () => {
+	const ws = createWorkspace();
+	const d = deps();
+	runWriteTool(ws, d, "world_state_update", { patch: { time: "午时", characters: { 林霜: { status: "站着" } } } });
+	const r = runWriteTool(ws, d, "world_state_update", { patch: { time: "入夜", characters: { 林霜: { status: "坐下" } } } });
+	assert.equal(r.ok, true);
+	assert.match(r.text, /同一字段有多次不同更新/);
+	assert.deepEqual(findStatePatchConflicts(ws.patches.slice(0, 1), ws.patches[1]!), [
+		'time（"午时" → "入夜"）',
+		'characters.林霜.status（"站着" → "坐下"）',
+	]);
+	assert.equal(projectedState(ws, d.baseState).time, "入夜");
 });
 
 test("未知写侧工具名：可读文本，不抛", () => {

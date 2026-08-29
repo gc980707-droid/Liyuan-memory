@@ -67,7 +67,10 @@ const historyOnlyStrip = new Set<string>(HISTORY_STRIP_BUILTIN);
  * 变量是初始化协议，不是剧情正文；保留挂载点，让后续卡正则继续生成作者自己的状态栏。
  */
 function hideGreetingInitvar(text: string): string {
-	const marker = text.indexOf("变量更新情况");
+	// 不同卡把同一段 MVU 初始化叫法写得不一致；只截掉「初始化标题→挂载点」
+	// 之间的协议文本，挂载点前的真实开场剧情和挂载点本身都保留。
+	const markerMatch = /(?:变量更新情况|变量初始化|初始变量|初始状态|\[mvu_update\])/i.exec(text);
+	const marker = markerMatch?.index ?? -1;
 	if (marker < 0) return text;
 	const mount = text.search(/<StatusPlaceHolderImpl\s*\/?>/i);
 	if (mount <= marker) return text;
@@ -404,11 +407,11 @@ function protectSkinDivs(text: string): { text: string; stash: string[] } {
  * 4) 皮肤 div 与叙事混排 → div 占位保护后照常过滤（thinking/注释不得因皮肤漏网），再还原
  * 5) 其余 displayAssistantText（fold/panel/unwrap）
  */
-export function prepareDisplayText(text: string, skin?: DisplaySkin | null): string {
+export function prepareDisplayText(text: string, skin?: DisplaySkin | null, depth = 0): string {
 	if (!text) return "";
 	let t = hideGreetingInitvar(text);
 	if (skin?.rules?.length) {
-		t = applyCardSkin(t, skin.rules, { charName: skin.charName, userName: skin.userName });
+		t = applyCardSkin(t, skin.rules, { charName: skin.charName, userName: skin.userName }, depth);
 	}
 	// 整段就是界面（前后无叙事）：原样交出，不拆
 	if (isFullPageHtmlPayload(t) && isBareFullPagePayload(t)) {

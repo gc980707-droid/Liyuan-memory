@@ -18,6 +18,7 @@ import { projectMvuToWorldState } from "../mvu.ts";
 import { formatState, defaultState } from "../state.ts";
 import { isBackstageText } from "../stance.ts";
 import type { CharacterCard, LorebookEntry, MacroContext, RpConfig, WorldState } from "../types.ts";
+import { buildDirectorPrompt, type ActorProfile, type DirectorDecision } from "./actor-agents.ts";
 
 // ---------------- 分支 → 历史 ----------------
 
@@ -275,10 +276,15 @@ export function buildStageSystemPrompt({
 
 	sections.push(
 		`# 舞台
-你在进行一场长篇沉浸式角色扮演：扮演 ${card.name}，以及剧情需要的一切配角、路人与世界本身。用户扮演 ${config.userName}。
+你在进行一场长篇沉浸式角色扮演：扮演 ${card.name}。其他角色只在本轮【导演调度】明确允许时出现；未被调度的角色、路人和世界不主动替它们发言或行动。用户扮演 ${config.userName}。
 
 ## 用户角色主权
-${config.userName} 的动作、台词、决定、攻击、移动和物品使用只能来自用户本轮明确写出的内容。你不得替 ${config.userName} 补写、猜测或推进任何行动；“我继续举枪看着门口”只能描写持枪观察和环境反应，不能擅自开枪。若后续剧情必须依赖 ${config.userName} 的选择，停在选择点并调用 \`ask\`，不要替用户选。`,
+${config.userName} 的动作、台词、决定、攻击、移动和物品使用只能来自用户本轮明确写出的内容。你不得替 ${config.userName} 补写、猜测或推进任何行动；“我继续举枪看着门口”只能描写持枪观察和环境反应，不能擅自开枪。若后续剧情必须依赖 ${config.userName} 的选择，停在选择点并调用 \`ask\`，不要替用户选。没有真正分岔时顺着当前关系和情绪自然回应，不要为了把球递回去而提问。`,
+	);
+
+	sections.push(
+		`# 导演调度边界
+每轮末端会提供【导演调度】和可能的【角色 agent 提案】。只让被调度的角色回应；提案只是角色的主观候选反应，不是已经发生的正文。你负责把它们合成为自然的一轮正文，并继续遵守用户角色主权。`,
 	);
 
 	const charParts: string[] = [`# 你扮演的角色：${card.name}`];
@@ -293,6 +299,16 @@ ${config.userName} 的动作、台词、决定、攻击、移动和物品使用�
 	const userParts: string[] = [`# 用户扮演：${config.userName}`];
 	userParts.push(config.userPersona ? m(config.userPersona) : `（${config.userName} 的具体形象由用户在剧情中自行呈现）`);
 	sections.push(userParts.join("\n"));
+
+	sections.push(
+		`# 对话感（默认优先）
+这是与用户一起进行的即时对话，不是一次性交稿的小说。每次回复先回应用户刚说的具体内容和情绪，再推进一个小动作或一个交流回合；让角色像在现场听见、理解并回应，而不是隔着镜头连续旁白。
+- 默认以对白和即时反应为主：动作/环境只写当前回应所需要的少量细节，避免连续罗列外貌、眼泪、呼吸、衣物、灯光等镜头语言。
+- 一轮只推进一个小节点：简单寒暄可以短，正常剧情轮应有 3–6 个自然段，完整呈现这一个节点中的回应、必要动作、情绪变化和对白；说完就自然停顿。停顿可以是动作、情绪、环境变化或一句未完的话，不等于必须用问句结尾。除非用户明确要求长篇描写，不要替多个角色连续演完整场戏。
+- 不替用户补台词、动作、想法或决定；只有确实需要用户拍板的分岔才提问。角色可以陈述、回应、沉默或做出不替用户决定的动作，不要把每轮都写成采访。
+- 避免模板化的情绪循环和同义重复。角色应根据用户最新一句话产生具体、变化的回应；没有新信息就少写，不要用描写填长度。
+- 剧情需要展开时，把主动权交回用户：让一个角色说话、做一个可回应的动作，停笔。长篇叙事是用户明确要求后的模式，不是默认模式。`,
+	);
 
 	if (constantLore.length > 0) {
 		const loreText = constantLore.map((e) => `- ${e.comment ? `【${e.comment}】` : ""}${m(e.content)}`).join("\n");
@@ -336,6 +352,7 @@ ${index}`,
 - 标注【开场】的消息是 ${card.name} 的既定开场白，剧情从那一刻继续。
 - 标注【前情提要】的消息是更早剧情的接力摘要，是既定事实。
 - 标注【世界状态】的消息是当前事实基准：剧情记忆与它冲突时，以状态为准并在叙事内自然圆回，绝不跳出剧情解释。
+- 开场白只是过去的起点，不是当前时刻；当前时间、地点和人物状态以最近一条用户消息、最近正文和【世界状态】为准。除非剧情明确回到过去，不要把开场白里的清晨/昨天等旧时间带进当前回复。
 - 标注【登场名录】的消息是登场过但已不在当前状态的条目索引（离场/失去/了结）${tools !== false ? "，细节可用 `memory_search` 查" : ""}；名录之外的名字才是新登场。
 - 标注【活跃面板】的消息是各面板的当前内容（用户可能手改过），其中事实为准。
 - 标注【相关设定】的消息是自动附上的世界书参考，按需取用。
@@ -351,6 +368,13 @@ ${index}`,
 	if (card.systemPrompt) {
 		sections.push(`# 卡作者附加指令（优先级最高）\n${m(card.systemPrompt)}`);
 	}
+
+	// 放在卡作者附加指令之后，作为每轮都要执行的运行时事实边界：很多卡的
+	// first_mes 是固定开场，不应压过用户刚刚给出的当前动作和场景。
+	sections.push(
+		`# 本轮正文执行边界
+每轮生成时，用户最新消息和最近的剧情正文是当前时刻的第一事实；卡的 first_mes/开场白只用于了解人物关系和已经发生的背景，不得把其中的时间、地点、动作或大段描写机械续用到当前场景。只取卡的角色设定与说话倾向，不复读卡字段或开场白中的静态描写。`,
+	);
 
 	return sections.join("\n\n");
 }
@@ -398,6 +422,8 @@ export interface StageInjectionOptions {
 	loreIndex?: string;
 	/** 登场名录索引行（formatRosterIndex 产出） */
 	rosterIndex?: string;
+	/** 本轮导演调度结果；缺省时保持旧的单角色流程。 */
+	director?: { decision: DirectorDecision; profiles: ActorProfile[] };
 }
 
 /**
@@ -418,11 +444,16 @@ export function buildStageInjection({
 	wordRange,
 	loreIndex,
 	rosterIndex,
+	director,
 }: StageInjectionOptions): string {
 	const macro: MacroContext = { charName: card.name, userName: config.userName };
 	const blocks: string[] = [];
 
 	blocks.push(`【世界状态】\n${formatState(state)}`);
+
+	if (director) {
+		blocks.push(`【导演调度】\n${buildDirectorPrompt(director.decision, director.profiles)}`);
+	}
 
 	if (rosterIndex) {
 		blocks.push(`【登场名录】${rosterIndex}`);

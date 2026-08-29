@@ -19,6 +19,7 @@ function mkProject() {
 	const cwd = mkdtempSync(join(tmpdir(), "liyuan-backup-"));
 	const agentHome = mkdtempSync(join(tmpdir(), "liyuan-agent-"));
 	writeFileSync(join(cwd, "liyuan.config.json"), JSON.stringify({ card: "assets/cards/a.png" }));
+	writeFileSync(join(cwd, ".liyuan-actor-profiles.json"), JSON.stringify({ version: 1, actors: { 阿梨: { identity: "掌柜" } } }));
 	mkdirSync(join(cwd, ".liyuan-state"), { recursive: true });
 	writeFileSync(join(cwd, ".liyuan-state", "sess.json"), '{"time":"night"}');
 	mkdirSync(join(cwd, ".liyuan-memory", "scopes", "x"), { recursive: true });
@@ -53,6 +54,7 @@ test("buildBackupZip：作用域正确——含数据/素材/会话，排除 ext
 		const names = listZipEntries(zip).map((e) => e.name);
 		assert.ok(names.includes("manifest.json"));
 		assert.ok(names.includes("project/liyuan.config.json"));
+		assert.ok(names.includes("project/.liyuan-actor-profiles.json"));
 		assert.ok(names.includes("project/.liyuan-state/sess.json"));
 		assert.ok(names.includes("project/.liyuan-memory/scopes/x/chunks.jsonl"));
 		assert.ok(names.includes("project/assets/cards/a.png"));

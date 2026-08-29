@@ -11,10 +11,12 @@
  * 依赖全部注入（SessionManager / 模型 / 流函数），可用 faux provider 离线整测。
  */
 
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 
 import { applyProjectedSamplers } from "../samplers.ts";
+import { loadCardFile } from "../card.ts";
+import { loadActorProfileOverrides } from "../actor-profiles.ts";
 import { extractDraftRules } from "../draft.ts";
 import {
 	appendOverlayEntry,
@@ -35,6 +37,19 @@ import { splitWithManifest } from "../preset-skill.ts";
 import { formatRosterIndex, formatState, saveState } from "../state.ts";
 import { isBackstageText } from "../stance.ts";
 import type { LorebookEntry } from "../types.ts";
+import {
+	actorProfilesFromState,
+	buildActorPrompt,
+	buildDirectorPrompt,
+	buildDirectorSelectionPrompt,
+	formatActorProposals,
+	findProposalConflicts,
+	parseActorProposal,
+	parseDirectorDecision,
+	runActorAgents,
+	selectActiveActors,
+	type ActorProposal,
+} from "./actor-agents.ts";
 import {
 	buildStageInjection,
 	buildStageSystemPrompt,
@@ -207,6 +222,12 @@ export interface StageEngineDeps {
 	getSessionManager: () => StageSessionManager;
 	getModel: () => StageModelLike | undefined;
 	getAuth: (model: StageModelLike) => Promise<{ apiKey?: string; headers?: Record<string, string> }>;
+	/** 开启导演筛选后的独立角色 agent 提案；省略时保持单模型回合兼容行为。 */
+	actorAgents?: boolean;
+	/** 可选角色模型路由；未提供时所有角色 agent 使用当前剧情模型，但上下文仍独立。 */
+	getActorModel?: (actorName: string, fallback: StageModelLike) => StageModelLike | undefined;
+	/** 用同一剧情模型先做一次导演调度；失败时回退确定性筛选。 */
+	directorAgent?: boolean;
 	/** 会话当前思考档（用户自由，引擎透传） */
 	getThinking?: () => string | undefined;
 	/** 账本磁盘缓存路径（.liyuan-state/<sessionId>.json）；给出则场记落盘（fs.watch → state 帧） */
@@ -769,6 +790,20 @@ export class StageEngine {
 			charName: card.name,
 			baseState: state,
 		};
+		// 导演层先做确定性调度：只把本轮真正有发言权的角色送入动态上下文。
+		// 角色 agent 的真实调用仍是可选的下一阶段，默认回落现有单次模型回合。
+		const actorProfiles = actorProfilesFromState(card, state, {}, {}, materials.entries, loadActorProfileOverrides(cwd));
+		for (const profile of actorProfiles) {
+			if (!profile.cardPath) continue;
+			try {
+				const actorCard = loadCardFile(isAbsolute(profile.cardPath) ? profile.cardPath : join(cwd, profile.cardPath));
+				profile.identity = [actorCard.description, actorCard.personality, actorCard.scenario].filter(Boolean).join("\n") || profile.identity;
+				profile.knownFacts = [...profile.knownFacts, ...(actorCard.scenario ? [`角色卡场景：${actorCard.scenario}`] : [])];
+			} catch (error) {
+				ev.onActivity?.(`角色卡装载失败（${profile.name}）：${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+		let directorDecision = selectActiveActors(actorProfiles, lastUserText, lastNarrativeText);
 
 		const systemPrompt = buildStageSystemPrompt({
 			card,
@@ -783,6 +818,7 @@ export class StageEngine {
 			// 与旧 director.ts 同一位置——工具清单里有 mcp__ 工具，这里说明它们是什么。
 			mcpTools: mcpTools.map((t) => ({ name: t.name, description: t.description })),
 		});
+		let actorProposals: ActorProposal[] = [];
 		const injection = buildStageInjection({
 			state,
 			activatedLore: activated,
@@ -888,6 +924,66 @@ export class StageEngine {
 					api: typeof m.api === "string" ? m.api : undefined,
 				});
 			};
+		}
+		if (this.#deps.directorAgent) {
+			try {
+				const directorStream = this.#deps.streamFn(
+					model,
+					{
+						systemPrompt: buildDirectorSelectionPrompt(actorProfiles),
+						messages: [{ role: "user", content: [{ type: "text", text: `用户最新输入：${lastUserText}\n最近正文：${lastNarrativeText || "（无）"}` }] }],
+					},
+					{ ...options, reasoning: "off", maxTokens: 300 },
+				);
+				const result = await directorStream.result();
+				const text = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n");
+				directorDecision = parseDirectorDecision(text, actorProfiles, directorDecision);
+				ev.onActivity?.(`导演调度：${directorDecision.activeActors.join("、") || "无角色"} · ${directorDecision.turnFocus}`);
+			} catch (error) {
+				ev.onActivity?.(`导演 agent 调度失败，回落规则调度：${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+		const directorContext = `【导演调度】\n${buildDirectorPrompt(directorDecision, actorProfiles)}`;
+		const tail = messages[messages.length - 1] as { content?: Array<{ type: string; text?: string }> };
+		if (Array.isArray(tail.content) && tail.content[0]) tail.content[0].text = `${directorContext}\n\n${tail.content[0].text ?? ""}`;
+
+		// 每个活跃角色单独调用一次模型，只产出该角色的主观提案；正文仍由
+		// 下方主回合模型统一合成，因此不会出现角色 agent 直接绕过稿纸落正文。
+		const actorAgents = actorProfiles.map((profile) => ({
+			profile,
+			respond: async (input: { userText: string; recentText: string; sharedState: { time: string; location: string } }) => {
+				const actorModel = this.#deps.getActorModel?.(profile.name, model) ?? model;
+				const actorAuth = actorModel === model ? { apiKey, headers } : await this.#deps.getAuth(actorModel);
+				const actorStream = this.#deps.streamFn(
+					actorModel,
+					{
+						systemPrompt: buildActorPrompt(profile, directorDecision),
+						messages: [{ role: "user", content: [{ type: "text", text: `时间：${input.sharedState.time}\n地点：${input.sharedState.location}\n最近正文：${input.recentText || "（无）"}\n用户最新输入：${input.userText}` }] }],
+					},
+					{ ...options, ...actorAuth, reasoning: "off", maxTokens: 800 },
+				);
+				const result = await actorStream.result();
+				const content = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n");
+				return parseActorProposal(content, profile);
+			},
+		}));
+		if (this.#deps.actorAgents && actorAgents.length > 0) {
+			try {
+				actorProposals = await runActorAgents(directorDecision, actorAgents, {
+					userText: lastUserText,
+					recentText: lastNarrativeText,
+					sharedState: { time: state.time, location: state.location },
+				});
+				const conflicts = findProposalConflicts(actorProposals);
+				if (conflicts.length > 0) ev.onActivity?.(`角色提案冲突：${conflicts.join("；")}`);
+				const actorContext = formatActorProposals(actorProposals);
+				if (actorContext) {
+					const tail = messages[messages.length - 1] as { content?: Array<{ type: string; text?: string }> };
+					if (Array.isArray(tail.content) && tail.content[0]) tail.content[0].text = `${actorContext}\n\n${tail.content[0].text ?? ""}`;
+				}
+			} catch (error) {
+				ev.onActivity?.(`角色 agent 提案失败，回落正文模型：${error instanceof Error ? error.message : String(error)}`);
+			}
 		}
 
 		const s = this.#deps.streamFn(model, { systemPrompt, messages, tools }, options);

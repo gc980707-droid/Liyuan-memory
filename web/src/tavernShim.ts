@@ -28,6 +28,8 @@ export type TavernChatBridge = {
 	sendPrompt: (text: string) => void;
 	/** 可选：执行梨园斜杠命令原文（如 /rewind） */
 	runCommand?: (text: string) => void;
+	/** 持久化卡内世界书更新；未提供时仍允许卡脚本本地完成更新。 */
+	updateWorldbook?: (name: string, updater: (entries: unknown[]) => unknown[] | Promise<unknown[]>) => Promise<unknown[] | void>;
 };
 
 type BusMap = Map<string, Set<(...args: unknown[]) => void>>;
@@ -199,6 +201,8 @@ export function installParentTavernShim(): void {
 			void triggerSlash(d.liyuanTriggerSlash);
 		});
 	}
+	(w as Window & { __liyuanWorldbookUpdate?: (name: string, updater: (entries: unknown[]) => unknown[] | Promise<unknown[]>) => Promise<unknown[] | void> }).__liyuanWorldbookUpdate =
+		(name, updater) => chatBridge?.updateWorldbook ? chatBridge.updateWorldbook(name, updater) : Promise.resolve();
 
 	w.TavernHelper = {
 		/**
@@ -348,6 +352,10 @@ export const IFRAME_TAVERN_GLOBALS_SNIPPET = `<script>(function(){
   if(typeof g.getAllVariables!=="function"){
     g.getAllVariables=function(){var v=g.__liyuanVariables||null;return v&&typeof v==="object"?v:{stat_data:{}};};
   }
+  // 酒馆卡 HTML 常用这两个只读接口回看当前楼层；显示正则已把原始匹配
+  // 内容注入 __liyuanMessageText，因此这里返回真实文本而不是空壳。
+  if(typeof g.getCurrentMessageId!=="function")g.getCurrentMessageId=function(){return 0;};
+  if(typeof g.getChatMessages!=="function")g.getChatMessages=function(){return [{message:String(g.__liyuanMessageText||"")}];};
   if(typeof g.addEventListener==="function"){
     g.addEventListener("message",function(ev){
       var d=ev&&ev.data;
@@ -388,13 +396,20 @@ export const IFRAME_TAVERN_GLOBALS_SNIPPET = `<script>(function(){
       return function(){try{return fn.apply(this,arguments);}catch(e){console.error("[liyuan card]",e);}};
     };
   }
-  if(typeof g.getWorldbookNames!=="function")g.getWorldbookNames=function(){return ["缝缝缝区行动1.1"];};
+  if(typeof g.getWorldbookNames!=="function")g.getWorldbookNames=function(){return Array.isArray(g.__liyuanWorldbookNames)?g.__liyuanWorldbookNames:[];};
   if(typeof g.substitudeMacros!=="function")g.substitudeMacros=function(s){return String(s).replace(/\{\{\s*(user|char)\s*\}\}/gi,function(_,n){return n.toLowerCase()==="user"?"旅人":"角色";});};
   if(typeof g.updateWorldbookWith!=="function")g.updateWorldbookWith=async function(name,updater){
-    if(name!=="缝缝缝区行动1.1")throw new Error("世界书不存在："+name);
+    var names=g.getWorldbookNames();
+    if(names.indexOf(name)<0)throw new Error("世界书不存在："+name);
+    var p=g.parent&&g.parent!==g?g.parent:null;
+    if(p&&typeof p.__liyuanWorldbookUpdate==="function"){
+      return await p.__liyuanWorldbookUpdate(name,updater);
+    }
     var current=[];
     var next=typeof updater==="function"?await updater(current):current;
-    try{g.parent&&g.parent.postMessage({liyuanWorldbookUpdate:{name:name,entries:next}} ,"*");}catch(e){}
+    try{
+      if(p)p.postMessage({liyuanWorldbookUpdate:{name:name,entries:next}},"*");
+    }catch(e){console.error("[liyuan worldbook]",e);throw e;}
     return next;
   };
   if(!g.toastr)g.toastr={

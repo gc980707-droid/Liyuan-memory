@@ -16,6 +16,9 @@ export interface DisplayRule {
 	source: string;
 	flags: string;
 	replace: string;
+	/** ST 消息深度限制：0 表示当前消息，越大越旧；缺省为不限制 */
+	minDepth?: number;
+	maxDepth?: number;
 }
 
 /** 一档皮肤快照:wire hello / REST 共用,前端据此注入显示管线 */
@@ -143,10 +146,8 @@ export function displayRules(scripts: unknown[]): DisplayRule[] {
 			console.warn(`[cardfront] 规则「${String(r.scriptName ?? "?")}」用了 substituteRegex,v1 不支持,跳过`);
 			continue;
 		}
-		// v1 明确不支持深度限定,忽略但提示(规则仍应用)
-		if (r.minDepth != null || r.maxDepth != null) {
-			console.warn(`[cardfront] 规则「${String(r.scriptName ?? "?")}」的深度限定被忽略`);
-		}
+		const minDepth = typeof r.minDepth === "number" && Number.isFinite(r.minDepth) ? Math.max(0, Math.floor(r.minDepth)) : undefined;
+		const maxDepth = typeof r.maxDepth === "number" && Number.isFinite(r.maxDepth) ? Math.max(0, Math.floor(r.maxDepth)) : undefined;
 		const find = typeof r.findRegex === "string" ? r.findRegex : "";
 		if (!find.trim()) continue;
 		const parsed = parseFindRegex(find);
@@ -159,6 +160,8 @@ export function displayRules(scripts: unknown[]): DisplayRule[] {
 			source: parsed.source,
 			flags: parsed.flags,
 			replace: typeof r.replaceString === "string" ? r.replaceString : "",
+			...(minDepth !== undefined ? { minDepth } : {}),
+			...(maxDepth !== undefined ? { maxDepth } : {}),
 		});
 	}
 	return out;

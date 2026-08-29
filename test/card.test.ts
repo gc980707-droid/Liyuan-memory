@@ -74,6 +74,13 @@ test("宏替换大小写不敏感", () => {
 	assert.equal(out, "Sera greets 旅人, Sera smiles.");
 });
 
+test("角色卡尖括号宏替换：不把 <user>/<char> 原样送进正文", () => {
+	assert.equal(
+		applyMacros("<user>看着< char >，<char>没有回答。", { charName: "沈云熙", userName: "旅人" }),
+		"旅人看着沈云熙，沈云熙没有回答。",
+	);
+});
+
 test("PNG tEXt 字段回写往返", () => {
 	const dir = mkdtempSync(join(tmpdir(), "liyuan-card-png-"));
 	try {

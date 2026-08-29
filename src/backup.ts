@@ -68,6 +68,7 @@ const PROJECT_DIR_SCOPES = [
 /** 项目根单文件配置 */
 const PROJECT_FILE_SCOPES = [
 	"liyuan.config.json",
+	".liyuan-actor-profiles.json",
 	"liyuan.agent.json",
 	"liyuan.agent.meta.json",
 	"liyuan-preset.json",

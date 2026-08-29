@@ -53,6 +53,7 @@ function invalidateAfterWrite(writePath: string): void {
 		{ test: /^\/api\/models/, prefixes: ["/api/models", "/api/agent-config"] },
 		{ test: /^\/api\/channels/, prefixes: ["/api/models", "/api/agent-config", "/api/agent-profiles"] },
 		{ test: /^\/api\/config/, prefixes: ["/api/config"] },
+		{ test: /^\/api\/actor-profiles/, prefixes: ["/api/actor-profiles"] },
 		{ test: /^\/api\/backup/, prefixes: [] },
 		{ test: /^\/api\/upload/, prefixes: ["/api/uploads"] },
 	];

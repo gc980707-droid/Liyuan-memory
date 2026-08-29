@@ -108,17 +108,9 @@ test("displayRules: substituteRegex 非零的规则整条跳过,warn", () => {
 	}
 });
 
-test("displayRules: minDepth/maxDepth 字段忽略但 warn,规则仍应用", () => {
-	const warnings: string[] = [];
-	const oldWarn = console.warn;
-	try {
-		console.warn = (...args) => warnings.push(args.join(" "));
-		const rules = displayRules([{ ...skinScript, minDepth: 2 }]);
-		assert.equal(rules.length, 1);
-		assert.ok(warnings.some((w) => w.includes("深度限定")));
-	} finally {
-		console.warn = oldWarn;
-	}
+test("displayRules: 保留并规范化 minDepth/maxDepth", () => {
+	const rules = displayRules([{ ...skinScript, minDepth: 2.9, maxDepth: 5.8 }]);
+	assert.deepEqual({ minDepth: rules[0].minDepth, maxDepth: rules[0].maxDepth }, { minDepth: 2, maxDepth: 5 });
 });
 
 test("buildCardFrontSnapshot: hello/REST 同源载荷", () => {

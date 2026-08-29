@@ -56,9 +56,11 @@ export function applyCardSkin(
 	text: string,
 	rules: DisplayRule[],
 	macros: { charName: string; userName: string },
+	depth = 0,
 ): string {
 	let out = text;
 	for (const r of rules) {
+		if ((r.minDepth !== undefined && depth < r.minDepth) || (r.maxDepth !== undefined && depth > r.maxDepth)) continue;
 		try {
 			const re = new RegExp(substMacros(r.source, macros, true), r.flags);
 			const template = substMacros(r.replace, macros, false);
@@ -68,7 +70,14 @@ export function applyCardSkin(
 				const hasNamed = typeof last === "object" && last !== null;
 				const captEnd = hasNamed ? args.length - 3 : args.length - 2;
 				const captures = args.slice(0, Math.max(0, captEnd)) as Array<string | undefined>;
-				return expandSkinReplacement(template, match, captures);
+				let replacement = expandSkinReplacement(template, match, captures);
+				// 酒馆卡的 HTML 正则常通过 getChatMessages() 重新读取整条消息。
+				// 梨园已把匹配到的原文拿在手里，随界面注入，避免卡脚本拿到空消息。
+				if (/getChatMessages\s*\(|getCurrentMessageId\s*\(/.test(replacement)) {
+					const seed = `<script>window.__liyuanMessageText=${JSON.stringify(match)};</script>`;
+					replacement = replacement.replace(/```html\s*/i, (f) => `${f}${seed}`).replace(/^((?!```html).)/i, `${seed}$1`);
+				}
+				return replacement;
 			});
 		} catch {
 			// 单条坏规则不拖累整条管线

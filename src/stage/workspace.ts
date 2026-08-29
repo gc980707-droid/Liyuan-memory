@@ -247,6 +247,31 @@ export function projectedState(ws: TurnWorkspace, base: WorldState): WorldState 
 	return s;
 }
 
+/** 找出本拍内对同一账本字段给出不同值的补丁；结果只作提醒，保留模型的最终顺序语义。 */
+export function findStatePatchConflicts(
+	existing: Record<string, unknown>[],
+	incoming: Record<string, unknown>,
+): string[] {
+	const flatten = (value: unknown, prefix: string, out: Map<string, unknown>): void => {
+		if (!value || typeof value !== "object" || Array.isArray(value)) {
+			if (prefix) out.set(prefix, value);
+			return;
+		}
+		for (const [key, child] of Object.entries(value as Record<string, unknown>)) flatten(child, prefix ? `${prefix}.${key}` : key, out);
+	};
+	const prior = new Map<string, unknown>();
+	for (const patch of existing) flatten(patch, "", prior);
+	const next = new Map<string, unknown>();
+	flatten(incoming, "", next);
+	const conflicts: string[] = [];
+	for (const [path, value] of next) {
+		if (!prior.has(path)) continue;
+		const old = prior.get(path);
+		if (JSON.stringify(old) !== JSON.stringify(value)) conflicts.push(`${path}（${JSON.stringify(old)} → ${JSON.stringify(value)}）`);
+	}
+	return conflicts;
+}
+
 export interface WriteToolResult {
 	/** 回给模型的 toolResult 文本 */
 	text: string;
@@ -472,6 +497,7 @@ export function runWriteTool(
 			...Object.keys(projectedState(ws, deps.baseState).characters),
 		];
 		const patch = canonicalizeCharacterKeys(raw as Record<string, unknown>, knownNames);
+		const conflicts = findStatePatchConflicts(ws.patches, patch);
 		// 只验不改：投影上干跑，合格才入队；真正落账在定稿后（叶守卫下统一套用）
 		const dry = applyPatch(projectedState(ws, deps.baseState), patch);
 		if (dry.applied.length === 0) {
@@ -479,7 +505,10 @@ export function runWriteTool(
 			return { text: `记账被拒：${why}。核对字段语义后重试。`, ok: false };
 		}
 		ws.patches.push(patch);
-		const warn = dry.warnings.length > 0 ? `\n警告（相应字段已忽略）：${dry.warnings.join("；")}` : "";
+		const warn = [
+			...(dry.warnings.length > 0 ? [`警告（相应字段已忽略）：${dry.warnings.join("；")}`] : []),
+			...(conflicts.length > 0 ? [`警告（本拍同一字段有多次不同更新，按提交顺序以后者为准）：${conflicts.join("；")}`] : []),
+		].map((x) => `\n${x}`).join("");
 		return {
 			text: `已记账（定稿后生效）：\n${dry.applied.map((a) => `- ${a}`).join("\n")}${warn}`,
 			activity: `记账 ${dry.applied.length} 项`,

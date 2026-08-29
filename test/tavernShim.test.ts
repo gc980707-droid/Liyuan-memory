@@ -171,3 +171,13 @@ test("酒馆全局垫片：jQuery/lodash/变量系统/Mvu/waitGlobalInitialized 
 	// 卡脚本本身完整（未被截断）
 	assert.ok(full.includes("switchTab"), "卡脚本原文在场");
 });
+
+test("卡内世界书名注入：不再把 1.2 卡误判成硬编码的 1.1", () => {
+	const doc = buildSrcDoc(
+		`<html><head></head><body><script>const TARGET_WORLDBOOK_NAME = "缝缝缝区行动1.2";</script></body></html>`,
+		true,
+		true,
+	);
+	assert.match(doc, /__liyuanWorldbookNames=\["缝缝缝区行动1\.2"\]/);
+	assert.ok(!doc.includes("缝缝缝区行动1.1"), "不能残留旧卡世界书名称");
+});
