@@ -19,6 +19,7 @@ packages/**/node_modules/
 .liyuan-uploads/
 .liyuan-audio/
 .liyuan-personas.json
+.liyuan-actor-profiles.json
 .rp-media/
 .rp-uploads/
 .playwright-mcp/

@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 
 import { applyProjectedSamplers } from "../samplers.ts";
+import { loadActorProfileOverrides } from "../actor-profiles.ts";
 import { extractDraftRules } from "../draft.ts";
 import {
 	appendOverlayEntry,
@@ -788,7 +789,7 @@ export class StageEngine {
 		};
 		// 导演层先做确定性调度：只把本轮真正有发言权的角色送入动态上下文。
 		// 角色 agent 的真实调用仍是可选的下一阶段，默认回落现有单次模型回合。
-		const actorProfiles = actorProfilesFromState(card, state, {}, {}, materials.entries);
+		const actorProfiles = actorProfilesFromState(card, state, {}, {}, materials.entries, loadActorProfileOverrides(cwd));
 		let directorDecision = selectActiveActors(actorProfiles, lastUserText, lastNarrativeText);
 
 		const systemPrompt = buildStageSystemPrompt({

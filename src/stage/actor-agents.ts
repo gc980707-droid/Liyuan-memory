@@ -4,6 +4,7 @@
  * 角色 agent 只提交「我会怎么回应」，最后仍由正文工件流程统一合成和验收。
  */
 
+import type { ActorProfileOverrides } from "../actor-profiles.ts";
 import type { CharacterCard, CharacterState, LorebookEntry, WorldState } from "../types.ts";
 
 export interface ActorProfile {
@@ -52,12 +53,14 @@ export function actorProfilesFromState(
 	knownFactsByActor: Record<string, string[]> = {},
 	privateStateByActor: Record<string, string> = {},
 	loreEntries: LorebookEntry[] = [],
+	profileOverrides: Record<string, ActorProfileOverrides> = {},
 ): ActorProfile[] {
 	const names = [card.name, ...Object.keys(state.characters).filter((n) => n !== card.name)];
 	return names.map((name) => {
 		const loreFacts = [...card.book, ...loreEntries]
 			.filter((entry) => `${entry.comment}\n${entry.content}`.includes(name))
 			.map((entry) => `设定事实：${entry.comment ? `【${entry.comment}】` : ""}${entry.content}`);
+		const override = profileOverrides[name] ?? {};
 		return {
 		name,
 		identity:
@@ -69,10 +72,14 @@ export function actorProfilesFromState(
 			...loreFacts,
 			...(state.characters[name]?.status ? [`当前状态：${state.characters[name].status}`] : []),
 			...(state.characters[name]?.notes ? [`已记录事项：${state.characters[name].notes}`] : []),
+			...(override.knownFacts ?? []),
 		],
 		privateState: privateStateByActor[name] ?? state.characters[name]?.notes ?? "",
 		blindSpots: ["不知道其他角色未公开的内心、秘密和决定"],
 		...(state.characters[name] ? { state: state.characters[name] } : {}),
+		...(override.identity !== undefined ? { identity: override.identity } : {}),
+		...(override.privateState !== undefined ? { privateState: override.privateState } : {}),
+		...(override.blindSpots !== undefined ? { blindSpots: override.blindSpots } : {}),
 		};
 	});
 }
