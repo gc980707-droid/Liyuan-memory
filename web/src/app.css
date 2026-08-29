@@ -6614,6 +6614,48 @@ label.drawer-btn {
 .access-actions .drawer-btn {
 	flex: 1;
 }
+.actor-profile-editor {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+.actor-profile-add {
+	margin-top: 0;
+}
+.actor-profile-add .field-input {
+	margin-top: 0;
+	flex: 1;
+}
+.actor-profile-card {
+	border: 1px solid var(--hairline);
+	border-radius: 8px;
+	padding: 8px 10px 10px;
+	background: var(--surface-raised, rgba(127, 127, 127, 0.04));
+}
+.actor-profile-card summary {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	cursor: pointer;
+	font-size: 13px;
+	font-weight: 600;
+	margin-bottom: 8px;
+}
+.actor-profile-card summary .drawer-btn {
+	flex: none;
+	padding: 3px 8px;
+	font-size: 11px;
+}
+.actor-profile-card .field-label {
+	display: block;
+	margin-top: 9px;
+	font-size: 11px;
+	color: var(--text-faint);
+}
+.actor-profile-card .field-label .settings-textarea,
+.actor-profile-card .field-label .field-input {
+	margin-top: 4px;
+}
 
 /* ============================================================
    助手面板(右栏独立会话,2026-07-14 职责拆分)

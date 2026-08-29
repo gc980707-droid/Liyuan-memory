@@ -42,6 +42,80 @@ type MemoryChunkRow = {
 	createdAt: string;
 };
 
+type ActorDraft = {
+	identity: string;
+	privateState: string;
+	blindSpots: string[];
+	knownFacts: string[];
+	card: string;
+};
+
+const emptyActorDraft = (): ActorDraft => ({ identity: "", privateState: "", blindSpots: ["不知道其他角色未公开的内心、秘密和决定"], knownFacts: [], card: "" });
+
+function normalizeActorDrafts(raw: Record<string, unknown>): Record<string, ActorDraft> {
+	const out: Record<string, ActorDraft> = {};
+	for (const [name, value] of Object.entries(raw)) {
+		if (!name.trim() || !value || typeof value !== "object" || Array.isArray(value)) continue;
+		const v = value as Record<string, unknown>;
+		out[name] = {
+			identity: typeof v.identity === "string" ? v.identity : "",
+			privateState: typeof v.privateState === "string" ? v.privateState : "",
+			blindSpots: Array.isArray(v.blindSpots) ? v.blindSpots.filter((x): x is string => typeof x === "string") : emptyActorDraft().blindSpots,
+			knownFacts: Array.isArray(v.knownFacts) ? v.knownFacts.filter((x): x is string => typeof x === "string") : [],
+			card: typeof v.card === "string" ? v.card : "",
+		};
+	}
+	return out;
+}
+
+function ActorProfileEditor({
+	actors,
+	setActors,
+	busy,
+	save,
+}: {
+	actors: Record<string, ActorDraft>;
+	setActors: (next: Record<string, ActorDraft>) => void;
+	busy: boolean;
+	save: () => void;
+}) {
+	const [newName, setNewName] = useState("");
+	const names = Object.keys(actors).sort((a, b) => a.localeCompare(b, "zh-CN"));
+	const update = (name: string, patch: Partial<ActorDraft>) => setActors({ ...actors, [name]: { ...actors[name]!, ...patch } });
+	const add = () => {
+		const name = newName.trim();
+		if (!name || actors[name]) return;
+		setActors({ ...actors, [name]: emptyActorDraft() });
+		setNewName("");
+	};
+	const remove = (name: string) => {
+		const next = { ...actors };
+		delete next[name];
+		setActors(next);
+	};
+	return (
+		<div className="actor-profile-editor">
+			<div className="access-actions actor-profile-add">
+				<input className="field-input" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="输入角色名" onKeyDown={(e) => { if (e.key === "Enter") add(); }} />
+				<button type="button" className="drawer-btn" disabled={!newName.trim() || !!actors[newName.trim()]} onClick={add}>新增角色</button>
+			</div>
+			{names.length === 0 ? <div className="field-hint">还没有独立档案；可先新增角色，也可以等角色首次出现后再补充。</div> : null}
+			{names.map((name) => {
+				const actor = actors[name]!;
+				return <details className="actor-profile-card" key={name} open>
+					<summary><span>{name}</span><button type="button" className="drawer-btn danger" disabled={busy} onClick={(e) => { e.preventDefault(); remove(name); }}>删除</button></summary>
+					<label className="field-label">身份与语气<textarea className="settings-textarea" rows={3} value={actor.identity} onChange={(e) => update(name, { identity: e.target.value })} placeholder="例如：谨慎的药铺掌柜，习惯先观察再说话" /></label>
+					<label className="field-label">私有状态<textarea className="settings-textarea" rows={2} value={actor.privateState} onChange={(e) => update(name, { privateState: e.target.value })} placeholder="这个角色在意什么、隐瞒什么" /></label>
+					<label className="field-label">独立角色卡路径<input className="field-input" value={actor.card} onChange={(e) => update(name, { card: e.target.value })} placeholder="例如 assets/cards/老周.json" /></label>
+					<label className="field-label">已知事实（每行一条）<textarea className="settings-textarea" rows={3} value={actor.knownFacts.join("\n")} onChange={(e) => update(name, { knownFacts: e.target.value.split("\n").map((x) => x.trim()).filter(Boolean) })} /></label>
+					<label className="field-label">盲区（每行一条）<textarea className="settings-textarea" rows={2} value={actor.blindSpots.join("\n")} onChange={(e) => update(name, { blindSpots: e.target.value.split("\n").map((x) => x.trim()).filter(Boolean) })} /></label>
+				</details>;
+			})}
+			<button type="button" className="drawer-btn save-btn" disabled={busy} onClick={save}>保存全部档案</button>
+		</div>
+	);
+}
+
 /** 条目管理列表：刷新 + 单条删除 */
 function MemoryChunkManager({
 	storeId,
@@ -725,7 +799,7 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 	const [askMode, setAskMode] = useState(false);
 	const [dirty, setDirty] = useState(false);
 	const [dark, setDark] = useState(() => getTheme() === "dark");
-	const [actorJson, setActorJson] = useState("{}");
+	const [actorDrafts, setActorDrafts] = useState<Record<string, ActorDraft>>({});
 
 	useEffect(() => {
 		if (data) {
@@ -738,8 +812,20 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 		}
 	}, [data]);
 	useEffect(() => {
-		if (actorData.data) setActorJson(JSON.stringify(actorData.data.actors, null, 2));
+		if (actorData.data) setActorDrafts(normalizeActorDrafts(actorData.data.actors));
 	}, [actorData.data]);
+
+	const saveActors = () => run(async () => {
+		const actors = Object.fromEntries(Object.entries(actorDrafts).map(([name, actor]) => [name, {
+			...(actor.identity.trim() ? { identity: actor.identity.trim() } : {}),
+			...(actor.privateState.trim() ? { privateState: actor.privateState.trim() } : {}),
+			...(actor.knownFacts.length ? { knownFacts: actor.knownFacts } : {}),
+			...(actor.blindSpots.length ? { blindSpots: actor.blindSpots } : {}),
+			...(actor.card.trim() ? { card: actor.card.trim() } : {}),
+		}]));
+		await apiPut("/api/actor-profiles", { actors });
+		await actorData.reload();
+	}, "角色档案已保存");
 
 	const touch = () => setDirty(true);
 
@@ -781,13 +867,7 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 			<section className="sp-section">
 				<h4>独立角色档案</h4>
 				<div className="field-hint">每个角色一份身份、已知事实、私有状态和盲区；保存后下轮生效。未填写的角色仍从当前状态与世界书补全。</div>
-				<textarea className="settings-textarea" value={actorJson} onChange={(e) => setActorJson(e.target.value)} rows={8} spellCheck={false} />
-				<button type="button" className="drawer-btn" disabled={busy || actorData.loading} onClick={() => run(async () => {
-					const actors = JSON.parse(actorJson) as unknown;
-					if (!actors || typeof actors !== "object" || Array.isArray(actors)) throw new Error("请输入角色对象 JSON");
-					await apiPut("/api/actor-profiles", { actors });
-					await actorData.reload();
-				}, "角色档案已保存")}>保存角色档案</button>
+				{actorData.loading && !actorData.data ? <div className="field-hint">档案加载中…</div> : <ActorProfileEditor actors={actorDrafts} setActors={setActorDrafts} busy={busy || actorData.loading} save={() => void saveActors()} />}
 			</section>
 			{data && (
 				<>
