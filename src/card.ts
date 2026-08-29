@@ -112,7 +112,7 @@ export function loadCardFile(path: string): CharacterCard {
 
 /** {{char}} / {{user}} 宏替换（大小写不敏感） */
 export function applyMacros(text: string, ctx: MacroContext): string {
-	return text.replace(/\{\{\s*(char|user)\s*\}\}/gi, (_m, name: string) =>
+	return text.replace(/(?:\{\{\s*|<\s*)(char|user)(?:\s*\}\}|\s*>)/gi, (_m, name: string) =>
 		name.toLowerCase() === "char" ? ctx.charName : ctx.userName,
 	);
 }
