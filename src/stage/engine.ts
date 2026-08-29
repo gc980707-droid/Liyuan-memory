@@ -40,6 +40,7 @@ import type { LorebookEntry } from "../types.ts";
 import {
 	actorProfilesFromState,
 	buildActorPrompt,
+	buildDirectorPrompt,
 	buildDirectorSelectionPrompt,
 	formatActorProposals,
 	parseActorProposal,
@@ -828,7 +829,6 @@ export class StageEngine {
 			...(wsDeps.rules.wordRange ? { wordRange: wsDeps.rules.wordRange } : {}),
 			loreIndex: formatLoreIndex(materials.entries),
 			rosterIndex: formatRosterIndex(state),
-			director: { decision: directorDecision, profiles: actorProfiles },
 		});
 
 		// §4.B 输出合约：v1 供数＝装载期一次性模型声明（M-R4 首件，指纹缓存，换卡/改预设即重声明）；
@@ -941,7 +941,7 @@ export class StageEngine {
 				ev.onActivity?.(`导演 agent 调度失败，回落规则调度：${error instanceof Error ? error.message : String(error)}`);
 			}
 		}
-		const directorContext = `【导演 agent 决定】本轮活跃角色：${directorDecision.activeActors.join("、")}；焦点：${directorDecision.turnFocus}；停点：${directorDecision.stopAt}`;
+		const directorContext = `【导演调度】\n${buildDirectorPrompt(directorDecision, actorProfiles)}`;
 		const tail = messages[messages.length - 1] as { content?: Array<{ type: string; text?: string }> };
 		if (Array.isArray(tail.content) && tail.content[0]) tail.content[0].text = `${directorContext}\n\n${tail.content[0].text ?? ""}`;
 
