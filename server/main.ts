@@ -91,6 +91,7 @@ import {
 	memoryListChunks,
 	memoryManualAdd,
 	memorySearch,
+	memoryRecallForTurn,
 	onNarrativeTurnEnd,
 } from "../src/memory/index.ts";
 import { handleApiRequest, loadCardFrontSnapshot, type CurrentModelInfo, type RestHost } from "./rest.ts";
@@ -2096,6 +2097,9 @@ const stage = new StageEngine({
 		]);
 		return [...narrative, ...external].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 6);
 	},
+	// 每轮自动召回：服务层按当前会话+角色卡作用域和 injectOnTurn 开关过滤、去重、排序。
+	recallMemory: async (sessionId, query) =>
+		memoryRecallForTurn(cwd, { sessionId, card: cardPath || undefined }, query),
 	// 向量库写侧三件（M-D3）：MemoryScope 一律在此绑定（当前对话 + 当前卡），**不经模型**。
 	// 写侧恒落 external——服务层 assertExtraStore 禁止手写剧情库，故工具不给 store 参数。
 	addMemory: (sessionId, input) =>
