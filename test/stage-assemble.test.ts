@@ -150,6 +150,8 @@ test("system prompt：默认对话优先，限制小说式一口气交稿", () =
 	assert.ok(p.includes("用户没有明确写出的动作、台词、想法和选择，不得补写或推进"));
 	assert.ok(p.includes("角色的具体性格、经历和反应方式由角色 Agent 决定"));
 	assert.ok(p.includes("同一种反应不要连续重复"));
+	assert.ok(p.includes("有明确的进行中动作时，先从该动作接着写"));
+	assert.ok(p.includes("用户进入现场只是互动变化"));
 });
 
 test("system prompt：全局不携带角色专属经历", () => {
