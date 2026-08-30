@@ -6,9 +6,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { readJsonFile } from "./jsonio.ts";
-import type { CharacterState, StateRoster, WorldState } from "./types.ts";
+import type { CharacterState, SceneState, StateRoster, WorldState } from "./types.ts";
 
-const TOP_KEYS = ["time", "location", "characters", "inventory", "flags", "plot_threads"] as const;
+const TOP_KEYS = ["time", "location", "characters", "inventory", "flags", "plot_threads", "scene"] as const;
 
 export function defaultState(): WorldState {
 	return {
@@ -18,6 +18,7 @@ export function defaultState(): WorldState {
 		inventory: [],
 		flags: {},
 		plot_threads: [],
+		scene: { positions: {}, held_items: {}, ongoing: [], known_facts: [] },
 	};
 }
 
@@ -181,6 +182,40 @@ export function applyPatch(state: WorldState, patch: Record<string, unknown>): P
 				} else warnings.push(`${key} 需要完整数组（整体替换语义），已忽略`);
 				break;
 			}
+			case "scene": {
+				if (!value || typeof value !== "object" || Array.isArray(value)) {
+					warnings.push("scene 需要对象，已忽略");
+					break;
+				}
+				const scene: SceneState = next.scene ?? { positions: {}, held_items: {}, ongoing: [], known_facts: [] };
+				const raw = value as Record<string, unknown>;
+				for (const table of ["positions", "held_items"] as const) {
+					const entries = raw[table];
+					if (entries === undefined) continue;
+					if (!entries || typeof entries !== "object" || Array.isArray(entries)) {
+						warnings.push(`scene.${table} 需要对象（值为字符串或 null），已忽略`);
+						continue;
+					}
+					for (const [name, item] of Object.entries(entries as Record<string, unknown>)) {
+						if (item === null) delete scene[table][name];
+						else if (typeof item === "string" && item.trim()) scene[table][name] = item.trim();
+						else warnings.push(`scene.${table}.${name} 需要非空字符串或 null，已忽略`);
+					}
+				}
+				for (const key of ["ongoing", "known_facts"] as const) {
+					const items = raw[key];
+					if (items === undefined) continue;
+					if (!Array.isArray(items)) {
+						warnings.push(`scene.${key} 需要字符串数组（整体替换语义），已忽略`);
+						continue;
+					}
+					const kept = items.filter((x): x is string => typeof x === "string" && x.trim()).map((x) => x.trim());
+					if (kept.length !== items.length) warnings.push(`scene.${key} 中非字符串或空项已丢弃`);
+					scene[key] = kept;
+				}
+				next.scene = scene;
+				break;
+			}
 			case "roster": {
 				// 登场名录编辑（用户主权，REST 侧用；模型工具 schema 不含此键）：
 				// {characters/items/events: {名称: null(删除) | 字符串(改一句话)}}。
@@ -230,6 +265,13 @@ export function formatState(state: WorldState): string {
 	if (state.inventory.length) lines.push(`物品：${state.inventory.join("、")}`);
 	for (const [k, v] of Object.entries(state.flags)) lines.push(`${k}：${v}`);
 	if (state.plot_threads.length) lines.push(`剧情线：${state.plot_threads.map((t) => `「${t}」`).join(" ")}`);
+	const scene = state.scene;
+	if (scene) {
+		if (Object.keys(scene.positions).length) lines.push(`场景位置：${Object.entries(scene.positions).map(([n, v]) => `${n}=${v}`).join("；")}`);
+		if (Object.keys(scene.held_items).length) lines.push(`手上物件：${Object.entries(scene.held_items).map(([n, v]) => `${n}=${v}`).join("；")}`);
+		if (scene.ongoing.length) lines.push(`进行中：${scene.ongoing.join("；")}`);
+		if (scene.known_facts.length) lines.push(`场景已知：${scene.known_facts.join("；")}`);
+	}
 	return lines.length ? lines.join("\n") : "（尚无记录）";
 }
 

@@ -61,12 +61,25 @@ export interface WorldState {
 	flags: Record<string, string>;
 	/** 未了结的剧情线/伏笔 */
 	plot_threads: string[];
+	/** 当前场景连续性快照：只记录已明确发生的事实，避免下一轮凭模板补道具/动作 */
+	scene: SceneState;
 	/** 登场名录（applyPatch 咽喉点自动登记；旧存档无此字段按空处理） */
 	roster?: StateRoster;
 	/** 作者卡 MVU 状态树（stat_data 的内容；字段结构由角色卡决定） */
 	mvu?: Record<string, unknown>;
 	/** Agent 后台状态更新保留的 MVU 数据（当前会话投影） */
 	mvuData?: Record<string, unknown>;
+}
+
+export interface SceneState {
+	/** 人物当前所在位置或姿势，键为角色名 */
+	positions: Record<string, string>;
+	/** 人物当前持有的具体物件，键为角色名 */
+	held_items: Record<string, string>;
+	/** 尚未完成的动作或现场过程 */
+	ongoing: string[];
+	/** 当前在场人物已经明确知道的事实 */
+	known_facts: string[];
 }
 
 export interface CharacterState {

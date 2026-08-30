@@ -37,6 +37,26 @@ test("补丁：数组整体替换、未知键告警", () => {
 	assert.ok(r.warnings[0].includes("hp"));
 });
 
+test("场景连续性快照：保留既有事实并支持清除物件", () => {
+	let s = defaultState();
+	s = applyPatch(s, {
+		scene: {
+			positions: { 沈云熙: "床沿" },
+			held_items: { 沈云熙: "手机" },
+			ongoing: ["刚挂断电话"],
+			known_facts: ["家里缺钱", "大女儿要交学费"],
+		},
+	}).state;
+	s = applyPatch(s, { scene: { held_items: { 沈云熙: null }, ongoing: [] } }).state;
+	assert.equal(s.scene.positions.沈云熙, "床沿", "部分更新不能抹掉位置");
+	assert.equal(s.scene.held_items.沈云熙, undefined, "明确清除后物件消失");
+	assert.deepEqual(s.scene.ongoing, []);
+	assert.deepEqual(s.scene.known_facts, ["家里缺钱", "大女儿要交学费"]);
+	const text = formatState(s);
+	assert.ok(text.includes("场景位置：沈云熙=床沿"));
+	assert.ok(text.includes("场景已知：家里缺钱；大女儿要交学费"));
+});
+
 test("持久化 roundtrip 与缺失文件回退", () => {
 	const dir = mkdtempSync(join(tmpdir(), "rp-state-"));
 	try {
