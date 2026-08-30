@@ -125,20 +125,29 @@ export function buildDirectorPrompt(decision: DirectorDecision, profiles: ActorP
 	return `你是本轮剧情导演，只负责调度，不写正文。\n当前焦点：${decision.turnFocus}\n${pacing ? `${pacing}\n` : ""}本轮可回应角色：\n${roster || "- （无）"}\n只让上述角色回应；停在：${decision.stopAt}。用户角色的台词、动作、想法和决定永远由用户本人提供。`;
 }
 
-export function buildDirectorSelectionPrompt(profiles: ActorProfile[]): string {
+export function buildDirectorSelectionPrompt(profiles: ActorProfile[], scene?: SceneState): string {
 	const roster = profiles.map((p) => `- ${p.name}：${p.identity || "（无身份摘要）"}`).join("\n");
-	return `你是剧情导演，只负责本轮调度，不写正文。\n角色名录：\n${roster || "- （无角色）"}\n根据用户最新输入和最近正文，选择本轮真正需要回应的角色（最多两个），并控制节奏。输出严格 JSON：{"activeActors":["角色名"],"turnFocus":"本轮焦点","stopAt":"停点","sceneGoal":"本轮希望推进的场景目标","tension":1}。tension 只能是 1 到 5；只能选择名录中的角色；不能替用户做决定，也不能把计划写成已发生事实。`;
+	const continuity = scene && scene.ongoing.length > 0
+		? `\n当前场景的进行中动作（优先级最高，必须在本轮继续）：${scene.ongoing.join("；")}。除非用户或正文明确完成、取消或改道，导演不得安排角色离开、停摆或另起一条动作。`
+		: "";
+	return `你是剧情导演，只负责本轮调度，不写正文。\n角色名录：\n${roster || "- （无角色）"}${continuity}\n根据用户最新输入、最近正文和场景连续性，选择本轮真正需要回应的角色（最多两个），并控制节奏。输出严格 JSON：{"activeActors":["角色名"],"turnFocus":"本轮焦点","stopAt":"停点","sceneGoal":"本轮希望推进的场景目标","tension":1}。tension 只能是 1 到 5；只能选择名录中的角色；不能替用户做决定，也不能把计划写成已发生事实。进行中动作存在时，turnFocus 必须包含“在该动作上继续回应”，不能把它当作背景后跳开。`;
 }
 
-export function parseDirectorDecision(text: string, profiles: ActorProfile[], fallback: DirectorDecision): DirectorDecision {
+export function parseDirectorDecision(text: string, profiles: ActorProfile[], fallback: DirectorDecision, scene?: SceneState): DirectorDecision {
 	const match = text.match(/\{[\s\S]*\}/);
 	if (!match) return fallback;
 	try {
 		const raw = JSON.parse(match[0]) as Partial<DirectorDecision>;
 		const names = new Set(profiles.map((p) => p.name));
-		const activeActors = Array.isArray(raw.activeActors)
-			? raw.activeActors.filter((n): n is string => typeof n === "string" && names.has(n)).slice(0, 2)
-			: [];
+			let activeActors = Array.isArray(raw.activeActors)
+				? raw.activeActors.filter((n): n is string => typeof n === "string" && names.has(n)).slice(0, 2)
+				: [];
+			if (scene?.ongoing.length) {
+				const ongoingActors = profiles.filter((p) => scene.ongoing.some((item) => item.includes(p.name))).map((p) => p.name);
+				for (const name of ongoingActors) {
+					if (!activeActors.includes(name)) activeActors = [...activeActors.slice(0, 1), name].slice(0, 2);
+				}
+			}
 		if (activeActors.length === 0) return fallback;
 		return {
 			activeActors,
@@ -159,7 +168,7 @@ export function buildActorPrompt(profile: ActorProfile, decision: DirectorDecisi
 	const sceneFacts = scene
 		? `当前场景连续性（共享只读事实）：位置=${Object.entries(scene.positions).map(([n, v]) => `${n}=${v}`).join("；") || "未记录"}；手上物件=${Object.entries(scene.held_items).map(([n, v]) => `${n}=${v}`).join("；") || "未记录"}；进行中=${scene.ongoing.join("；") || "无"}；已知=${scene.known_facts.join("；") || "无"}`
 		: "当前场景连续性（共享只读事实）：未提供，不得自行补全";
-	return `你是角色 agent「${profile.name}」，只从这个角色的主观位置回应。\n身份与语气：${profile.identity || "（未提供）"}\n你知道：${profile.knownFacts.join("；") || "（仅知道当前现场）"}\n你的私有状态：${profile.privateState || "（无）"}\n你的盲区：${profile.blindSpots.join("；") || "不要擅自推断他人内心"}\n${ledger}\n${sceneFacts}\n场景中的“进行中”动作是当前连续性约束：除非正文明确完成、取消或改道，不得用临时提案让角色放弃它，应该在其上继续回应。身份与语气、已知事实和私有状态也是稳定约束；如果其中明确写有长期家暴/创伤经历，必须带入本轮判断，不能因用户一句日常需求就把她改写成从容熟练、无条件照料他人的角色。具体反应仍以档案为准，不要套固定的哭泣、道歉或害怕模板；本轮只提议一个可见反应和一个动作，提到一次迟疑/道歉/观察脸色后就推进，不要连续重复同一种创伤反应。\n事实纪律：未列出的事实一律视为未知；不要从“加盟、借款、电话”等词推断行业、店铺类型、地点、人物关系或他人动机；不确定就保持模糊。状态变化只是意图，必须由正文模型通过状态工具确认后才算发生。\n本轮导演焦点：${decision.turnFocus}\n只输出严格 JSON：{"actor":"${profile.name}","content":"这个角色此刻的反应","intendedAction":"这个角色准备做的一个动作"}。content 只写这个角色，不写其他角色，不写用户，不替用户做决定。`;
+	return `你是角色 agent「${profile.name}」，只从这个角色的主观位置回应。\n身份与语气：${profile.identity || "（未提供）"}\n你知道：${profile.knownFacts.join("；") || "（仅知道当前现场）"}\n你的私有状态：${profile.privateState || "（无）"}\n你的盲区：${profile.blindSpots.join("；") || "不要擅自推断他人内心"}\n${ledger}\n${sceneFacts}\n场景中的“进行中”动作是本轮最高优先级的连续性约束：除非用户或正文明确完成、取消或改道，不得用临时提案让角色放弃它、离开或停摆；必须先在该动作上做一个具体的可见推进，再回应用户。若用户只是走近、说饿了或改变位置，这不等于取消角色正在做的事。身份与语气、已知事实和私有状态也是稳定约束；如果其中明确写有长期家暴/创伤经历，必须带入本轮判断，不能因用户一句日常需求就把她改写成从容熟练、无条件照料他人的角色。具体反应仍以档案为准，不要套固定的哭泣、道歉或害怕模板；本轮只提议一个可见反应和一个动作，提到一次迟疑/道歉/观察脸色后就推进，不要连续重复同一种创伤反应。\n事实纪律：未列出的事实一律视为未知；不要从“加盟、借款、电话”等词推断行业、店铺类型、地点、人物关系或他人动机；不确定就保持模糊。状态变化只是意图，必须由正文模型通过状态工具确认后才算发生。\n本轮导演焦点：${decision.turnFocus}\n只输出严格 JSON：{"actor":"${profile.name}","content":"这个角色此刻的反应","intendedAction":"这个角色准备做的一个动作"}。content 只写这个角色，不写其他角色，不写用户，不替用户做决定。`;
 }
 
 /** 角色提案的宽容解析：模型偶尔多说一句时只保留可用字段，避免把协议污染正文。 */
@@ -217,7 +226,7 @@ export function formatActorProposals(proposals: ActorProposal[]): string {
 	const conflicts = findProposalConflicts(proposals);
 	return `【角色 agent 提案】\n${proposals
 		.map((p) => `- ${p.actor}：${p.content}${p.intendedAction ? `（行动意图：${p.intendedAction}）` : ""}`)
-		.join("\n")}${conflicts.length > 0 ? `\n【提案冲突提醒】\n${conflicts.map((x) => `- ${x}`).join("\n")}` : ""}\n以上只是各角色的主观提案；正文模型负责取舍和落稿，不把提案当成用户已做出的动作或决定。冲突时保留不确定性，不擅自替用户选择。`;
+		.join("\n")}${conflicts.length > 0 ? `\n【提案冲突提醒】\n${conflicts.map((x) => `- ${x}`).join("\n")}` : ""}\n以上是角色的主观反应材料；正文模型负责取舍和落稿，不把提案当成用户已做出的动作或决定。但场景账本中的“进行中”动作是连续性约束，不是可选建议：没有明确完成、取消或改道时，必须在正文中保留并推进该动作。冲突时保留不确定性，不擅自替用户选择。`;
 }
 
 export async function runActorAgents(

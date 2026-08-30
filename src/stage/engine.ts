@@ -1018,14 +1018,14 @@ export class StageEngine {
 				const directorStream = this.#deps.streamFn(
 					model,
 					{
-						systemPrompt: buildDirectorSelectionPrompt(actorProfiles),
+						systemPrompt: buildDirectorSelectionPrompt(actorProfiles, state.scene),
 						messages: [{ role: "user", content: [{ type: "text", text: `用户最新输入：${lastUserText}\n最近正文：${lastNarrativeText || "（无）"}` }] }],
 					},
 					{ ...options, reasoning: "off", maxTokens: 300 },
 				);
 				const result = await directorStream.result();
 				const text = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n");
-				directorDecision = parseDirectorDecision(text, actorProfiles, directorDecision);
+				directorDecision = parseDirectorDecision(text, actorProfiles, directorDecision, state.scene);
 				ev.onActivity?.(`导演调度：${directorDecision.activeActors.join("、") || "无角色"} · ${directorDecision.turnFocus}`);
 			} catch (error) {
 				ev.onActivity?.(`导演 agent 调度失败，回落规则调度：${error instanceof Error ? error.message : String(error)}`);
