@@ -153,6 +153,9 @@ test("system prompt：默认对话优先，限制小说式一口气交稿", () =
 	assert.ok(p.includes("环境不是填充物"));
 	assert.ok(p.includes("默认用直白、具体的动词和名词"));
 	assert.ok(p.includes("先回应，再描写"));
+	assert.ok(p.includes("保持场景连续"));
+	assert.ok(p.includes("最近一轮用户消息和正文里的明确事实优先于角色卡开场"));
+	assert.ok(p.includes("没有依据的具体道具、地点变化和动作不要补"));
 	assert.ok(p.includes("不要把已经通过动作表现出的情绪再解释一遍"));
 	assert.ok(p.includes("让人物保留当下的不完整"));
 	assert.ok(p.includes("维持对话的新鲜度"));
