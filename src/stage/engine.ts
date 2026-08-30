@@ -956,7 +956,7 @@ export class StageEngine {
 		const past = endsWithUser ? history.slice(0, -1) : history;
 		// 规划卡（五注入之一）：每拍第 1 轮随末端注入送达（工作区新建必空），用户话保持最后一句。
 		const singleReplyRule = this.#deps.singleReply
-			? "\n\n【单条回复】本拍只回应用户这一条输入；完成必要读取后，用一次 `draft_write` 交出一条完整、适度展开的正文，停在可接话处，不要 beat_plan 后分段连载，不要替用户继续行动。"
+			? "\n\n【单条回复】本拍只回应用户这一条输入；完成必要读取后，用一次 `draft_write` 交出一条完整、适度展开的正文，在角色自己的动作或情绪自然停顿处收束。正文收尾的最后两段不得出现问句、询问用户、邀请用户回应或“等着他开口”之类的递话句；只有用户明确要求做选择时才可 ask。不要 beat_plan 后分段连载，不要替用户继续行动。"
 			: "";
 		const injWithCard = tools.length > 0 ? `${injection}\n\n${PLAN_CARD}${singleReplyRule}` : `${injection}${singleReplyRule}`;
 		const tailText = endsWithUser ? `${injWithCard}\n\n${history[history.length - 1].text}` : injWithCard;
@@ -1661,6 +1661,7 @@ export class StageEngine {
 						forcedNudgedForSeg = false;
 						if (this.#deps.singleReply) singleReplyDone = true;
 					}
+					if (name === "draft_write" && r.ok !== false && this.#deps.singleReply) singleReplyDone = true;
 					// 重复读瘦身：名单内 skill 首读成功后记名（未知名回落直写不记，避免把 miss 记成已读）
 					if (skillReadName && o.skillNames.includes(skillReadName) && r.ok !== false) {
 						skillReadDone.add(skillReadName);
@@ -1852,7 +1853,7 @@ export class StageEngine {
 			// draft_append 时出现「屏上看到了、刷新后正文没了」或只保留上一段的情况。
 			// 格式块不在这里收，仍由 mergeFinalText 保留。
 			const finalCalls = (final.content ?? []).filter((c) => c.type === "toolCall");
-			if (finalCalls.length === 0 && o.ws.draft.trim()) {
+			if (finalCalls.length === 0 && o.ws.draft.trim() && !singleReplyDone) {
 				const body = continuationBody(roundText);
 				const existingDraft = o.ws.draft.trim();
 				// OpenAI 兼容中转站有时会在封笔后的普通文本通道重述整份现稿。

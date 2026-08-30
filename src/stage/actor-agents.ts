@@ -101,7 +101,7 @@ export function selectActiveActors(
 	userText: string,
 	recentText = "",
 ): DirectorDecision {
-	if (profiles.length === 0) return { activeActors: [], turnFocus: "无角色可调度", stopAt: "交还用户" };
+	if (profiles.length === 0) return { activeActors: [], turnFocus: "无角色可调度", stopAt: "角色动作或情绪自然停顿" };
 	const source = `${userText}\n${recentText}`;
 	const mentioned = profiles.filter((p) => source.includes(p.name));
 	const chosen = mentioned.length > 0 ? mentioned : profiles.slice(0, 1);
@@ -109,7 +109,7 @@ export function selectActiveActors(
 	return {
 		activeActors,
 		turnFocus: userText.trim() || "回应当前现场",
-		stopAt: "一个角色反应完成、用户仍可自然接话处",
+		stopAt: "一个角色反应完成、在角色自己的动作或情绪自然停顿处收束",
 	};
 }
 
