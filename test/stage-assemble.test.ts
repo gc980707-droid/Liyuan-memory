@@ -170,6 +170,7 @@ test("system prompt：卡明确有家暴经历时，避免默认安全型照料�
 	});
 	assert.ok(p.includes("不要把她写成默认从容、熟练照料他人的安全型角色"));
 	assert.ok(p.includes("不要把这些表现固定成模板"));
+	assert.ok(p.includes("同一轮只选一个这样的可见反应"));
 });
 
 test("system prompt：# 工作方式 = 纯协议（§2.1-5 逐字）；tools=false 时不出现", () => {

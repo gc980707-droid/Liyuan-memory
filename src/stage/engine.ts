@@ -1841,12 +1841,21 @@ export class StageEngine {
 			const finalCalls = (final.content ?? []).filter((c) => c.type === "toolCall");
 			if (finalCalls.length === 0 && o.ws.draft.trim()) {
 				const body = continuationBody(roundText);
-				if (body && !isClosingChatter(body) && !isStructuredControlText(body)) {
-					const accepted = runWriteTool(o.ws, o.wsDeps, "draft_append", { segment: body }, true);
+				const existingDraft = o.ws.draft.trim();
+				// OpenAI 兼容中转站有时会在封笔后的普通文本通道重述整份现稿。
+				// 这不是新续写：整段丢弃；若文本以现稿开头，只保留真正新增的尾部。
+				const newBody =
+					body === existingDraft
+						? ""
+						: body.startsWith(existingDraft)
+							? body.slice(existingDraft.length).trim()
+							: body;
+				if (newBody && !isClosingChatter(newBody) && !isStructuredControlText(newBody)) {
+					const accepted = runWriteTool(o.ws, o.wsDeps, "draft_append", { segment: newBody }, true);
 					if (accepted.ok) {
 						ev.onActivity?.("普通正文已收进续稿");
 						// 这一轮若没有增量事件，补发一次；有增量时正文已经在屏上，不能重复发送。
-						if (!roundTextStreamed) ev.onDelta?.("text", body, true, false);
+						if (!roundTextStreamed) ev.onDelta?.("text", newBody, true, false);
 						o.ws.sealed = false;
 						convo.push(last);
 						convo.push(inject("上一轮有正文未走 draft_append，已自动收进现稿。若还有剧情继续用 draft_append；到停点再 draft_seal。"));

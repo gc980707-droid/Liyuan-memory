@@ -61,6 +61,7 @@ test("角色 agent：稳定档案中的长期家暴经历必须进入本轮判�
 	const prompt = buildActorPrompt(profile, selectActiveActors([profile], "我饿了"));
 	assert.match(prompt, /长期家暴\/创伤经历/);
 	assert.match(prompt, /不能因用户一句日常需求就把她改写成从容熟练/);
+	assert.match(prompt, /本轮只提议一个可见反应和一个动作/);
 });
 
 test("角色提案按 JSON 校验，错误格式只回退为该角色文本", () => {

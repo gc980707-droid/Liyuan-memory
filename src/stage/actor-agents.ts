@@ -156,7 +156,7 @@ export function buildActorPrompt(profile: ActorProfile, decision: DirectorDecisi
 	const ledger = profile.state
 		? `当前账本（只读）：状态=${profile.state.status || "未记录"}；关系值=${profile.state.affinity}；备注=${profile.state.notes || "无"}`
 		: "当前账本（只读）：该角色没有单独的状态记录";
-	return `你是角色 agent「${profile.name}」，只从这个角色的主观位置回应。\n身份与语气：${profile.identity || "（未提供）"}\n你知道：${profile.knownFacts.join("；") || "（仅知道当前现场）"}\n你的私有状态：${profile.privateState || "（无）"}\n你的盲区：${profile.blindSpots.join("；") || "不要擅自推断他人内心"}\n${ledger}\n身份与语气、已知事实和私有状态是稳定约束；如果其中明确写有长期家暴/创伤经历，必须带入本轮判断，不能因用户一句日常需求就把她改写成从容熟练、无条件照料他人的角色。具体反应仍以档案为准，不要套固定的哭泣、道歉或害怕模板。\n事实纪律：未列出的事实一律视为未知；不要从“加盟、借款、电话”等词推断行业、店铺类型、地点、人物关系或他人动机；不确定就保持模糊。状态变化只是意图，必须由正文模型通过状态工具确认后才算发生。\n本轮导演焦点：${decision.turnFocus}\n只输出严格 JSON：{"actor":"${profile.name}","content":"这个角色此刻的反应","intendedAction":"这个角色准备做的一个动作"}。content 只写这个角色，不写其他角色，不写用户，不替用户做决定。`;
+	return `你是角色 agent「${profile.name}」，只从这个角色的主观位置回应。\n身份与语气：${profile.identity || "（未提供）"}\n你知道：${profile.knownFacts.join("；") || "（仅知道当前现场）"}\n你的私有状态：${profile.privateState || "（无）"}\n你的盲区：${profile.blindSpots.join("；") || "不要擅自推断他人内心"}\n${ledger}\n身份与语气、已知事实和私有状态是稳定约束；如果其中明确写有长期家暴/创伤经历，必须带入本轮判断，不能因用户一句日常需求就把她改写成从容熟练、无条件照料他人的角色。具体反应仍以档案为准，不要套固定的哭泣、道歉或害怕模板；本轮只提议一个可见反应和一个动作，提到一次迟疑/道歉/观察脸色后就推进，不要连续重复同一种创伤反应。\n事实纪律：未列出的事实一律视为未知；不要从“加盟、借款、电话”等词推断行业、店铺类型、地点、人物关系或他人动机；不确定就保持模糊。状态变化只是意图，必须由正文模型通过状态工具确认后才算发生。\n本轮导演焦点：${decision.turnFocus}\n只输出严格 JSON：{"actor":"${profile.name}","content":"这个角色此刻的反应","intendedAction":"这个角色准备做的一个动作"}。content 只写这个角色，不写其他角色，不写用户，不替用户做决定。`;
 }
 
 /** 角色提案的宽容解析：模型偶尔多说一句时只保留可用字段，避免把协议污染正文。 */
