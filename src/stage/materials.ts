@@ -177,13 +177,14 @@ export function loadStageMaterials(cwd: string): StageMaterials {
 		statusBarFormats = [];
 	}
 
-	// 世界书：已挂载独立书（0..N）+ 补充设定集 overlay；卡内 character_book 不自动进上下文
+	// 世界书：角色卡内嵌 character_book、已挂载独立书（0..N）与补充设定集 overlay
+	// 统一进入同一条过滤/检索链；角色卡必须自带自己的世界，不能只靠外部挂载才能生效。
 	const fileGroups: LorebookEntry[][] = [];
 	for (const rel of mountedLorebookPaths(config)) {
 		const abs = resolvePath(cwd, rel);
 		if (existsSync(abs)) fileGroups.push(loadLorebookFile(abs));
 	}
-	const fileEntries = mergeEntries(...fileGroups);
+	const fileEntries = mergeEntries(card.book, ...fileGroups);
 	const overlayFile = overlayPathFor(cwd, card.name);
 	const overlayEntries = existsSync(overlayFile) ? loadLorebookFile(overlayFile) : [];
 	// 用户级停用 → 外部插件协议判死（M-C2）。协议条目是 H 类「脑内 harness」：

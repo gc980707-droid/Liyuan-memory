@@ -333,6 +333,34 @@ test("loadStageMaterials：卡+预设宏求值+postHistory 每拍求值", () => 
 	}
 });
 
+test("loadStageMaterials：卡内嵌 character_book 进入统一世界书素材", () => {
+	const cwd = mkdtempSync(join(tmpdir(), "liyuan-card-book-"));
+	try {
+		writeFileSync(
+			join(cwd, "card.json"),
+			JSON.stringify({
+				data: {
+					name: "沈云熙",
+					character_book: {
+						entries: [
+							{ keys: ["凌菲烟"], content: "大女儿凌菲烟，刚考上大学。", constant: true, enabled: true },
+							{ keys: ["凌菲影"], content: "小女儿凌菲影，沉迷亚文化。", constant: true, enabled: true },
+						],
+					},
+				},
+			}),
+		);
+		writeFileSync(join(cwd, "liyuan.config.json"), JSON.stringify({ card: "card.json" }));
+
+		const m = loadStageMaterials(cwd);
+		const lore = constantLoreOf(m);
+		assert.ok(lore.some((e) => e.content.includes("凌菲烟")));
+		assert.ok(lore.some((e) => e.content.includes("凌菲影")));
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("loadStageMaterials：纪律块撤出写作上下文（R7）——system prompt 不见禁词表，规则/纪律单独可取", () => {
 	const cwd = mkdtempSync(join(tmpdir(), "liyuan-pol-"));
 	try {
