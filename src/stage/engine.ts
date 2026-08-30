@@ -728,6 +728,7 @@ export class StageEngine {
 		let sceneIntent: { explicitActions: string[]; explicitNeeds: string[] } | undefined;
 		if (this.#deps.sceneAgent === true && lastUserText.trim()) {
 			try {
+				ev.onActivity?.("场景记录员 Agent：开始独立调用");
 				const scenePrompt = buildSceneAgentPrompt({
 					state,
 					userText: lastUserText,
@@ -767,9 +768,10 @@ export class StageEngine {
 								}
 								sm.flush();
 								ev.onState?.(state);
-								ev.onActivity?.(`场景记录员记下 ${result.applied.length} 项场景事实`);
+							ev.onActivity?.(`场景记录员记下 ${result.applied.length} 项场景事实`);
 							}
 						}
+						ev.onActivity?.("场景记录员 Agent：完成独立调用");
 					}
 				}
 			} catch (error) {
@@ -1022,7 +1024,8 @@ export class StageEngine {
 		}
 		if (this.#deps.directorAgent) {
 			try {
-				const directorStream = this.#deps.streamFn(
+				ev.onActivity?.("导演 Agent：开始独立调用");
+				const result = await this.#runModelOnce(
 					model,
 					{
 						systemPrompt: buildDirectorSelectionPrompt(actorProfiles, state.scene),
@@ -1030,9 +1033,9 @@ export class StageEngine {
 					},
 					{ ...options, reasoning: "off", maxTokens: 300 },
 				);
-				const result = await directorStream.result();
 				const text = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n");
 				directorDecision = parseDirectorDecision(text, actorProfiles, directorDecision, state.scene);
+				ev.onActivity?.("导演 Agent：完成独立调用");
 				ev.onActivity?.(`导演调度：${directorDecision.activeActors.join("、") || "无角色"} · ${directorDecision.turnFocus}`);
 			} catch (error) {
 				ev.onActivity?.(`导演 agent 调度失败，回落规则调度：${error instanceof Error ? error.message : String(error)}`);
@@ -1047,9 +1050,10 @@ export class StageEngine {
 		const actorAgents = actorProfiles.map((profile) => ({
 			profile,
 			respond: async (input: { userText: string; recentText: string; sharedState: { time: string; location: string } }) => {
+				ev.onActivity?.(`角色 Agent「${profile.name}」：开始独立调用`);
 				const actorModel = this.#deps.getActorModel?.(profile.name, model) ?? model;
 				const actorAuth = actorModel === model ? { apiKey, headers } : await this.#deps.getAuth(actorModel);
-				const actorStream = this.#deps.streamFn(
+				const result = await this.#runModelOnce(
 					actorModel,
 					{
 						systemPrompt: buildActorPrompt(profile, directorDecision, state.scene),
@@ -1057,8 +1061,8 @@ export class StageEngine {
 					},
 					{ ...options, ...actorAuth, reasoning: "off", maxTokens: 800 },
 				);
-				const result = await actorStream.result();
 				const content = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n");
+				ev.onActivity?.(`角色 Agent「${profile.name}」：完成独立调用`);
 				return parseActorProposal(content, profile);
 			},
 		}));
@@ -1082,6 +1086,7 @@ export class StageEngine {
 			}
 		}
 
+		ev.onActivity?.("主回复 Agent：开始独立调用");
 		const s = this.#deps.streamFn(model, { systemPrompt, messages, tools }, options);
 		let final: AssistantMsgLike | null = null;
 		let errored: string | undefined;
@@ -1106,6 +1111,7 @@ export class StageEngine {
 				fwd(e);
 			}
 		}
+		ev.onActivity?.("主回复 Agent：完成独立调用");
 		// DSML 会在流式正文里被先显示，定稿前清理并重绘，避免协议文本污染对话。
 		const cleanedText = stripDsmlToolCalls(text);
 		if (cleanedText !== text) {
@@ -2053,6 +2059,28 @@ export class StageEngine {
 	}
 
 	// M-A 起 #revise 精修旁路退役（8/10 验收整体退役，revise.ts 已删除）。
+
+	/** 独立 Agent 的一次模型调用：共享超时与取消信号，但不共享对话消息。 */
+	async #runModelOnce(
+		model: StageModelLike,
+		context: { systemPrompt?: string; messages: unknown[] },
+		options: Record<string, unknown>,
+	): Promise<AssistantMsgLike> {
+		const timeoutMs = this.#deps.sideTextTimeoutMs ?? 30_000;
+		const timeoutController = new AbortController();
+		const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
+		const signal = this.#abort?.signal
+			? AbortSignal.any([this.#abort.signal, timeoutController.signal])
+			: timeoutController.signal;
+		try {
+			const stream = this.#deps.streamFn(model, context, { ...options, signal });
+			const result = await stream.result();
+			if (!result) throw new Error("独立 Agent 未返回最终消息");
+			return result;
+		} finally {
+			clearTimeout(timeout);
+		}
+	}
 
 	/** 旁路文本调用（精修/场记用）：静默收集，不外发增量；失败返回 {error} */
 	async #sideText(

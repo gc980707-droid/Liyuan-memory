@@ -285,7 +285,11 @@ test("引擎循环：干净直出=代收后走完记账席位收束，过程条�
 		});
 		await engine.performTurn("走进殿内。");
 		assert.equal(reg.getPendingResponseCount(), 0, "初稿+回执轮+记账轮+场记兜底，四发用尽");
-		assert.deepEqual(activities, ["直出正文已代收为 draft_write"], "只有一条代收过程条");
+		assert.deepEqual(
+			activities,
+			["主回复 Agent：开始独立调用", "主回复 Agent：完成独立调用", "直出正文已代收为 draft_write"],
+			"主回复与代收过程均应可观测",
+		);
 	} finally {
 		reg.unregister();
 		rmSync(cwd, { recursive: true, force: true });
