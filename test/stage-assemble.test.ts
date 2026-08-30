@@ -152,7 +152,11 @@ test("system prompt：默认对话优先，限制小说式一口气交稿", () =
 	assert.ok(p.includes("不替用户补台词、动作、想法或决定"));
 	assert.ok(p.includes("环境不是填充物"));
 	assert.ok(p.includes("默认用直白、具体的动词和名词"));
+	assert.ok(p.includes("先回应，再描写"));
 	assert.ok(p.includes("不要把已经通过动作表现出的情绪再解释一遍"));
+	assert.ok(p.includes("让人物保留当下的不完整"));
+	assert.ok(p.includes("维持对话的新鲜度"));
+	assert.ok(p.includes("角色不是剧情客服"));
 });
 
 test("system prompt：# 工作方式 = 纯协议（§2.1-5 逐字）；tools=false 时不出现", () => {
