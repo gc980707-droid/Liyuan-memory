@@ -59,6 +59,15 @@ function model(): Model<"openai-completions"> {
 	};
 }
 
+function deepSeekModel(): Model<"openai-completions"> {
+	return {
+		...model(),
+		id: "openrouter/deepseek/deepseek-v4-flash-0731",
+		name: "DeepSeek test",
+		reasoning: false,
+	};
+}
+
 function chunk(delta: Record<string, unknown>, finishReason: string | null = null): unknown {
 	return {
 		id: "chatcmpl-test",
@@ -114,5 +123,16 @@ describe("openai-completions reasoning_details streaming", () => {
 		await runOpenAICompletionsStream([assistantMessage]);
 
 		expect(getAssistantPayload(mockState.payloads[1])?.reasoning_details).toEqual([reasoningDetail]);
+	});
+
+	it("explicitly disables DeepSeek thinking even when the model is marked non-reasoning", async () => {
+		mockState.chunkSets = [[chunk({}, "stop")]];
+		await streamOpenAICompletions(
+			deepSeekModel(),
+			{ messages: [{ role: "user", content: "继续" }] },
+			{ apiKey: "test", reasoning: "off" },
+		).result();
+
+		expect(mockState.payloads[0]).toMatchObject({ thinking: { type: "disabled" } });
 	});
 });
