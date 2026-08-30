@@ -150,6 +150,9 @@ test("system prompt：默认对话优先，限制小说式一口气交稿", () =
 	assert.ok(p.includes("活人式交流优先于“显得有用”"));
 	assert.ok(p.includes("不要为了讨好用户而无条件赞同"));
 	assert.ok(p.includes("不替用户补台词、动作、想法或决定"));
+	assert.ok(p.includes("环境不是填充物"));
+	assert.ok(p.includes("默认用直白、具体的动词和名词"));
+	assert.ok(p.includes("不要把已经通过动作表现出的情绪再解释一遍"));
 });
 
 test("system prompt：# 工作方式 = 纯协议（§2.1-5 逐字）；tools=false 时不出现", () => {
@@ -364,9 +367,9 @@ test("默认预设（§4.A）：config.preset 空 → 装 presets/默认.json；
 		assert.ok(resident.includes("斜体"), "视角/排版承接");
 		assert.ok(resident.includes("感官细节"), "感官承接");
 		assert.ok(resident.includes("忌 AI 腔"), "忌AI腔承接");
-		// 篇幅兜底数据化：extractDraftRules 能从默认预设提出 wordRange
+		// 默认预设不再强迫模型凑 800–1500 字；长度随场景，避免把普通对话写成文章。
 		const rules = extractDraftRules(m.presetRuleTexts, m.statusBarFormats);
-		assert.deepEqual(rules.wordRange, { min: 800, max: 1500 }, "篇幅从默认预设提取");
+		assert.equal(rules.wordRange, undefined, "默认预设不应生成硬性篇幅范围");
 
 		// 用户预设在场：默认预设完全不装（不叠加）
 		writeFileSync(
