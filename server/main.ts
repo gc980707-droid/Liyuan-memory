@@ -1509,11 +1509,14 @@ try {
 		syncAgentConfigToRuntime(cwd, getAgentDir(), cfg);
 		session.modelRegistry.refresh();
 		const cur = session.model;
-		if (cur) {
-			const next = session.modelRegistry.find(cur.provider, cur.id);
-			if (next) await session.setModel(next);
-			const p = cfg.providers[cur.provider];
-			const entry = Array.isArray(p?.models) ? p.models.find((m) => String(m.id) === cur.id) : undefined;
+		const configured = cfg.defaultProvider && cfg.defaultModel
+			? session.modelRegistry.find(cfg.defaultProvider, cfg.defaultModel)
+			: undefined;
+		const next = configured ?? (cur ? session.modelRegistry.find(cur.provider, cur.id) : undefined);
+		if (next) {
+			await session.setModel(next);
+			const p = cfg.providers[next.provider];
+			const entry = Array.isArray(p?.models) ? p.models.find((m) => String(m.id) === next.id) : undefined;
 			const per =
 				typeof entry?.thinkingLevel === "string" && entry.thinkingLevel.trim()
 					? entry.thinkingLevel.trim()
