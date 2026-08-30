@@ -1188,8 +1188,9 @@ export class StageEngine {
 			sm.flush();
 		}
 
-		// 场记兜底（D5）：模型本拍没调 world_state_update 才旁路补账，M-B 视实弹数据决定退役。
-		if (entryId && !aborted && finalText && ws.patches.length === 0) {
+		// 场记旁路：每拍都从最新正文抽取场景连续性；即使主演已经提交了其它账本补丁，
+		// 场记仍要检查位置/手上物件/进行中动作，避免这类事实依赖主演是否想起调用工具。
+		if (entryId && !aborted && finalText) {
 			const r = await runScribeTurn(
 				{
 					// 给隐藏思考留出余量；自建中转站可能仍输出 reasoning，2048 会把 JSON 挤没。

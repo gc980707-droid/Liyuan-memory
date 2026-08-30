@@ -6,7 +6,7 @@ import { withAliases } from "../src/lorebook.ts";
 import { defaultState } from "../src/state.ts";
 import type { LorebookEntry } from "../src/types.ts";
 
-test("场记提示词：只记账，不含连续性审查", () => {
+test("场记提示词：只记账，并维护场景连续性快照", () => {
 	const { systemPrompt, userText } = buildScribeTurnPrompt({
 		state: defaultState(),
 		userText: "*我递出怀表* 收下吧。",
@@ -16,7 +16,8 @@ test("场记提示词：只记账，不含连续性审查", () => {
 	});
 	assert.ok(systemPrompt.includes("patch"));
 	assert.ok(!systemPrompt.includes('"warnings"'), "不再要求输出 warnings 字段");
-	assert.ok(!systemPrompt.includes("连续性"), "不再做连续性审查");
+	assert.ok(systemPrompt.includes("场景连续性快照"), "场记负责维护场景连续性事实");
+	assert.ok(systemPrompt.includes("不能用常见套路换成别的物件"));
 	assert.ok(!systemPrompt.includes("unasked_turn"), "不再做先斩后奏检测");
 	assert.ok(systemPrompt.includes("否定性事件"), "拒收类事件必须显式要求记账");
 	assert.ok(systemPrompt.includes("青梧"));
@@ -54,6 +55,17 @@ test("场记输出解析：只取 patch，丢弃审查字段", () => {
 	assert.ok(malformed);
 	assert.deepEqual(malformed.patch, {}, "非对象 patch 应回退为空");
 	assert.deepEqual(malformed.warnings, []);
+});
+
+test("场记输出解析：保留 scene 补丁", () => {
+	const result = parseScribeResult(
+		'{"patch":{"scene":{"positions":{"沈云熙":"厨房"},"held_items":{"沈云熙":"手机"},"ongoing":["正在做饭"]}}}',
+	);
+	assert.deepEqual(result?.patch.scene, {
+		positions: { 沈云熙: "厨房" },
+		held_items: { 沈云熙: "手机" },
+		ongoing: ["正在做饭"],
+	});
 });
 
 test("场记输出解析：unasked_turn 即使返回也丢弃", () => {
