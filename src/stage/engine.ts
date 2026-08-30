@@ -956,7 +956,7 @@ export class StageEngine {
 		const past = endsWithUser ? history.slice(0, -1) : history;
 		// 规划卡（五注入之一）：每拍第 1 轮随末端注入送达（工作区新建必空），用户话保持最后一句。
 		const singleReplyRule = this.#deps.singleReply
-			? "\n\n【单条回复】本拍只回应用户这一条输入；完成必要读取后，用一次 `draft_write` 交出一条完整、适度展开的正文，在角色自己的动作或情绪自然停顿处收束。正文收尾的最后两段不得出现问句、询问用户、邀请用户回应或“等着他开口”之类的递话句；只有用户明确要求做选择时才可 ask。不要 beat_plan 后分段连载，不要替用户继续行动。"
+			? "\n\n【单条回复】本拍只回应用户这一条输入；完成必要读取后，用一次 `draft_write` 交出一条完整但克制的正文：先写角色对这句话的一个直接反应，再推进一个具体动作，然后自然停顿。不要为了证明人物真实而堆叠手抖、旧回忆、环境隐喻或背景解释，不要在一条回复里补完一段人生；没有必要就保持沉默和留白。正文收尾的最后两段不得出现问句、询问用户、邀请用户回应或“等着他开口”之类的递话句；只有用户明确要求做选择时才可 ask。不要 beat_plan 后分段连载，不要替用户继续行动。"
 			: "";
 		const injWithCard = tools.length > 0 ? `${injection}\n\n${PLAN_CARD}${singleReplyRule}` : `${injection}${singleReplyRule}`;
 		const tailText = endsWithUser ? `${injWithCard}\n\n${history[history.length - 1].text}` : injWithCard;
