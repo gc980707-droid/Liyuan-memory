@@ -1045,7 +1045,7 @@ export class StageEngine {
 				const actorStream = this.#deps.streamFn(
 					actorModel,
 					{
-						systemPrompt: buildActorPrompt(profile, directorDecision),
+						systemPrompt: buildActorPrompt(profile, directorDecision, state.scene),
 						messages: [{ role: "user", content: [{ type: "text", text: `时间：${input.sharedState.time}\n地点：${input.sharedState.location}\n最近正文：${input.recentText || "（无）"}\n用户最新输入：${input.userText}` }] }],
 					},
 					{ ...options, ...actorAuth, reasoning: "off", maxTokens: 800 },
@@ -1060,7 +1060,7 @@ export class StageEngine {
 				actorProposals = await runActorAgents(directorDecision, actorAgents, {
 					userText: lastUserText,
 					recentText: lastNarrativeText,
-					sharedState: { time: state.time, location: state.location },
+					sharedState: { time: state.time, location: state.location, scene: state.scene },
 				});
 				ev.onActivity?.(`角色 agent 已调用：${actorProposals.map((p) => p.actor).join("、") || "无有效提案"}`);
 				const conflicts = findProposalConflicts(actorProposals);

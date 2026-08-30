@@ -64,6 +64,18 @@ test("角色 agent：稳定档案中的长期家暴经历必须进入本轮判�
 	assert.match(prompt, /本轮只提议一个可见反应和一个动作/);
 });
 
+test("角色 agent：收到场景进行中动作，不得脱离连续性另起动作", () => {
+	const profile = actorProfilesFromState(card, state)[0]!;
+	const prompt = buildActorPrompt(profile, selectActiveActors([profile], "客人走到厨房门口"), {
+		positions: { 阿梨: "灶台边" },
+		held_items: {},
+		ongoing: ["阿梨正在准备清粥"],
+		known_facts: ["客人有些晃"],
+	});
+	assert.match(prompt, /进行中=阿梨正在准备清粥/);
+	assert.match(prompt, /不得用临时提案让角色放弃它/);
+});
+
 test("角色提案按 JSON 校验，错误格式只回退为该角色文本", () => {
 	const profile = actorProfilesFromState(card, state)[0]!;
 	assert.deepEqual(parseActorProposal('{"actor":"阿梨","content":"把杯子推过去","intendedAction":"倒水"}', profile), {
