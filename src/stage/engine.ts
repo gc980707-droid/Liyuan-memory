@@ -34,7 +34,7 @@ import {
 	type AssemblyReportItem,
 } from "../preset-split.ts";
 import { splitWithManifest } from "../preset-skill.ts";
-import { formatRosterIndex, formatState, saveState } from "../state.ts";
+import { applyPatch, canonicalizeCharacterKeys, formatRosterIndex, formatState, saveState } from "../state.ts";
 import { isBackstageText } from "../stance.ts";
 import type { LorebookEntry } from "../types.ts";
 import {
@@ -86,6 +86,7 @@ import {
 	type RpSummaryData,
 } from "./compact.ts";
 import { runScribeTurn, STATE_ENTRY_TYPE } from "./scribe-run.ts";
+import { buildSceneAgentPrompt, parseSceneAgentResult } from "./scene-agent.ts";
 import { applyWorldPatchToMvu, mvuTimePatchIfMissing, projectMvuToWorldState } from "../mvu.ts";
 import {
 	MAX_ROUNDS,
@@ -228,6 +229,8 @@ export interface StageEngineDeps {
 	getActorModel?: (actorName: string, fallback: StageModelLike) => StageModelLike | undefined;
 	/** 用同一剧情模型先做一次导演调度；失败时回退确定性筛选。 */
 	directorAgent?: boolean;
+	/** 生成前场景记录员：提取用户明确动作/需求；宿主显式开启，失败不阻塞主生成。 */
+	sceneAgent?: boolean;
 	/** 会话当前思考档（用户自由，引擎透传） */
 	getThinking?: () => string | undefined;
 	/** 账本磁盘缓存路径（.liyuan-state/<sessionId>.json）；给出则场记落盘（fs.watch → state 帧） */
@@ -709,11 +712,65 @@ export class StageEngine {
 
 		// 上下文 = f(分支)
 		const branch = sm.getBranch() as BranchEntryLike[];
-		const state = stateFromBranch(branch);
+		let state = stateFromBranch(branch);
 		const { history, lastUserText, lastNarrativeText, summary } = rebuildHistory(branch);
 		if (!history.some((m) => m.role === "user")) {
 			ev.onNotify?.("error", "没有可开演的用户输入。");
 			return { aborted: false, error: "no-user-input" };
+		}
+
+		// 生成前场景记录员：先把用户本轮明确说出的动作/需求与场景事实分离出来，
+		// 再交给主演。它只做事实提取，失败不影响正文生成。
+		let sceneIntent: { explicitActions: string[]; explicitNeeds: string[] } | undefined;
+		if (this.#deps.sceneAgent === true && lastUserText.trim()) {
+			try {
+				const scenePrompt = buildSceneAgentPrompt({
+					state,
+					userText: lastUserText,
+					recentText: lastNarrativeText,
+					charName: card.name,
+					userName: config.userName,
+				});
+				const sceneResp = await this.#sideText(
+					model,
+					scenePrompt.systemPrompt,
+					scenePrompt.userText,
+					await this.#deps.getAuth(model),
+					4096,
+				);
+				if (typeof sceneResp !== "string") {
+					ev.onActivity?.(`场景记录员失败，继续生成：${sceneResp.error}`);
+				} else {
+					const parsed = parseSceneAgentResult(sceneResp);
+					if (!parsed) {
+						ev.onActivity?.("场景记录员输出不可解析，继续生成");
+					} else {
+						sceneIntent = {
+							explicitActions: parsed.explicitActions,
+							explicitNeeds: parsed.explicitNeeds,
+						};
+						if (Object.keys(parsed.patch).length > 0) {
+							const result = applyPatch(
+								state,
+								canonicalizeCharacterKeys(parsed.patch, [card.name, config.userName, ...Object.keys(state.characters)]),
+							);
+							if (result.applied.length > 0) {
+								state = result.state;
+								sm.appendCustomEntry(STATE_ENTRY_TYPE, state);
+								const stateFile = this.#deps.getStateFile?.(sm.getSessionId());
+								if (stateFile) {
+									try { saveState(stateFile, state); } catch { /* 树上快照仍是权威 */ }
+								}
+								sm.flush();
+								ev.onState?.(state);
+								ev.onActivity?.(`场景记录员记下 ${result.applied.length} 项场景事实`);
+							}
+						}
+					}
+				}
+			} catch (error) {
+				ev.onActivity?.(`场景记录员异常，继续生成：${error instanceof Error ? error.message : String(error)}`);
+			}
 		}
 
 		const languageMismatch = lastNarrativeText
@@ -860,6 +917,7 @@ export class StageEngine {
 			loreIndex: formatLoreIndex(materials.entries),
 			rosterIndex: formatRosterIndex(state),
 			...(memoryHits.length > 0 ? { memoryHits } : {}),
+			...(sceneIntent ? { sceneIntent } : {}),
 		});
 
 		// §4.B 输出合约：v1 供数＝装载期一次性模型声明（M-R4 首件，指纹缓存，换卡/改预设即重声明）；

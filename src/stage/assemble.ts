@@ -437,6 +437,8 @@ export interface StageInjectionOptions {
 	memoryHits?: MemoryHitLike[];
 	/** 本轮导演调度结果；缺省时保持旧的单角色流程。 */
 	director?: { decision: DirectorDecision; profiles: ActorProfile[] };
+	/** 生成前场景记录员提取的用户明确意图；只作事实，不替用户扩展行动。 */
+	sceneIntent?: { explicitActions: string[]; explicitNeeds: string[] };
 }
 
 /**
@@ -459,6 +461,7 @@ export function buildStageInjection({
 	rosterIndex,
 	memoryHits,
 	director,
+	sceneIntent,
 }: StageInjectionOptions): string {
 	const macro: MacroContext = { charName: card.name, userName: config.userName };
 	const blocks: string[] = [];
@@ -493,6 +496,14 @@ export function buildStageInjection({
 			.map((h) => `- ${h.text}${h.meta?.title ? `（来源：${h.meta.title}）` : ""}`)
 			.join("\n");
 		blocks.push(`【自动召回的剧情记忆】\n${memory}\n以上是检索命中，不是本轮新发生的事实；与当前账本冲突时以当前账本和本轮已落稿内容为准。`);
+	}
+
+	if (sceneIntent && (sceneIntent.explicitActions.length > 0 || sceneIntent.explicitNeeds.length > 0)) {
+		const lines = [
+			...sceneIntent.explicitActions.map((item) => `- 明确动作：${item}`),
+			...sceneIntent.explicitNeeds.map((item) => `- 明确需求/状态：${item}`),
+		];
+		blocks.push(`【本轮用户明确意图】\n${lines.join("\n")}\n只按这些明确内容回应；没有写出的用户动作、道具和安排不得补写。`);
 	}
 
 	// 预设末端内容：原文直通，零归拢零引导语（M-R1）

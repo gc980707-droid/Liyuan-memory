@@ -2192,6 +2192,8 @@ const stage = new StageEngine({
 	// 导演先调度，再为每个活跃角色单独取一份主观提案；正文仍由台上主回合合成。
 	actorAgents: true,
 	directorAgent: true,
+	// 生成前先由场景记录员提取用户明确动作/需求，避免主演凭套路补道具和动作。
+	sceneAgent: true,
 	events: {
 		onTurnStart: () => broadcast({ type: "agent", state: "start" }),
 		onDelta: (kind, delta, draft, reset) =>

@@ -251,6 +251,19 @@ test("末端注入：自动召回记忆独立成块，并标注为旧事实", ()
 	assert.match(inj, /不是本轮新发生的事实/);
 });
 
+test("末端注入：场景记录员的明确意图独立注入，不替用户扩展动作", () => {
+	const inj = buildStageInjection({
+		state: defaultState(),
+		activatedLore: [],
+		card,
+		config,
+		sceneIntent: { explicitActions: [], explicitNeeds: ["用户表示饿了"] },
+	});
+	assert.ok(inj.includes("【本轮用户明确意图】"));
+	assert.ok(inj.includes("明确需求/状态：用户表示饿了"));
+	assert.ok(inj.includes("没有写出的用户动作、道具和安排不得补写"));
+});
+
 test("detectsLanguageMismatch：中文目标才判、样本要够长", () => {
 	const en = "The moon hangs over the courtyard while she waits in silence for a long time tonight.";
 	assert.equal(detectsLanguageMismatch(en, "中文"), true);

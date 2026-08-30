@@ -197,9 +197,15 @@ export function applyPatch(state: WorldState, patch: Record<string, unknown>): P
 						continue;
 					}
 					for (const [name, item] of Object.entries(entries as Record<string, unknown>)) {
-						if (item === null) delete scene[table][name];
-						else if (typeof item === "string" && item.trim()) scene[table][name] = item.trim();
-						else warnings.push(`scene.${table}.${name} 需要非空字符串或 null，已忽略`);
+						if (item === null) {
+							if (name in scene[table]) {
+								delete scene[table][name];
+								applied.push(`scene.${table}.${name} 已移除`);
+							}
+						} else if (typeof item === "string" && item.trim()) {
+							scene[table][name] = item.trim();
+							applied.push(`scene.${table}.${name} → ${item.trim()}`);
+						} else warnings.push(`scene.${table}.${name} 需要非空字符串或 null，已忽略`);
 					}
 				}
 				for (const key of ["ongoing", "known_facts"] as const) {
@@ -212,6 +218,7 @@ export function applyPatch(state: WorldState, patch: Record<string, unknown>): P
 					const kept = items.filter((x): x is string => typeof x === "string" && x.trim()).map((x) => x.trim());
 					if (kept.length !== items.length) warnings.push(`scene.${key} 中非字符串或空项已丢弃`);
 					scene[key] = kept;
+					applied.push(`scene.${key} → [${kept.join("、")}]`);
 				}
 				next.scene = scene;
 				break;

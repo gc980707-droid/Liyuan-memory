@@ -52,6 +52,7 @@ test("场景连续性快照：保留既有事实并支持清除物件", () => {
 	assert.equal(s.scene.held_items.沈云熙, undefined, "明确清除后物件消失");
 	assert.deepEqual(s.scene.ongoing, []);
 	assert.deepEqual(s.scene.known_facts, ["家里缺钱", "大女儿要交学费"]);
+	assert.ok(applyPatch(defaultState(), { scene: { held_items: { 沈云熙: "手机" } } }).applied.length > 0);
 	const text = formatState(s);
 	assert.ok(text.includes("场景位置：沈云熙=床沿"));
 	assert.ok(text.includes("场景已知：家里缺钱；大女儿要交学费"));
