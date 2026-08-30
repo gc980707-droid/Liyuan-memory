@@ -292,6 +292,8 @@ export interface StageEngineDeps {
 	 * 未注入 = 台上无 ask 工具（依赖缺失的工具不上清单）。
 	 */
 	askUser?: (question: string, options: string[], signal?: AbortSignal) => Promise<string | undefined>;
+	/** 单条回复模式：首段正文受理后立即收束本拍，仍执行引擎侧收尾。 */
+	singleReply?: boolean;
 	streamFn: StageStreamFn;
 	events?: StageEvents;
 }
@@ -953,7 +955,10 @@ export class StageEngine {
 		const endsWithUser = history[history.length - 1]?.role === "user";
 		const past = endsWithUser ? history.slice(0, -1) : history;
 		// 规划卡（五注入之一）：每拍第 1 轮随末端注入送达（工作区新建必空），用户话保持最后一句。
-		const injWithCard = tools.length > 0 ? `${injection}\n\n${PLAN_CARD}` : injection;
+		const singleReplyRule = this.#deps.singleReply
+			? "\n\n【单条回复】本拍只回应用户这一条输入；完成必要读取后，用一次 `draft_write` 交出一条完整、适度展开的正文，停在可接话处，不要 beat_plan 后分段连载，不要替用户继续行动。"
+			: "";
+		const injWithCard = tools.length > 0 ? `${injection}\n\n${PLAN_CARD}${singleReplyRule}` : `${injection}${singleReplyRule}`;
 		const tailText = endsWithUser ? `${injWithCard}\n\n${history[history.length - 1].text}` : injWithCard;
 		const guardedTailText = endsWithUser
 			? `${injWithCard}\n\n【硬性主权校验】只能执行用户本轮原话明确写出的动作；没有写“开枪/射击”，不得开枪、扣扳机、命中或消耗弹药；没有写移动，不得替用户移动。其余内容只能描写环境和非用户角色反应。\n\n${history[history.length - 1].text}`
@@ -1427,6 +1432,7 @@ export class StageEngine {
 		let ledgerInjected = false;
 		let ledgerDone = false;
 		let curtainInjected = false;
+		let singleReplyDone = false;
 		// 稿首次落地时的 text 长度：之前的 text 是读题/计划旁白（工具轮的 text 通道产出），
 		// 不算正文也不算尾巴；之后的 text 才是尾巴候选（状态栏等）。-1 = 稿未落地。
 		let tailStart = -1;
@@ -1653,6 +1659,7 @@ export class StageEngine {
 					if (name === "draft_append" && r.ok !== false) {
 						readThisSeg.clear();
 						forcedNudgedForSeg = false;
+						if (this.#deps.singleReply) singleReplyDone = true;
 					}
 					// 重复读瘦身：名单内 skill 首读成功后记名（未知名回落直写不记，避免把 miss 记成已读）
 					if (skillReadName && o.skillNames.includes(skillReadName) && r.ok !== false) {
@@ -1678,6 +1685,12 @@ export class StageEngine {
 						timestamp: Date.now(),
 					});
 				}
+			}
+
+			// 单条回复模式：第一段稿件已受理，封笔并结束模型循环，避免一拍变连载。
+			if (singleReplyDone && o.ws.draft.trim()) {
+				if (!o.ws.sealed) runWriteTool(o.ws, o.wsDeps, "draft_seal", {});
+				break;
 			}
 
 			// P7：用户停止（ask 卡上点了停止）——本拍收束，不再续轮

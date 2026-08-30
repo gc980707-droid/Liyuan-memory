@@ -2197,6 +2197,8 @@ const stage = new StageEngine({
 	directorAgent: true,
 	// 生成前先由场景记录员提取用户明确动作/需求，避免主演凭套路补道具和动作。
 	sceneAgent: true,
+	// 一次输入只生成一条完整回复；场记与状态收尾仍由引擎执行。
+	singleReply: true,
 	events: {
 		onTurnStart: () => broadcast({ type: "agent", state: "start" }),
 		onDelta: (kind, delta, draft, reset) =>
