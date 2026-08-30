@@ -162,6 +162,16 @@ test("system prompt：默认对话优先，限制小说式一口气交稿", () =
 	assert.ok(p.includes("角色不是剧情客服"));
 });
 
+test("system prompt：卡明确有家暴经历时，避免默认安全型照料反应", () => {
+	const p = buildStageSystemPrompt({
+		card: { ...card, description: "长期遭受家暴，习惯先观察对方脸色。" },
+		config,
+		constantLore: [],
+	});
+	assert.ok(p.includes("不要把她写成默认从容、熟练照料他人的安全型角色"));
+	assert.ok(p.includes("不要把这些表现固定成模板"));
+});
+
 test("system prompt：# 工作方式 = 纯协议（§2.1-5 逐字）；tools=false 时不出现", () => {
 	const p = buildStageSystemPrompt({ card, config, constantLore: [] });
 	assert.ok(p.includes("# 工作方式"), "工作方式节在场");
