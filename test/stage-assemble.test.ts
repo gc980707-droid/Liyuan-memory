@@ -145,32 +145,22 @@ test("system prompt：字节稳定、宏替换；扮演话语零残留（P1—�
 test("system prompt：默认对话优先，限制小说式一口气交稿", () => {
 	const p = buildStageSystemPrompt({ card, config, constantLore: [] });
 	assert.ok(p.includes("# 对话感（默认优先）"));
-	assert.ok(p.includes("先回应用户刚说的具体内容和情绪"));
-	assert.ok(p.includes("不要替多个角色连续演完整场戏"));
-	assert.ok(p.includes("活人式交流优先于“显得有用”"));
-	assert.ok(p.includes("不要为了讨好用户而无条件赞同"));
-	assert.ok(p.includes("不替用户补台词、动作、想法或决定"));
-	assert.ok(p.includes("环境不是填充物"));
-	assert.ok(p.includes("默认用直白、具体的动词和名词"));
-	assert.ok(p.includes("先回应，再描写"));
-	assert.ok(p.includes("保持场景连续"));
-	assert.ok(p.includes("最近一轮用户消息和正文里的明确事实优先于角色卡开场"));
-	assert.ok(p.includes("没有依据的具体道具、地点变化和动作不要补"));
-	assert.ok(p.includes("不要把已经通过动作表现出的情绪再解释一遍"));
-	assert.ok(p.includes("让人物保留当下的不完整"));
-	assert.ok(p.includes("维持对话的新鲜度"));
-	assert.ok(p.includes("角色不是剧情客服"));
+	assert.ok(p.includes("全局只管边界、连续性和节奏，不替角色决定性格或经历"));
+	assert.ok(p.includes("先回应用户刚说的内容，再推进一个最小、具体的现场变化"));
+	assert.ok(p.includes("用户没有明确写出的动作、台词、想法和选择，不得补写或推进"));
+	assert.ok(p.includes("角色的具体性格、经历和反应方式由角色 Agent 决定"));
+	assert.ok(p.includes("同一种反应不要连续重复"));
 });
 
-test("system prompt：卡明确有家暴经历时，避免默认安全型照料反应", () => {
+test("system prompt：全局不携带角色专属经历", () => {
 	const p = buildStageSystemPrompt({
 		card: { ...card, description: "长期遭受家暴，习惯先观察对方脸色。" },
 		config,
 		constantLore: [],
 	});
-	assert.ok(p.includes("不要把她写成默认从容、熟练照料他人的安全型角色"));
-	assert.ok(p.includes("不要把这些表现固定成模板"));
-	assert.ok(p.includes("同一轮只选一个这样的可见反应"));
+	assert.ok(p.includes("长期遭受家暴"), "角色卡原文仍应作为角色档案送达");
+	assert.ok(!p.includes("默认从容、熟练照料他人的安全型角色"));
+	assert.ok(p.includes("角色的具体性格、经历和反应方式由角色 Agent 决定"));
 });
 
 test("system prompt：# 工作方式 = 纯协议（§2.1-5 逐字）；tools=false 时不出现", () => {
