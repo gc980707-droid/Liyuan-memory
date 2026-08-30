@@ -1062,6 +1062,7 @@ export class StageEngine {
 					recentText: lastNarrativeText,
 					sharedState: { time: state.time, location: state.location },
 				});
+				ev.onActivity?.(`角色 agent 已调用：${actorProposals.map((p) => p.actor).join("、") || "无有效提案"}`);
 				const conflicts = findProposalConflicts(actorProposals);
 				if (conflicts.length > 0) ev.onActivity?.(`角色提案冲突：${conflicts.join("；")}`);
 				const actorContext = formatActorProposals(actorProposals);

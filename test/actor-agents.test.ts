@@ -55,6 +55,14 @@ test("导演提示只列活跃角色，角色提示带盲区且不接管用户",
 	assert.match(buildActorPrompt(profiles[0]!, decision), /严格 JSON/);
 });
 
+test("角色 agent：稳定档案中的长期家暴经历必须进入本轮判断", () => {
+	const traumaCard = { ...card, description: "长期遭受家暴，习惯先观察对方脸色。" };
+	const profile = actorProfilesFromState(traumaCard, state)[0]!;
+	const prompt = buildActorPrompt(profile, selectActiveActors([profile], "我饿了"));
+	assert.match(prompt, /长期家暴\/创伤经历/);
+	assert.match(prompt, /不能因用户一句日常需求就把她改写成从容熟练/);
+});
+
 test("角色提案按 JSON 校验，错误格式只回退为该角色文本", () => {
 	const profile = actorProfilesFromState(card, state)[0]!;
 	assert.deepEqual(parseActorProposal('{"actor":"阿梨","content":"把杯子推过去","intendedAction":"倒水"}', profile), {
