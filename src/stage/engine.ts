@@ -231,6 +231,8 @@ export interface StageEngineDeps {
 	directorAgent?: boolean;
 	/** 生成前场景记录员：提取用户明确动作/需求；宿主显式开启，失败不阻塞主生成。 */
 	sceneAgent?: boolean;
+	/** 旁路 Agent 单次调用上限；超时即按该 Agent 的降级路径继续。 */
+	sideTextTimeoutMs?: number;
 	/** 会话当前思考档（用户自由，引擎透传） */
 	getThinking?: () => string | undefined;
 	/** 账本磁盘缓存路径（.liyuan-state/<sessionId>.json）；给出则场记落盘（fs.watch → state 帧） */
@@ -2061,11 +2063,17 @@ export class StageEngine {
 		maxTokens = 8192,
 		reasoning: string | undefined = "off",
 	): Promise<string | { error: string }> {
+		const timeoutMs = this.#deps.sideTextTimeoutMs ?? 30_000;
+		const timeoutController = new AbortController();
+		const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
+		const signal = this.#abort?.signal
+			? AbortSignal.any([this.#abort.signal, timeoutController.signal])
+			: timeoutController.signal;
 		const options: Record<string, unknown> = {
 			apiKey: auth.apiKey,
 			headers: auth.headers,
 			maxTokens,
-			signal: this.#abort?.signal,
+			signal,
 			// 精修/场记/压缩是 harness 的机械窄题，默认强制关思考：zen go 对 low/high 无可靠节流
 			//（8/02 实测），放开推理会把 maxTokens 整个烧在隐形思考里、正文零输出。
 			// 合约声明是判断题（整卡+预设通读），由调用点透传会话思考档（undefined＝随供应商默认）。
@@ -2095,6 +2103,8 @@ export class StageEngine {
 			return text || { error: "最终消息无文本" };
 		} catch (err) {
 			return { error: err instanceof Error ? err.message : String(err) };
+		} finally {
+			clearTimeout(timeout);
 		}
 	}
 }
