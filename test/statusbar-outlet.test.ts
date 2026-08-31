@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { classifyTag } from "../src/postprocess.ts";
-import { dedupeIdenticalBlocks, dedupeLatestStatusBlocks, formatTailStart, mergeFinalText } from "../src/stage/engine.ts";
+import { dedupeIdenticalBlocks, dedupeLatestStatusBlocks, formatTailStart, mergeFinalText, stripLeakedStagehandText } from "../src/stage/engine.ts";
 import { splitStatusParts } from "../web/src/statusBlocks.ts";
 
 // ---------- ① mergeFinalText：尾巴只取格式块 ----------
@@ -33,6 +33,12 @@ test("mergeFinalText：元话语 + ``` 围栏状态栏 → 从围栏行起切", 
 	const merged = mergeFinalText(draft, text);
 	assert.ok(merged.includes("⏰ 时间：23:20"));
 	assert.ok(!merged.includes("停点"), "元话语不进定稿");
+});
+
+test("stripLeakedStagehandText：过滤较长谢幕元话语，保留剧情段落", () => {
+	const text = "她没有躲开你的手，只是低声哭着。\n\n已落账。这一拍停在这里：她需要一点时间，也需要你下一步的动作。";
+	assert.equal(stripLeakedStagehandText(text), "她没有躲开你的手，只是低声哭着。");
+	assert.equal(mergeFinalText("正文。", text), "正文。");
 });
 
 test("mergeFinalText：旧行为不回归——纯元话语整段丢、纯格式块原样拼、无稿直出全保留", () => {
