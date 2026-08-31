@@ -224,9 +224,14 @@ export function findProposalConflicts(proposals: ActorProposal[]): string[] {
 export function formatActorProposals(proposals: ActorProposal[]): string {
 	if (proposals.length === 0) return "";
 	const conflicts = findProposalConflicts(proposals);
-	return `【角色 agent 提案】\n${proposals
-		.map((p) => `- ${p.actor}：${p.content}${p.intendedAction ? `（行动意图：${p.intendedAction}）` : ""}`)
-		.join("\n")}${conflicts.length > 0 ? `\n【提案冲突提醒】\n${conflicts.map((x) => `- ${x}`).join("\n")}` : ""}\n以上是角色的主观反应材料；正文模型负责取舍和落稿，不把提案当成用户已做出的动作或决定。但场景账本中的“进行中”动作是连续性约束，不是可选建议：没有明确完成、取消或改道时，必须在正文中保留并推进该动作。冲突时保留不确定性，不擅自替用户选择。`;
+	return `【角色 agent 提案｜非事实材料】
+以下内容只是各角色对本轮的候选反应。它们不是已经发生的正文，也不是场景账本；尤其“行动意图”只是可能方向。除非最近正文、场景账本或用户本轮原话已经明确支持，否则主回复 Agent 必须舍弃该意图，不得把它写成已发生动作。
+${proposals
+		.map((p) => `- ${p.actor}：候选反应=${p.content}${p.intendedAction ? `；可能方向（非事实）=${p.intendedAction}` : ""}`)
+		.join("\n")}${conflicts.length > 0 ? `
+【提案冲突提醒】
+${conflicts.map((x) => `- ${x}`).join("\n")}` : ""}
+正文模型负责取舍和落稿，不把提案当成用户已做出的动作或决定。但场景账本中的“进行中”动作是连续性约束，不是可选建议：没有明确完成、取消或改道时，必须在正文中保留并推进该动作。冲突时保留不确定性，不擅自替用户选择。`;
 }
 
 export async function runActorAgents(

@@ -960,7 +960,7 @@ export class StageEngine {
 		const past = endsWithUser ? history.slice(0, -1) : history;
 		// 规划卡（五注入之一）：每拍第 1 轮随末端注入送达（工作区新建必空），用户话保持最后一句。
 		const singleReplyRule = this.#deps.singleReply
-			? "\n\n【单条回复｜主回复 Agent 权限】本拍只处理用户这一条输入，不写完整剧情。只写：角色对当前输入的一次直接反应 + 一个为完成该反应所需的动作；动作完成后立即停笔，通常 2–5 个自然段即可。不得替用户补台词、重复用户台词、安排用户动作或替用户表达感受。不得补写下一步承诺、未来计划、家庭背景或未被当前事件触发的回忆。普通场景不使用角色卡中的性化身体细节。不要为了证明真实而堆叠创伤解释、环境隐喻或生活道具；不要用“像是”“仿佛”“等着回应”“等他开口”等句式替角色解释情绪。正文不得以问句、邀请用户回应或递话句收尾；只有用户明确要求做选择时才可 ask。不要 beat_plan 后分段连载，不要替用户继续行动。"
+			? "\n\n【单条回复｜主回复 Agent 权限】本拍只处理用户这一条输入，不写完整剧情。历史用户消息只提供剧情事实；其中旧的字数、篇幅和生成要求不自动继承，除非用户在本轮再次明确提出。只写：角色对当前输入的一次直接反应 + 一个为完成该反应所需的动作；动作完成后立即停笔，通常 2–5 个自然段即可。不得替用户补台词、重复用户台词、安排用户动作或替用户表达感受。不得补写下一步承诺、未来计划、家庭背景或未被当前事件触发的回忆。普通场景不使用角色卡中的性化身体细节。不要为了证明真实而堆叠创伤解释、环境隐喻或生活道具；不要用“像是”“仿佛”“等着回应”“等他开口”等句式替角色解释情绪。正文不得以问句、邀请用户回应或递话句收尾；只有用户明确要求做选择时才可 ask。不要 beat_plan 后分段连载，不要替用户继续行动。"
 			: "";
 		const injWithCard = tools.length > 0 ? `${injection}\n\n${PLAN_CARD}${singleReplyRule}` : `${injection}${singleReplyRule}`;
 		const tailText = endsWithUser ? `${injWithCard}\n\n${history[history.length - 1].text}` : injWithCard;
@@ -1087,14 +1087,28 @@ export class StageEngine {
 		}
 
 		ev.onActivity?.("主回复 Agent：开始独立调用");
-		const s = this.#deps.streamFn(model, { systemPrompt, messages, tools }, options);
+		// 主回复也是独立 Agent，不能因为它走流式通道就失去旁路 Agent 的超时保护。
+		// 某些中转站在 reasoning-only、断流或缺 done 时会让 async iterable 永不结束；
+		// 只给 stream.result() 加超时并不能覆盖这里，所以同时给整段迭代设硬上限。
+		const mainTimeoutMs = this.#deps.sideTextTimeoutMs ?? 30_000;
+		const mainTimeoutController = new AbortController();
+		let rejectMainTimeout: ((reason?: unknown) => void) | undefined;
+		const mainTimeoutPromise = new Promise<never>((_, reject) => { rejectMainTimeout = reject; });
+		const mainTimeout = setTimeout(() => {
+			mainTimeoutController.abort();
+			rejectMainTimeout?.(new Error("主回复 Agent 超时"));
+		}, mainTimeoutMs);
+		const mainSignal = AbortSignal.any([this.#abort.signal, mainTimeoutController.signal]);
+		const s = this.#deps.streamFn(model, { systemPrompt, messages, tools }, { ...options, signal: mainSignal });
 		let final: AssistantMsgLike | null = null;
 		let errored: string | undefined;
 		let text = "";
+		let mainTimedOut = false;
 		const fwd = this.#draftForwarder();
-		for await (const e of s) {
-				if (e.type === "done") {
-					final = normalizeDsmlToolCalls(e.message ?? null);
+		const consumeMain = async () => {
+			for await (const e of s) {
+					if (e.type === "done") {
+						final = normalizeDsmlToolCalls(e.message ?? null);
 			} else if (e.type === "error") {
 				final = e.error ?? null;
 				errored = final?.errorMessage || "provider error";
@@ -1107,11 +1121,33 @@ export class StageEngine {
 			} else if (e.type === "thinking_delta" && e.delta) {
 				recordSegment(ws, { kind: "thinking", text: e.delta });
 				ev.onDelta?.("thinking", e.delta);
-			} else {
-				fwd(e);
+				} else {
+					fwd(e);
+				}
 			}
+		};
+		try {
+			await Promise.race([
+				consumeMain(),
+				mainTimeoutPromise,
+			]);
+		} catch (error) {
+			if (mainTimeoutController.signal.aborted && !this.#abort.signal.aborted) {
+				mainTimedOut = true;
+				// 保留已经流出的半截正文，按用户中断的语义落树，避免超时后静默丢稿。
+				final = {
+					role: "assistant",
+					content: text ? [{ type: "text", text }] : [],
+					stopReason: "aborted",
+				};
+			} else if (!this.#abort.signal.aborted) {
+				errored = error instanceof Error ? error.message : String(error);
+			}
+		} finally {
+			clearTimeout(mainTimeout);
 		}
-		ev.onActivity?.("主回复 Agent：完成独立调用");
+		if (mainTimedOut) ev.onActivity?.(`主回复 Agent：超时（${mainTimeoutMs}ms）`);
+		else ev.onActivity?.("主回复 Agent：完成独立调用");
 		// DSML 会在流式正文里被先显示，定稿前清理并重绘，避免协议文本污染对话。
 		const cleanedText = stripDsmlToolCalls(text);
 		if (cleanedText !== text) {
