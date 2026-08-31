@@ -960,7 +960,7 @@ export class StageEngine {
 		const past = endsWithUser ? history.slice(0, -1) : history;
 		// 规划卡（五注入之一）：每拍第 1 轮随末端注入送达（工作区新建必空），用户话保持最后一句。
 		const singleReplyRule = this.#deps.singleReply
-			? "\n\n【单条回复】本拍只回应用户这一条输入；完成必要读取后，用一次 `draft_write` 交出一条完整但克制的正文：先写角色对这句话的一个直接反应，再推进一个具体动作，然后自然停顿。不得替用户补台词、重复用户台词或安排用户动作。不要为了证明人物真实而堆叠创伤解释、旧回忆、环境隐喻或背景细节，不要为了生活感擅自添加道具、地点、声音或动作；没有必要就保持沉默和留白。不要用“像是”“仿佛”“等着回应”“等他开口”等句式替角色解释情绪。正文收尾的最后两段不得出现问句、询问用户、邀请用户回应或递话句；只有用户明确要求做选择时才可 ask。不要 beat_plan 后分段连载，不要替用户继续行动。"
+			? "\n\n【单条回复｜主回复 Agent 权限】本拍只处理用户这一条输入，不写完整剧情。只写：角色对当前输入的一次直接反应 + 一个为完成该反应所需的动作；动作完成后立即停笔，通常 2–5 个自然段即可。不得替用户补台词、重复用户台词、安排用户动作或替用户表达感受。不得补写下一步承诺、未来计划、家庭背景或未被当前事件触发的回忆。普通场景不使用角色卡中的性化身体细节。不要为了证明真实而堆叠创伤解释、环境隐喻或生活道具；不要用“像是”“仿佛”“等着回应”“等他开口”等句式替角色解释情绪。正文不得以问句、邀请用户回应或递话句收尾；只有用户明确要求做选择时才可 ask。不要 beat_plan 后分段连载，不要替用户继续行动。"
 			: "";
 		const injWithCard = tools.length > 0 ? `${injection}\n\n${PLAN_CARD}${singleReplyRule}` : `${injection}${singleReplyRule}`;
 		const tailText = endsWithUser ? `${injWithCard}\n\n${history[history.length - 1].text}` : injWithCard;
