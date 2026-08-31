@@ -44,4 +44,6 @@ test("wire visual channel and history opt-in use the same protected rewrite", ()
 	] as const;
 	assert.equal(rebuildHistory([...branch]).history[1].text, "八股");
 	assert.equal(rebuildHistory([...branch], processors).history[1].text, "自然");
+	assert.equal(toWireMsg({ role: "user", content: "八股" }, { charName: "c", userName: "u" }, { rewriteProcessors: processors })?.text, "八股");
+	assert.equal(toWireMsg({ role: "assistant", content: "八股" }, { charName: "c", userName: "u" }, { backstage: true, rewriteProcessors: processors })?.text, "八股");
 });

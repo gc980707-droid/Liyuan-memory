@@ -497,7 +497,10 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 	const showStatusBar = opts?.showStatusBar === true;
 	const historical = opts?.showStatusBar === false;
 	const rawText = textOf(msg.content).trim();
-	const rewritten = opts?.rewriteProcessors?.length ? applyRewriteProtected(rawText, opts.rewriteProcessors) : rawText;
+	// Rewrite is strictly an assistant narrative projection. User text, backstage
+	// turns, and custom/import records remain byte-identical.
+	const shouldRewrite = msg.role === "assistant" && opts?.backstage !== true;
+	const rewritten = shouldRewrite && opts?.rewriteProcessors?.length ? applyRewriteProtected(rawText, opts.rewriteProcessors) : rawText;
 	const text = hideHistoricalSkinBlocks(projectStatusPlaceholder(rewritten, skin, showStatusBar), skin, !historical).trim();
 
 	if (msg.role === "user") {

@@ -78,6 +78,12 @@ function canMatchEmpty(re: RegExp): boolean {
 	return re.test("");
 }
 
+function isRiskyRegex(source: string): boolean {
+	// RegExp is synchronous and cannot be safely interrupted. Reject the common
+	// catastrophic-backtracking shapes before they reach the display path.
+	return source.length > 10_000 || /\([^)]*[+*][^)]*\)[+*{]/.test(source) || /(?:\.\*|\.\+)\s*(?:\.\*|\.\+)/.test(source);
+}
+
 /** Accepts Veridis' top-level array and { rules: [...] } wrapper. */
 export function normalizeRewriteRules(payload: unknown): NormalizeResult {
 	const raw = Array.isArray(payload) ? payload : payload && typeof payload === "object" ? (payload as { rules?: unknown }).rules : undefined;
@@ -112,6 +118,7 @@ export function compileRewriteProcessors(rules: RewriteRuleGroup[]): { processor
 			for (const target of sub.targets ?? []) {
 				try {
 					const parsed = sub.mode === "regex" ? parseRegex(target) : { source: sub.mode === "simple" ? simplePattern(target) : escapeRegExp(target), flags: "g" };
+					if (sub.mode === "regex" && isRiskyRegex(parsed.source)) { warnings.push(`忽略可能造成灾难性回溯的正则：${target}`); continue; }
 					const regex = new RegExp(parsed.source, parsed.flags.includes("g") ? parsed.flags : `${parsed.flags}g`);
 					if (canMatchEmpty(regex)) { warnings.push(`忽略空匹配规则：${target}`); continue; }
 					processors.push({ group: group.name, mode: sub.mode ?? "text", target, regex, replacements: [...(sub.replacements ?? [])] });

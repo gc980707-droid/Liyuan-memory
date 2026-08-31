@@ -3104,10 +3104,11 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 			}
 			case "POST /api/rewrite-rules/import": {
 				if (refuseWhileStreaming()) return true;
-				const body = JSON.parse(await readBody(req)) as { name?: string; rules?: unknown };
+				const parsed = JSON.parse(await readBody(req)) as unknown;
+				const body = !Array.isArray(parsed) && parsed && typeof parsed === "object" ? parsed as { name?: string; rules?: unknown } : {};
 				const name = (body.name ?? query.get("name") ?? "").trim().replace(/\.json$/i, "");
 				if (!name) throw new Error("缺少规则集名称");
-				const normalized = normalizeRewriteRules(body.rules ?? body);
+				const normalized = normalizeRewriteRules(Array.isArray(parsed) ? parsed : body.rules ?? body);
 				if (!normalized.rules.length) throw new Error("不是有效规则集");
 				const safe = `${name.replace(/[\\/:*?"<>|]/g, "-")}.json`;
 				mkdirSync(join(host.cwd, REWRITE_DIR), { recursive: true });

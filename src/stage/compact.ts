@@ -28,6 +28,7 @@ import {
 import { buildRpSummaryPrompt } from "../scribe.ts";
 import { formatState } from "../state.ts";
 import type { WorldState } from "../types.ts";
+import type { RewriteProcessor } from "../rewrite-rules.ts";
 
 export { SUMMARY_ENTRY_TYPE };
 export type { RpSummaryData };
@@ -66,6 +67,7 @@ export interface PlanCompactionOptions {
 	keepRecentBeats?: number;
 	/** 可裁正文字数地板（缺省 MIN_COMPACT_CHARS） */
 	minChars?: number;
+	rewriteProcessors?: RewriteProcessor[];
 }
 
 /**
@@ -77,11 +79,11 @@ export interface PlanCompactionOptions {
  * 「摘要条目之前全裁」，反而把本次要摘的正文全丢了。旧摘要的内容不靠这条路带回，
  * 由 previousSummary 单独入提示词。
  */
-export function serializeForSummary(entries: BranchEntryLike[], userName: string, charName: string): string {
+export function serializeForSummary(entries: BranchEntryLike[], userName: string, charName: string, rewriteProcessors: RewriteProcessor[] = []): string {
 	const bodyOnly = entries.filter(
 		(e) => e.type !== "compaction" && !(e.type === "custom" && e.customType === SUMMARY_ENTRY_TYPE),
 	);
-	const { history } = rebuildHistory(bodyOnly);
+	const { history } = rebuildHistory(bodyOnly, rewriteProcessors);
 	return history.map((m) => `${m.role === "user" ? userName : charName}：${m.text}`).join("\n\n");
 }
 
@@ -113,7 +115,7 @@ export function planCompaction(branch: BranchEntryLike[], opts: PlanCompactionOp
 	const coversThroughId = covered[covered.length - 1]?.id;
 	if (!coversThroughId) return null; // 无 id 的条目（异常树）不敢下刀
 
-	const conversationText = serializeForSummary(covered, opts.userName, opts.charName);
+	const conversationText = serializeForSummary(covered, opts.userName, opts.charName, opts.rewriteProcessors);
 	if (conversationText.length < minChars) return null;
 
 	return {
@@ -146,6 +148,7 @@ export interface CompactRunInput {
 	everyNTurns: number;
 	keepRecentBeats?: number;
 	minChars?: number;
+	rewriteProcessors?: RewriteProcessor[];
 }
 
 export type CompactOutcome =
@@ -165,6 +168,7 @@ export async function runCompaction(deps: CompactRunDeps, input: CompactRunInput
 		charName: input.charName,
 		keepRecentBeats: input.keepRecentBeats,
 		minChars: input.minChars,
+		rewriteProcessors: input.rewriteProcessors,
 	});
 	if (!plan) return { kind: "skipped", reason: "not-due" };
 

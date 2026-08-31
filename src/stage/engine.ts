@@ -1401,6 +1401,7 @@ export class StageEngine {
 					userName: config.userName,
 					charName: card.name,
 					everyNTurns,
+					rewriteProcessors: rewriteProcessorsForConfig(this.#deps.cwd, config.rewrite, "history").processors,
 					...(minChars !== undefined ? { minChars } : {}),
 				},
 			);
