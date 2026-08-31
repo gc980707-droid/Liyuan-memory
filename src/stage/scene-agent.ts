@@ -15,6 +15,27 @@ export interface SceneAgentResult {
 	explicitNeeds: string[];
 }
 
+/** Keep the scene agent on its narrow write surface before applyPatch sees it. */
+export function sanitizeScenePatch(patch: Record<string, unknown>, hasExplicitInput: boolean): Record<string, unknown> {
+	if (!hasExplicitInput || !patch.scene || typeof patch.scene !== "object" || Array.isArray(patch.scene)) return {};
+	const raw = patch.scene as Record<string, unknown>;
+	const scene: Record<string, unknown> = {};
+	for (const key of ["positions", "held_items"]) {
+		if (!raw[key] || typeof raw[key] !== "object" || Array.isArray(raw[key])) continue;
+		const values: Record<string, string | null> = {};
+		for (const [name, value] of Object.entries(raw[key] as Record<string, unknown>)) {
+			if (typeof name === "string" && (typeof value === "string" || value === null)) values[name] = value;
+		}
+		if (Object.keys(values).length) scene[key] = values;
+	}
+	for (const key of ["ongoing", "known_facts"]) {
+		if (!Array.isArray(raw[key])) continue;
+		const values = raw[key].filter((x): x is string => typeof x === "string" && x.trim()).map((x) => x.trim()).slice(0, 100);
+		if (values.length) scene[key] = values;
+	}
+	return Object.keys(scene).length ? { scene } : {};
+}
+
 export function buildSceneAgentPrompt(input: SceneAgentInput): { systemPrompt: string; userText: string } {
 	const systemPrompt = [
 		"你是角色扮演的场景记录员，只做事实提取，不写正文，不替任何人做决定。",

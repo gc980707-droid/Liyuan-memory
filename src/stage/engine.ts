@@ -86,7 +86,7 @@ import {
 	type RpSummaryData,
 } from "./compact.ts";
 import { runScribeTurn, STATE_ENTRY_TYPE } from "./scribe-run.ts";
-import { buildSceneAgentPrompt, parseSceneAgentResult } from "./scene-agent.ts";
+import { buildSceneAgentPrompt, parseSceneAgentResult, sanitizeScenePatch } from "./scene-agent.ts";
 import { rewriteProcessorsForConfig } from "../rewrite-rules.ts";
 import { applyWorldPatchToMvu, mvuTimePatchIfMissing, projectMvuToWorldState } from "../mvu.ts";
 import {
@@ -744,6 +744,7 @@ export class StageEngine {
 		// 再交给主演。它只做事实提取，失败不影响正文生成。
 		let sceneIntent: { explicitActions: string[]; explicitNeeds: string[] } | undefined;
 		if (this.#deps.sceneAgent === true && lastUserText.trim()) {
+			const sceneLeafBefore = sm.getLeafId();
 			try {
 				ev.onActivity?.("场景记录员 Agent：开始独立调用");
 				const scenePrompt = buildSceneAgentPrompt({
@@ -771,10 +772,11 @@ export class StageEngine {
 							explicitActions: parsed.explicitActions,
 							explicitNeeds: parsed.explicitNeeds,
 						};
-						if (Object.keys(parsed.patch).length > 0) {
+						const safeScenePatch = sanitizeScenePatch(parsed.patch, parsed.explicitActions.length > 0 || parsed.explicitNeeds.length > 0);
+						if (Object.keys(safeScenePatch).length > 0 && sm.getLeafId() === sceneLeafBefore) {
 							const result = applyPatch(
 								state,
-								canonicalizeCharacterKeys(parsed.patch, [card.name, config.userName, ...Object.keys(state.characters)]),
+								canonicalizeCharacterKeys(safeScenePatch, [card.name, config.userName, ...Object.keys(state.characters)]),
 							);
 							if (result.applied.length > 0) {
 								state = result.state;
@@ -787,6 +789,8 @@ export class StageEngine {
 								ev.onState?.(state);
 							ev.onActivity?.(`场景记录员记下 ${result.applied.length} 项场景事实`);
 							}
+						} else if (sm.getLeafId() !== sceneLeafBefore) {
+							ev.onActivity?.("场景记录员结果已丢弃（本拍期间切换了分支）");
 						}
 						ev.onActivity?.("场景记录员 Agent：完成独立调用");
 					}
