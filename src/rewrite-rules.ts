@@ -3,7 +3,7 @@
  * This module deliberately knows nothing about SillyTavern, DOM, or the model.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
 export type RewriteMode = "text" | "regex" | "simple";
@@ -27,6 +27,7 @@ export interface RewriteConfig {
 	rulesFile?: string;
 	rules?: RewriteRuleGroup[];
 	scope?: "visual" | "visual+history";
+	whitelist?: string[];
 }
 
 export interface RewriteProcessor {
@@ -35,6 +36,7 @@ export interface RewriteProcessor {
 	target: string;
 	regex: RegExp;
 	replacements: string[];
+	whitelist?: string[];
 }
 
 export interface NormalizeResult {
@@ -145,6 +147,7 @@ export function applyRewrite(text: string, processors: RewriteProcessor[], optio
 		out = out.replace(processor.regex, (...args: unknown[]) => {
 			const match = String(args[0]);
 			const captures = args.slice(1, -2);
+			if (processor.whitelist?.some((item) => item && match.includes(item))) return match;
 			const value = replacement(processor.replacements, options.deterministicKey ?? "", index++);
 			if (processor.mode === "regex") return value.replace(/\$(\d+)/g, (_, n) => String(captures[Number(n) - 1] ?? "")).replace(/\$&/g, match);
 			return value;
@@ -155,6 +158,10 @@ export function applyRewrite(text: string, processors: RewriteProcessor[], optio
 
 export function rewriteProcessorsForConfig(cwd: string, config: RewriteConfig | undefined, channel: "visual" | "history"): { processors: RewriteProcessor[]; warnings: string[] } {
 	if (!config?.enabled || (channel === "history" && config.scope !== "visual+history")) return { processors: [], warnings: [] };
+	const fileStamp = config.rulesFile ? (() => { try { return statSync(resolve(cwd, config.rulesFile)).mtimeMs; } catch { return 0; } })() : 0;
+	const cacheKey = JSON.stringify([cwd, channel, config, fileStamp]);
+	const cached = rewriteCache.get(cacheKey);
+	if (cached) return cached;
 	let payload: unknown = config.rules ?? [];
 	if (config.rulesFile) {
 		try {
@@ -166,17 +173,23 @@ export function rewriteProcessorsForConfig(cwd: string, config: RewriteConfig | 
 			// Kept here so callers do not need to know the on-disk format.
 			payload = JSON.parse(readFileSync(file, "utf8"));
 		} catch (error) {
-			return { processors: [], warnings: [`规则文件加载失败，已回退为关闭：${error instanceof Error ? error.message : String(error)}`] };
+			const failed = { processors: [], warnings: [`规则文件加载失败，已回退为关闭：${error instanceof Error ? error.message : String(error)}`] };
+			rewriteCache.set(cacheKey, failed);
+			return failed;
 		}
 	}
 	const normalized = normalizeRewriteRules(payload);
 	const compiled = compileRewriteProcessors(normalized.rules);
-	return { processors: compiled.processors, warnings: [...normalized.warnings, ...compiled.warnings] };
+	const result = { processors: compiled.processors.map((p) => ({ ...p, whitelist: config.whitelist })), warnings: [...normalized.warnings, ...compiled.warnings] };
+	rewriteCache.set(cacheKey, result);
+	return result;
 }
+
+const rewriteCache = new Map<string, { processors: RewriteProcessor[]; warnings: string[] }>();
 
 /** Rewrite narrative text while leaving fences, thinking, and status markup byte-identical. */
 export function applyRewriteProtected(text: string, processors: RewriteProcessor[], options?: { deterministicKey?: string }): string {
-	const protectedRe = /```[\s\S]*?```|<(?:(?:think|thinking|StatusPlaceHolderImpl)(?:\s[^>]*)?)[\s\S]*?<\/(?:think|thinking|StatusPlaceHolderImpl)\s*>|<StatusPlaceHolderImpl\s*\/?\s*>/gi;
+	const protectedRe = /```[\s\S]*?```|<!--[\s\S]*?-->|<(?:(?:think|thinking|StatusPlaceHolderImpl)(?:\s[^>]*)?)[\s\S]*?<\/(?:think|thinking|StatusPlaceHolderImpl)\s*>|<StatusPlaceHolderImpl\s*\/?\s*>|<\/?[A-Za-z][^>]*>/gi;
 	let cursor = 0;
 	let out = "";
 	for (const match of text.matchAll(protectedRe)) {

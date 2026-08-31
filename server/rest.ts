@@ -429,6 +429,7 @@ export function applyConfigPatch(config: RpConfig, patch: Record<string, unknown
 				...(typeof rw.rulesFile === "string" && rw.rulesFile.trim() ? { rulesFile: rw.rulesFile.trim() } : {}),
 				...(rules ? { rules } : {}),
 				scope: rw.scope === "visual+history" ? "visual+history" : "visual",
+				...(Array.isArray(rw.whitelist) ? { whitelist: rw.whitelist.filter((x): x is string => typeof x === "string" && x.trim()).map((x) => x.trim()).slice(0, 500) } : {}),
 			};
 		}
 	}
@@ -3121,6 +3122,20 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 				writeJsonWithBackup(configPath(host.cwd), next);
 				host.notify("info", `规则集「${name}」已导入（${normalized.rules.length} 组）`);
 				sendJson(res, 200, { ok: true, path: rel, warnings: normalized.warnings, groupCount: normalized.rules.length });
+				return true;
+			}
+			case "POST /api/rewrite-rules/whitelist": {
+				if (refuseWhileStreaming()) return true;
+				const body = JSON.parse(await readBody(req)) as { phrase?: string; enabled?: boolean };
+				const phrase = typeof body.phrase === "string" ? body.phrase.trim() : "";
+				if (!phrase || phrase.length > 200) throw new Error("phrase 必须为 1-200 字符");
+				const config = loadConfig(host.cwd);
+				const current = config.rewrite?.whitelist ?? [];
+				const nextList = body.enabled === false ? current.filter((x) => x !== phrase) : [...new Set([...current, phrase])].slice(0, 500);
+				const next = applyConfigPatch(config, { rewrite: { ...(config.rewrite ?? { enabled: false, scope: "visual" }), whitelist: nextList } });
+				writeJsonWithBackup(configPath(host.cwd), next);
+				await host.softRefreshConfig();
+				sendJson(res, 200, { ok: true, whitelist: next.rewrite?.whitelist ?? [] });
 				return true;
 			}
 			case "PUT /api/rewrite-rules": {
