@@ -475,12 +475,12 @@ const trimContentBodyRepeat = (body: string, inner: string): string => {
 export const mergeFinalText = (draft: string, text: string): string => {
 	const d = draft.trim();
 	const t = stripDsmlToolCalls(text.trim());
-	if (!d) return dedupeLatestStatusBlocks(dedupeIdenticalBlocks(t));
+	if (!d) return stripLeakedStagehandText(dedupeLatestStatusBlocks(dedupeIdenticalBlocks(t)));
 	if (!t || d === t) return d;
 	// 有稿时普通 text 通道只可能是格式尾巴；模型的收笔闲聊、旁路 JSON
 	// 或协议残片不能再被当成续写拼进正文。真正的续写已在 agentLoop
 	// 中自动收进 ws.draft。
-	if (formatTailStart(t) < 0) return d;
+	if (formatTailStart(t) < 0) return stripLeakedStagehandText(d);
 	// 稿件已包含 text（模型边写边交，text 是半截）：稿件已是全量
 	if (d.includes(t)) return d;
 	// 只认「稿件在尾巴开头」的续写增量（正文在前、尾巴在后）；稿件出现在尾巴中段
@@ -498,7 +498,7 @@ export const mergeFinalText = (draft: string, text: string): string => {
 			const trimmed = trimContentBodyRepeat(d, inner);
 			return trimmed ? `<content>${trimmed}</content>` : "";
 		});
-	return dedupeLatestStatusBlocks(dedupeIdenticalBlocks([d, tailPart].filter(Boolean).join("\n\n")));
+	return stripLeakedStagehandText(dedupeLatestStatusBlocks(dedupeIdenticalBlocks([d, tailPart].filter(Boolean).join("\n\n"))));
 };
 
 /**
@@ -561,6 +561,21 @@ const isStructuredControlText = (text: string): boolean => {
 		at = end;
 	}
 	return count > 0;
+};
+
+/**
+ * 某些中转模型会把谢幕注入改写后原样吐回（例如「已落账。这一拍停在这里……」）。
+ * 这类流程元话语不是剧情正文；仅按段首的明确收尾措辞过滤，避免误伤角色对白。
+ */
+export const stripLeakedStagehandText = (text: string): string => {
+	if (!text.trim()) return "";
+	const meta = /^\s*(?:已落账|已记账|本拍已(?:经)?(?:定稿|结束)|这一拍停在这里|她需要一点时间(?:，|,)?(?:也需要|还需要).*(?:下一步|动作))/u;
+	return text
+		.split(/\n{2,}/u)
+		.filter((part) => !meta.test(part))
+		.join("\n\n")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
 };
 
 /** 兼容不支持原生 tools 的 OpenAI 中转站：把 DSML 文本调用还原成工具块。 */
