@@ -19,7 +19,7 @@ export function buildSceneAgentPrompt(input: SceneAgentInput): { systemPrompt: s
 	const systemPrompt = [
 		"你是角色扮演的场景记录员，只做事实提取，不写正文，不替任何人做决定。",
 		"阅读当前账本、最近正文和用户最新输入，输出 JSON。只记录用户明确说出或明确做出的内容，不根据常见剧情套路补全。",
-		"explicit_actions：用户本轮明确做出的动作；没有就填 []。不要把角色卡或助手正文里的‘你……’当成用户动作。",
+		"explicit_actions：用户本轮明确做出的动作；没有就填 []。不要把角色卡或助手正文里的‘你……’当成用户动作，也不要替用户补动作、台词或意图。",
 		"explicit_needs：用户本轮明确表达的需求或状态，例如‘我饿了’应记录为‘用户表示饿了’；没有就填 []。不要把需求擅自扩展成用户指定的方案。",
 		"patch.scene：只在场景事实确实变化时填写。positions/held_items 按人物合并，值为字符串或 null；ongoing/known_facts 是完整字符串数组。电话刚挂断且没有写放下时，手机仍属于原持有者；不要凭空添加抹布、厨房或其他道具。",
 		"不确定就省略 patch.scene，完全没有变化时 patch 为 {}。",
