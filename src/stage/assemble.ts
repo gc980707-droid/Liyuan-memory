@@ -19,6 +19,7 @@ import { formatState, defaultState } from "../state.ts";
 import { isBackstageText } from "../stance.ts";
 import type { CharacterCard, LorebookEntry, MacroContext, RpConfig, WorldState } from "../types.ts";
 import type { MemoryHitLike } from "../tools/memory.ts";
+import { applyRewriteProtected, type RewriteProcessor } from "../rewrite-rules.ts";
 import { buildDirectorPrompt, type ActorProfile, type DirectorDecision } from "./actor-agents.ts";
 
 // ---------------- 分支 → 历史 ----------------
@@ -127,7 +128,7 @@ export function activeSummary(branch: BranchEntryLike[]): { summary: string; cut
  *
  * M4：有 rp-summary 时，被覆盖的早期条目整段不进历史，改由 summary 字段回读为【前情提要】。
  */
-export function rebuildHistory(branch: BranchEntryLike[]): RebuiltHistory {
+export function rebuildHistory(branch: BranchEntryLike[], rewriteProcessors: RewriteProcessor[] = []): RebuiltHistory {
 	const active = activeSummary(branch);
 	const live = active ? branch.slice(active.cut) : branch;
 
@@ -161,7 +162,10 @@ export function rebuildHistory(branch: BranchEntryLike[]): RebuiltHistory {
 	for (const m of patched) {
 		const role = (m as { _role?: "user" | "assistant" })._role ?? (m.role === "user" ? "user" : "assistant");
 		let text = textOf(m.content);
-		if (role === "assistant") text = cleanAssistantText(text);
+		if (role === "assistant") {
+			text = cleanAssistantText(text);
+			if (rewriteProcessors.length) text = applyRewriteProtected(text, rewriteProcessors);
+		}
 		text = text.trim();
 		if (!text) continue;
 		const prev = history[history.length - 1];

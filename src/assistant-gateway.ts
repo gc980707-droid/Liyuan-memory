@@ -9,6 +9,8 @@
  * globalThis 上，否则 register 写进 A、execute 读 B → 永远「助手不可用」。
  */
 
+import { buildIndependentReviewPrompt, buildRewriteAgentPrompt, parseIndependentReview, parseRewriteAgentResponse, validateRewriteAgentResponse, type RewriteAgentResponse, type RewriteValidation } from "./rewrite-agent.ts";
+
 export type AssistantRunMode = "ops" | "author" | "diagnose" | "auto";
 
 export interface AssistantRunRequest {
@@ -38,6 +40,19 @@ export interface AssistantRunResult {
 	abandoned?: boolean;
 	/** 是否由 return_answer 正式交回（否则为回合结束时的兜底摘录） */
 	viaReturnTool?: boolean;
+	error?: string;
+}
+
+export interface RewriteAgentRequest {
+	text: string;
+	rulesSummary: string;
+	protectedRanges?: string;
+	signal?: AbortSignal;
+}
+
+export interface RewriteAgentResult extends RewriteValidation {
+	modelResponse?: RewriteAgentResponse;
+	independentReview?: ReturnType<typeof parseIndependentReview>;
 	error?: string;
 }
 
@@ -98,4 +113,22 @@ export async function runAssistantTask(req: AssistantRunRequest): Promise<Assist
 	} finally {
 		endAssistantDelegate();
 	}
+}
+
+/** Optional semantic pass; never throws and never returns an unvalidated rewrite. */
+export async function runRewriteAgent(req: RewriteAgentRequest): Promise<RewriteAgentResult> {
+	if (!req.text.trim()) return { ok: false, text: req.text, accepted: [], rejected: ["候选文本为空"] };
+	const prompt = buildRewriteAgentPrompt(req);
+	const result = await runAssistantTask({ task: `${prompt.systemPrompt}\n${prompt.userText}`, mode: "author", needStoryContext: false, signal: req.signal });
+	if (!result.ok) return { ok: false, text: req.text, accepted: [], rejected: [result.error ?? "助手调用失败"], error: result.error };
+	const modelResponse = parseRewriteAgentResponse(result.summary);
+	const validation = validateRewriteAgentResponse(req.text, modelResponse);
+	if (!validation.ok || !modelResponse) return { ...validation, ...(modelResponse ? { modelResponse } : {}) };
+	const reviewPrompt = buildIndependentReviewPrompt(req.text, validation.text);
+	const reviewResult = await runAssistantTask({ task: `${reviewPrompt.systemPrompt}\n${reviewPrompt.userText}`, mode: "diagnose", needStoryContext: false, signal: req.signal });
+	const independentReview = reviewResult.ok ? parseIndependentReview(reviewResult.summary) : null;
+	if (!independentReview || independentReview.introducesFacts || independentReview.meaning < 0.8 || independentReview.voice < 0.8 || independentReview.continuity < 0.8) {
+		return { ok: false, text: req.text, accepted: [], rejected: ["独立复核未通过"], modelResponse, independentReview };
+	}
+	return { ...validation, modelResponse, independentReview };
 }

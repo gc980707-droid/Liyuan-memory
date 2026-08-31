@@ -44,7 +44,7 @@ import {
 	buildDirectorSelectionPrompt,
 	formatActorProposals,
 	findProposalConflicts,
-	parseActorProposal,
+	parseActorProposalStrict,
 	parseDirectorDecision,
 	runActorAgents,
 	selectActiveActors,
@@ -86,7 +86,8 @@ import {
 	type RpSummaryData,
 } from "./compact.ts";
 import { runScribeTurn, STATE_ENTRY_TYPE } from "./scribe-run.ts";
-import { buildSceneAgentPrompt, parseSceneAgentResult } from "./scene-agent.ts";
+import { buildSceneAgentPrompt, parseSceneAgentResult, sanitizeScenePatch } from "./scene-agent.ts";
+import { rewriteProcessorsForConfig } from "../rewrite-rules.ts";
 import { applyWorldPatchToMvu, mvuTimePatchIfMissing, projectMvuToWorldState } from "../mvu.ts";
 import {
 	MAX_ROUNDS,
@@ -112,7 +113,7 @@ import {
 	runMediaStageTool,
 	type MediaStageResult,
 } from "./media-stage.ts";
-import { assistantStageTool, runAssistantStageTool } from "./assistant-stage.ts";
+import { assistantStageTool, rewriteAgentTool, runAssistantStageTool, runRewriteAgentStageTool } from "./assistant-stage.ts";
 import type { MemoryChunkLike } from "../tools/memory.ts";
 import { extractDraftBody } from "../draft.ts";
 import {
@@ -732,7 +733,8 @@ export class StageEngine {
 		// 上下文 = f(分支)
 		const branch = sm.getBranch() as BranchEntryLike[];
 		let state = stateFromBranch(branch);
-		const { history, lastUserText, lastNarrativeText, summary } = rebuildHistory(branch);
+		const historyRewrite = rewriteProcessorsForConfig(cwd, config.rewrite, "history");
+		const { history, lastUserText, lastNarrativeText, summary } = rebuildHistory(branch, historyRewrite.processors);
 		if (!history.some((m) => m.role === "user")) {
 			ev.onNotify?.("error", "没有可开演的用户输入。");
 			return { aborted: false, error: "no-user-input" };
@@ -742,6 +744,7 @@ export class StageEngine {
 		// 再交给主演。它只做事实提取，失败不影响正文生成。
 		let sceneIntent: { explicitActions: string[]; explicitNeeds: string[] } | undefined;
 		if (this.#deps.sceneAgent === true && lastUserText.trim()) {
+			const sceneLeafBefore = sm.getLeafId();
 			try {
 				ev.onActivity?.("场景记录员 Agent：开始独立调用");
 				const scenePrompt = buildSceneAgentPrompt({
@@ -769,10 +772,11 @@ export class StageEngine {
 							explicitActions: parsed.explicitActions,
 							explicitNeeds: parsed.explicitNeeds,
 						};
-						if (Object.keys(parsed.patch).length > 0) {
+						const safeScenePatch = sanitizeScenePatch(parsed.patch, parsed.explicitActions.length > 0 || parsed.explicitNeeds.length > 0);
+						if (Object.keys(safeScenePatch).length > 0 && sm.getLeafId() === sceneLeafBefore) {
 							const result = applyPatch(
 								state,
-								canonicalizeCharacterKeys(parsed.patch, [card.name, config.userName, ...Object.keys(state.characters)]),
+								canonicalizeCharacterKeys(safeScenePatch, [card.name, config.userName, ...Object.keys(state.characters)]),
 							);
 							if (result.applied.length > 0) {
 								state = result.state;
@@ -785,6 +789,8 @@ export class StageEngine {
 								ev.onState?.(state);
 							ev.onActivity?.(`场景记录员记下 ${result.applied.length} 项场景事实`);
 							}
+						} else if (sm.getLeafId() !== sceneLeafBefore) {
+							ev.onActivity?.("场景记录员结果已丢弃（本拍期间切换了分支）");
 						}
 						ev.onActivity?.("场景记录员 Agent：完成独立调用");
 					}
@@ -880,6 +886,7 @@ export class StageEngine {
 		const mediaTools = this.#deps.media ? mediaStageTools(config.language, mediaOpts) : [];
 		// 助手委托（8/06 重接）：runner 未注册时不上清单
 		const assistantTool = assistantStageTool();
+		const rewriteTool = rewriteAgentTool();
 		// P7：ask 工具依赖宿主注入 askUser（选择卡通道）；未注入则从清单剔除
 		const askEnabled = !!this.#deps.askUser;
 		const tools = [
@@ -888,6 +895,7 @@ export class StageEngine {
 			...writeTools(config.language).filter((t) => t.name !== "ask" || askEnabled),
 			...mediaTools,
 			...(assistantTool ? [assistantTool] : []),
+			...(rewriteTool ? [rewriteTool] : []),
 			...mcpTools,
 		];
 		const ws = createWorkspace();
@@ -1078,7 +1086,7 @@ export class StageEngine {
 				);
 				const content = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n");
 				ev.onActivity?.(`角色 Agent「${profile.name}」：完成独立调用`);
-				return parseActorProposal(content, profile);
+				return parseActorProposalStrict(content, profile) ?? { actor: profile.name, content: "", intendedAction: "" };
 			},
 		}));
 		if (this.#deps.actorAgents && actorAgents.length > 0) {
@@ -1399,6 +1407,7 @@ export class StageEngine {
 					userName: config.userName,
 					charName: card.name,
 					everyNTurns,
+					rewriteProcessors: rewriteProcessorsForConfig(this.#deps.cwd, config.rewrite, "history").processors,
 					...(minChars !== undefined ? { minChars } : {}),
 				},
 			);
@@ -1668,10 +1677,12 @@ export class StageEngine {
 					// 三态路由 +MCP：统一层/台上读侧 → tools.ts；MCP 外设 → hub；其余 → 工作区。
 					// MCP 走网络/子进程，可能很慢——把本拍 abort 信号透传下去，用户点停止能立刻中断。
 					r = name === "assistant_run"
-						? ((await runAssistantStageTool(name, call.arguments ?? {}, this.#abort?.signal)) ?? {
-								text: `未知工具「${name}」。`,
-								isError: true,
-							})
+					? ((await runAssistantStageTool(name, call.arguments ?? {}, this.#abort?.signal)) ?? {
+							text: `未知工具「${name}」。`,
+							isError: true,
+						})
+					: name === "rewrite_agent"
+							? ((await runRewriteAgentStageTool(name, call.arguments ?? {}, this.#abort?.signal, o.ws.draft)) ?? { text: `未知工具「${name}」。`, isError: true })
 						: MCP_TOOLS.has(name)
 							? ((await runMcpStageTool(
 									this.#deps.mcp!,
@@ -1686,8 +1697,20 @@ export class StageEngine {
 									})
 								: READ_TOOLS.has(name)
 									? await this.#runReadTool(o, readDeps, name, call.arguments ?? {})
-									: runWriteTool(o.ws, o.wsDeps, name, call.arguments ?? {});
+														: runWriteTool(o.ws, o.wsDeps, name, call.arguments ?? {});
 						}
+					// Semantic review is an atomic draft edit: accepted patches are applied only
+					// to the current workspace draft, then the normal resync path updates the UI.
+					if (name === "rewrite_agent" && (r as { isError?: boolean }).isError !== true) {
+						const details = (r as { details?: { rewriteAgent?: { ok?: boolean; patches?: unknown } } }).details?.rewriteAgent;
+						if (details?.ok === true && Array.isArray(details.patches) && details.patches.length > 0) {
+							o.ws.rewriteUndo = o.ws.draft;
+							const applied = runWriteTool(o.ws, o.wsDeps, "draft_edit", { edits: details.patches });
+							if (applied.ok === false) r = { text: `审校补丁未能写回稿纸：${applied.text}`, isError: true };
+							else ev.onDraftResync?.(splitDraftSegments(o.ws.draft));
+						}
+					}
+					if (name === "rewrite_undo" && r.ok !== false && o.ws.draft.trim()) ev.onDraftResync?.(splitDraftSegments(o.ws.draft));
 					// 8/13 定案：稿件只在**被受理后**才上屏（转发器已不再生成时抢跑）——
 					// 被受理门拒掉的段落永远不流式，屏上正文 = 最终正文。
 					// 模型已走 text_delta 直出过的（先写正文再交稿）不重复转发，避免双份。

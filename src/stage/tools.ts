@@ -193,6 +193,11 @@ export function writeTools(language: string): StageTool[] {
 			},
 		},
 		{
+			name: "rewrite_undo",
+			description: "撤销最近一次已自动写回稿纸的杀八股改写，恢复改写前版本；没有可撤销版本时拒绝。",
+			parameters: { type: "object", properties: {}, required: [] },
+		},
+		{
 			name: "draft_read",
 			description:
 				"读回当前稿全文，附稿次与**验收口径字数**（与字数规则同一口径，不含标签模块）。" +

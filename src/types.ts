@@ -3,6 +3,8 @@
  * 本目录（src/）不允许 import pi 的任何东西（PLAN.md D3）。
  */
 
+import type { RewriteConfig } from "./rewrite-rules.ts";
+
 /** 归一化后的角色卡（兼容 V1 / V2 chara_card_v2 / V3 chara_card_v3 / ST 导出格式） */
 export interface CharacterCard {
 	name: string;
@@ -93,6 +95,8 @@ export interface CharacterState {
 
 /** 项目配置（app/liyuan.config.json；旧名 rp.config.json 启动时迁移） */
 export interface RpConfig {
+	/** 杀八股兼容规则层；默认关闭，仅 visual 显示通道生效。 */
+	rewrite?: RewriteConfig;
 	/** 角色卡路径（.png 或 .json），相对项目根 */
 	card: string;
 	/**
@@ -145,6 +149,7 @@ export interface RpConfig {
 }
 
 export const DEFAULT_CONFIG: RpConfig = {
+	rewrite: { enabled: false, scope: "visual" },
 	card: "assets/cards/default_Qingwu.json",
 	// 默认不挂书：角色卡与世界书解耦，用户按需多选挂载
 	lorebooks: [],

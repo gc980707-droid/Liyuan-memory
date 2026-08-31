@@ -516,6 +516,7 @@ test("引擎工具：查设定 → 结果回喂 → 续演正文；工具装配�
 			"lorebook_search",
 			"lorebook_write",
 			"memory_search",
+			"rewrite_undo",
 			"world_state_get",
 			"world_state_update",
 		]);

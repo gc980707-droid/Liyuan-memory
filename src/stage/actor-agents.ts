@@ -191,6 +191,17 @@ export function parseActorProposal(text: string, profile: ActorProfile): ActorPr
 	return { actor: profile.name, content: text.trim(), intendedAction: "" };
 }
 
+/** Strict form for the engine: malformed model output is not proposal material. */
+export function parseActorProposalStrict(text: string, profile: ActorProfile): ActorProposal | null {
+	const match = text.match(/\{[\s\S]*\}/);
+	if (!match) return null;
+	try {
+		const raw = JSON.parse(match[0]) as Partial<ActorProposal>;
+		if (raw.actor !== profile.name || typeof raw.content !== "string" || !raw.content.trim()) return null;
+		return { actor: profile.name, content: raw.content.trim(), intendedAction: typeof raw.intendedAction === "string" ? raw.intendedAction.trim() : "" };
+	} catch { return null; }
+}
+
 const CONTRADICTORY_ACTIONS: Array<[RegExp, RegExp, string]> = [
 	[/离开|走开|转身离去/u, /留下|停下|不走/u, "离开与留下"],
 	[/攻击|拔刀|开枪|出手/u, /停手|收手|不攻击/u, "攻击与停手"],
@@ -241,8 +252,9 @@ export async function runActorAgents(
 ): Promise<ActorProposal[]> {
 	const active = new Set(decision.activeActors);
 	const selected = agents.filter((a) => active.has(a.profile.name));
-	// 角色之间暂不并行写正文：保留导演顺序，后续可在合成层引入并行提案。
-	const out: ActorProposal[] = [];
-	for (const agent of selected) out.push(await agent.respond(input));
-	return out;
+	// 提案彼此独立，并行调用降低多角色场景延迟；Promise.all 保留导演顺序。
+	const out = await Promise.all(selected.map(async (agent) => {
+		try { return await agent.respond(input); } catch { return null; }
+	}));
+	return out.filter((proposal): proposal is ActorProposal => !!proposal && proposal.content.trim().length > 0);
 }

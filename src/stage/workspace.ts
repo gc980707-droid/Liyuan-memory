@@ -31,6 +31,8 @@ export interface BeatStep {
 export interface TurnWorkspace {
 	/** 当前稿（draft_write 全量替换语义；draft_append 追加语义） */
 	draft: string;
+	/** semantic rewrite rollback snapshot; only lives for the current turn */
+	rewriteUndo?: string;
 	/**
 	 * 本拍计划清单（beat_plan）——首轮构思的落点。
 	 *
@@ -457,6 +459,16 @@ export function runWriteTool(
 			activity: `定点改稿 ${edits.length} 处`,
 			ok: true,
 		};
+	}
+
+	if (name === "rewrite_undo") {
+		if (ws.rewriteUndo === undefined) return { text: "没有可撤销的杀八股改写。", ok: false };
+		ws.draft = ws.rewriteUndo;
+		ws.rewriteUndo = undefined;
+		ws.edits++;
+		if (ws.appends > 0) resyncDraftSegments(ws);
+		else replaceDraftSegment(ws, ws.draft);
+		return { text: "已撤销最近一次杀八股改写，恢复改写前稿件。", activity: "撤销杀八股改写", ok: true };
 	}
 
 	if (name === "draft_read") {
