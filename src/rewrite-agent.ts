@@ -14,6 +14,13 @@ export interface RewriteAgentReview {
 	continuity: number;
 }
 
+export interface RewriteIndependentReview {
+	meaning: number;
+	voice: number;
+	continuity: number;
+	introducesFacts: boolean;
+}
+
 export interface RewriteAgentResponse {
 	patches: RewriteAgentPatch[];
 	review: RewriteAgentReview;
@@ -60,6 +67,22 @@ export function buildRewriteAgentPrompt(input: { text: string; rulesSummary: str
 			limits: "patches 最多 8 个；每个 old 必须来自原文且唯一；new 不得引入新事实；三项 review 和 confidence 都需达到 0.8 才会采用。",
 		}, null, 2),
 	};
+}
+
+export function buildIndependentReviewPrompt(original: string, rewritten: string): { systemPrompt: string; userText: string } {
+	return {
+		systemPrompt: "你是独立的文本审校员。只判断替换是否保留原意、角色口吻和叙事连续性，以及是否新增事实。必须只返回 JSON，不要改写文本。",
+		userText: JSON.stringify({ original, rewritten, output: { meaning: 0.0, voice: 0.0, continuity: 0.0, introducesFacts: false }, rule: "任一评分低于 0.8，或 introducesFacts=true，都判定不通过" }, null, 2),
+	};
+}
+
+export function parseIndependentReview(raw: string): RewriteIndependentReview | null {
+	const match = /\{[\s\S]*\}/.exec(raw);
+	if (!match) return null;
+	try {
+		const x = JSON.parse(match[0]) as Record<string, unknown>;
+		return { meaning: number01(x.meaning), voice: number01(x.voice), continuity: number01(x.continuity), introducesFacts: x.introducesFacts === true };
+	} catch { return null; }
 }
 
 function protectedContent(text: string): string[] {

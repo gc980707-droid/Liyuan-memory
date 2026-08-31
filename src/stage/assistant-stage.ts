@@ -47,7 +47,7 @@ export async function runRewriteAgentStageTool(name: string, args: Record<string
 	if (currentDraft !== undefined && text !== currentDraft) return { text: "审校未采用：只能审校当前稿纸，不能传入用户消息或其他文本。", isError: true, activity: "杀八股范围拒绝" };
 	try {
 		const result = await runRewriteAgent({ text, rulesSummary, protectedRanges: typeof args.protected_ranges === "string" ? args.protected_ranges : undefined, signal });
-		const payload = { ok: result.ok, text: result.text, patches: result.accepted, rejected: result.rejected };
+		const payload = { ok: result.ok, text: result.text, patches: result.accepted, rejected: result.rejected, independentReview: result.independentReview };
 		return { text: JSON.stringify(payload), isError: !result.ok, activity: result.ok ? "杀八股审校完成" : "杀八股审校回退原文", details: { rewriteAgent: payload } };
 	} catch (error) {
 		return { text: `杀八股审校失败，保留原文：${error instanceof Error ? error.message : String(error)}`, isError: true, activity: "杀八股审校失败" };

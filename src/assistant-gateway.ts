@@ -9,7 +9,7 @@
  * globalThis 上，否则 register 写进 A、execute 读 B → 永远「助手不可用」。
  */
 
-import { buildRewriteAgentPrompt, parseRewriteAgentResponse, validateRewriteAgentResponse, type RewriteAgentResponse, type RewriteValidation } from "./rewrite-agent.ts";
+import { buildIndependentReviewPrompt, buildRewriteAgentPrompt, parseIndependentReview, parseRewriteAgentResponse, validateRewriteAgentResponse, type RewriteAgentResponse, type RewriteValidation } from "./rewrite-agent.ts";
 
 export type AssistantRunMode = "ops" | "author" | "diagnose" | "auto";
 
@@ -52,6 +52,7 @@ export interface RewriteAgentRequest {
 
 export interface RewriteAgentResult extends RewriteValidation {
 	modelResponse?: RewriteAgentResponse;
+	independentReview?: ReturnType<typeof parseIndependentReview>;
 	error?: string;
 }
 
@@ -122,5 +123,12 @@ export async function runRewriteAgent(req: RewriteAgentRequest): Promise<Rewrite
 	if (!result.ok) return { ok: false, text: req.text, accepted: [], rejected: [result.error ?? "助手调用失败"], error: result.error };
 	const modelResponse = parseRewriteAgentResponse(result.summary);
 	const validation = validateRewriteAgentResponse(req.text, modelResponse);
-	return { ...validation, ...(modelResponse ? { modelResponse } : {}) };
+	if (!validation.ok || !modelResponse) return { ...validation, ...(modelResponse ? { modelResponse } : {}) };
+	const reviewPrompt = buildIndependentReviewPrompt(req.text, validation.text);
+	const reviewResult = await runAssistantTask({ task: `${reviewPrompt.systemPrompt}\n${reviewPrompt.userText}`, mode: "diagnose", needStoryContext: false, signal: req.signal });
+	const independentReview = reviewResult.ok ? parseIndependentReview(reviewResult.summary) : null;
+	if (!independentReview || independentReview.introducesFacts || independentReview.meaning < 0.8 || independentReview.voice < 0.8 || independentReview.continuity < 0.8) {
+		return { ok: false, text: req.text, accepted: [], rejected: ["独立复核未通过"], modelResponse, independentReview };
+	}
+	return { ...validation, modelResponse, independentReview };
 }
