@@ -34,6 +34,7 @@ test("writeTools：写侧十件在清单里，beat_plan 列首为落笔前构思
 		"draft_write",
 		"draft_seal",
 		"draft_edit",
+		"rewrite_undo",
 		"draft_read",
 		"draft_search",
 		"world_state_update",
@@ -138,6 +139,7 @@ test("draft_append 回执一句事实（§2.4 瘦身）：无字数读数、无�
 	assert.equal(e.ok, true);
 	assert.match(e.text, /已改 1 处/);
 	assert.doesNotMatch(e.text, /验收/, "改稿回执不再附验收报告——事实在 seal 回执可见");
+	assert.equal(runWriteTool(ws, d, "rewrite_undo", {}).ok, false, "普通 draft_edit 不应伪造杀八股撤销快照");
 
 	// 封笔是验收场合：事实报告在此给出
 	const sealed = runWriteTool(ws, d, "draft_seal", {});

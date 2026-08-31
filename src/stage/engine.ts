@@ -1704,11 +1704,13 @@ export class StageEngine {
 					if (name === "rewrite_agent" && (r as { isError?: boolean }).isError !== true) {
 						const details = (r as { details?: { rewriteAgent?: { ok?: boolean; patches?: unknown } } }).details?.rewriteAgent;
 						if (details?.ok === true && Array.isArray(details.patches) && details.patches.length > 0) {
+							o.ws.rewriteUndo = o.ws.draft;
 							const applied = runWriteTool(o.ws, o.wsDeps, "draft_edit", { edits: details.patches });
 							if (applied.ok === false) r = { text: `审校补丁未能写回稿纸：${applied.text}`, isError: true };
 							else ev.onDraftResync?.(splitDraftSegments(o.ws.draft));
 						}
 					}
+					if (name === "rewrite_undo" && r.ok !== false && o.ws.draft.trim()) ev.onDraftResync?.(splitDraftSegments(o.ws.draft));
 					// 8/13 定案：稿件只在**被受理后**才上屏（转发器已不再生成时抢跑）——
 					// 被受理门拒掉的段落永远不流式，屏上正文 = 最终正文。
 					// 模型已走 text_delta 直出过的（先写正文再交稿）不重复转发，避免双份。
