@@ -651,7 +651,7 @@ function buildParams(
 		if (chatTemplateKwargs) {
 			(params as any).chat_template_kwargs = chatTemplateKwargs;
 		}
-	} else if (compat.thinkingFormat === "deepseek" && model.reasoning) {
+	} else if (compat.thinkingFormat === "deepseek" && (model.reasoning || /deepseek/i.test(model.id))) {
 		if (options?.reasoningEffort) {
 			(params as any).thinking = { type: "enabled" };
 		} else if (model.thinkingLevelMap?.off !== null) {

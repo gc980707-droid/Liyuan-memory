@@ -2,7 +2,7 @@
  * 场记（scribe）：旁侧廉价模型——每轮结束后从正文抽取世界状态补丁（纯函数，零 pi 依赖）。
  *
  * 设计：记账从主演手里拿走（D10：产出是数据不是文字）。
- * 连续性/代打等事后审查已移除（费 token 且用户反馈无用）。
+ * 不做代打审查；场景连续性作为结构化事实抽取，供下一拍恢复现场。
  */
 
 import type { WorldState } from "./types.ts";
@@ -61,6 +61,8 @@ export function buildScribeTurnPrompt(input: ScribePromptInput): { systemPrompt:
 - "inventory"：字符串数组，整体替换——只在物品归属变化时给出变化后的完整清单，条目注明归属（如「黄铜怀表（${userName}持有）」）。
 - "flags"：键值对，按键合并（值为字符串）。
 - "plot_threads"：字符串数组，整体替换——新增或了结剧情线时给出完整清单。
+
+- "scene"：当前场景连续性快照。"positions" 和 "held_items" 是按人物合并的对象（值为字符串或 null）；"ongoing" 和 "known_facts" 是字符串数组，整体替换。只记录本轮后仍成立的明确事实：人物位置、姿势、手上物件、未完成动作和在场人物已知信息。没有变化就省略；物件没有明确放下/转移就保留旧值，不能用常见套路换成别的物件。
 	要点：否定性事件也要记账（赠礼被拒→物品仍在原主处；承诺被收回→记入 flags）；新的承诺、约定、伏笔进 plot_threads；没有变化的字段不要出现在 patch 中；完全无变化则 "patch" 为 {}。${mvuInstruction}${rulesSection}
 
 	只输出 JSON 对象，例如 {"patch":{...}${hasMvu ? ',"mvu_patch":{...}' : ""}} 或 {"patch":{}${hasMvu ? ',"mvu_patch":{}' : ""}}。不要输出 warnings、不要输出其他文字。`;

@@ -131,7 +131,7 @@ export function writeTools(language: string): StageTool[] {
 				`往下演一段（${language}）——你落笔的方式。` +
 				`在现稿末尾追加，不覆盖已写部分：交出去的就是已经发生的事，不会被打回。` +
 				`落笔前先在思考里想清这段的戏（人物此刻的状态、动作、对白、情绪），并回看已写内容重新评估：` +
-				`只有出现真正的剧情分岔才 ask 用户；否则自然回应，判断剩余路标是否需要重拟、戏是否到停点。` +
+				`只有出现真正的剧情分岔才 ask 用户；否则自然回应，在角色自己的动作或情绪自然停顿处收束，不用提问或邀请回应把话递给用户。` +
 				`一段大约一个自然段就交。全部演完调用 draft_seal 收笔。`,
 			parameters: {
 				type: "object",
@@ -215,9 +215,10 @@ export function writeTools(language: string): StageTool[] {
 			description:
 				"提交世界状态账本补丁（合并语义）：time/location 字符串整体替换；characters 按角色名合并字段" +
 				"（affinity 数值/status/notes，传 null 删除该角色）；flags 按键合并（null 删除）；" +
-				"inventory/plot_threads 传**字符串数组**整体替换（如 [\"补气丹（已服用）\"]，元素不能是对象）。" +
+				"inventory/plot_threads 传**字符串数组**整体替换（如 [\"补气丹（已服用）\"]，元素不能是对象）；" +
+				"scene 用于维护当前场景连续性：positions/held_items 按人物合并（值为字符串或 null），ongoing/known_facts 传字符串数组整体替换。" +
 				"本拍剧情改变了世界（时间流逝/移动/关系变化/" +
-				"获得失去物品/剧情推进）就在定稿前提交——你是唯一知道现场发生了什么的人，不提交账本就会漂移。",
+				"获得失去物品/剧情推进/人物位置或手上物件变化）就在定稿前提交——你是唯一知道现场发生了什么的人，不提交账本就会漂移。",
 			parameters: {
 				type: "object",
 				properties: {

@@ -1509,11 +1509,14 @@ try {
 		syncAgentConfigToRuntime(cwd, getAgentDir(), cfg);
 		session.modelRegistry.refresh();
 		const cur = session.model;
-		if (cur) {
-			const next = session.modelRegistry.find(cur.provider, cur.id);
-			if (next) await session.setModel(next);
-			const p = cfg.providers[cur.provider];
-			const entry = Array.isArray(p?.models) ? p.models.find((m) => String(m.id) === cur.id) : undefined;
+		const configured = cfg.defaultProvider && cfg.defaultModel
+			? session.modelRegistry.find(cfg.defaultProvider, cfg.defaultModel)
+			: undefined;
+		const next = configured ?? (cur ? session.modelRegistry.find(cur.provider, cur.id) : undefined);
+		if (next) {
+			await session.setModel(next);
+			const p = cfg.providers[next.provider];
+			const entry = Array.isArray(p?.models) ? p.models.find((m) => String(m.id) === next.id) : undefined;
 			const per =
 				typeof entry?.thinkingLevel === "string" && entry.thinkingLevel.trim()
 					? entry.thinkingLevel.trim()
@@ -2192,6 +2195,10 @@ const stage = new StageEngine({
 	// 导演先调度，再为每个活跃角色单独取一份主观提案；正文仍由台上主回合合成。
 	actorAgents: true,
 	directorAgent: true,
+	// 生成前先由场景记录员提取用户明确动作/需求，避免主演凭套路补道具和动作。
+	sceneAgent: true,
+	// 一次输入只生成一条完整回复；场记与状态收尾仍由引擎执行。
+	singleReply: true,
 	events: {
 		onTurnStart: () => broadcast({ type: "agent", state: "start" }),
 		onDelta: (kind, delta, draft, reset) =>

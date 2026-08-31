@@ -34,7 +34,7 @@ import {
 	type AssemblyReportItem,
 } from "../preset-split.ts";
 import { splitWithManifest } from "../preset-skill.ts";
-import { formatRosterIndex, formatState, saveState } from "../state.ts";
+import { applyPatch, canonicalizeCharacterKeys, formatRosterIndex, formatState, saveState } from "../state.ts";
 import { isBackstageText } from "../stance.ts";
 import type { LorebookEntry } from "../types.ts";
 import {
@@ -86,6 +86,7 @@ import {
 	type RpSummaryData,
 } from "./compact.ts";
 import { runScribeTurn, STATE_ENTRY_TYPE } from "./scribe-run.ts";
+import { buildSceneAgentPrompt, parseSceneAgentResult } from "./scene-agent.ts";
 import { applyWorldPatchToMvu, mvuTimePatchIfMissing, projectMvuToWorldState } from "../mvu.ts";
 import {
 	MAX_ROUNDS,
@@ -228,6 +229,10 @@ export interface StageEngineDeps {
 	getActorModel?: (actorName: string, fallback: StageModelLike) => StageModelLike | undefined;
 	/** 用同一剧情模型先做一次导演调度；失败时回退确定性筛选。 */
 	directorAgent?: boolean;
+	/** 生成前场景记录员：提取用户明确动作/需求；宿主显式开启，失败不阻塞主生成。 */
+	sceneAgent?: boolean;
+	/** 旁路 Agent 单次调用上限；超时即按该 Agent 的降级路径继续。 */
+	sideTextTimeoutMs?: number;
 	/** 会话当前思考档（用户自由，引擎透传） */
 	getThinking?: () => string | undefined;
 	/** 账本磁盘缓存路径（.liyuan-state/<sessionId>.json）；给出则场记落盘（fs.watch → state 帧） */
@@ -289,6 +294,8 @@ export interface StageEngineDeps {
 	 * 未注入 = 台上无 ask 工具（依赖缺失的工具不上清单）。
 	 */
 	askUser?: (question: string, options: string[], signal?: AbortSignal) => Promise<string | undefined>;
+	/** 单条回复模式：首段正文受理后立即收束本拍，仍执行引擎侧收尾。 */
+	singleReply?: boolean;
 	streamFn: StageStreamFn;
 	events?: StageEvents;
 }
@@ -709,11 +716,67 @@ export class StageEngine {
 
 		// 上下文 = f(分支)
 		const branch = sm.getBranch() as BranchEntryLike[];
-		const state = stateFromBranch(branch);
+		let state = stateFromBranch(branch);
 		const { history, lastUserText, lastNarrativeText, summary } = rebuildHistory(branch);
 		if (!history.some((m) => m.role === "user")) {
 			ev.onNotify?.("error", "没有可开演的用户输入。");
 			return { aborted: false, error: "no-user-input" };
+		}
+
+		// 生成前场景记录员：先把用户本轮明确说出的动作/需求与场景事实分离出来，
+		// 再交给主演。它只做事实提取，失败不影响正文生成。
+		let sceneIntent: { explicitActions: string[]; explicitNeeds: string[] } | undefined;
+		if (this.#deps.sceneAgent === true && lastUserText.trim()) {
+			try {
+				ev.onActivity?.("场景记录员 Agent：开始独立调用");
+				const scenePrompt = buildSceneAgentPrompt({
+					state,
+					userText: lastUserText,
+					recentText: lastNarrativeText,
+					charName: card.name,
+					userName: config.userName,
+				});
+				const sceneResp = await this.#sideText(
+					model,
+					scenePrompt.systemPrompt,
+					scenePrompt.userText,
+					await this.#deps.getAuth(model),
+					4096,
+				);
+				if (typeof sceneResp !== "string") {
+					ev.onActivity?.(`场景记录员失败，继续生成：${sceneResp.error}`);
+				} else {
+					const parsed = parseSceneAgentResult(sceneResp);
+					if (!parsed) {
+						ev.onActivity?.("场景记录员输出不可解析，继续生成");
+					} else {
+						sceneIntent = {
+							explicitActions: parsed.explicitActions,
+							explicitNeeds: parsed.explicitNeeds,
+						};
+						if (Object.keys(parsed.patch).length > 0) {
+							const result = applyPatch(
+								state,
+								canonicalizeCharacterKeys(parsed.patch, [card.name, config.userName, ...Object.keys(state.characters)]),
+							);
+							if (result.applied.length > 0) {
+								state = result.state;
+								sm.appendCustomEntry(STATE_ENTRY_TYPE, state);
+								const stateFile = this.#deps.getStateFile?.(sm.getSessionId());
+								if (stateFile) {
+									try { saveState(stateFile, state); } catch { /* 树上快照仍是权威 */ }
+								}
+								sm.flush();
+								ev.onState?.(state);
+							ev.onActivity?.(`场景记录员记下 ${result.applied.length} 项场景事实`);
+							}
+						}
+						ev.onActivity?.("场景记录员 Agent：完成独立调用");
+					}
+				}
+			} catch (error) {
+				ev.onActivity?.(`场景记录员异常，继续生成：${error instanceof Error ? error.message : String(error)}`);
+			}
 		}
 
 		const languageMismatch = lastNarrativeText
@@ -860,6 +923,7 @@ export class StageEngine {
 			loreIndex: formatLoreIndex(materials.entries),
 			rosterIndex: formatRosterIndex(state),
 			...(memoryHits.length > 0 ? { memoryHits } : {}),
+			...(sceneIntent ? { sceneIntent } : {}),
 		});
 
 		// §4.B 输出合约：v1 供数＝装载期一次性模型声明（M-R4 首件，指纹缓存，换卡/改预设即重声明）；
@@ -895,7 +959,10 @@ export class StageEngine {
 		const endsWithUser = history[history.length - 1]?.role === "user";
 		const past = endsWithUser ? history.slice(0, -1) : history;
 		// 规划卡（五注入之一）：每拍第 1 轮随末端注入送达（工作区新建必空），用户话保持最后一句。
-		const injWithCard = tools.length > 0 ? `${injection}\n\n${PLAN_CARD}` : injection;
+		const singleReplyRule = this.#deps.singleReply
+			? "\n\n【单条回复｜主回复 Agent 权限】本拍只处理用户这一条输入，不写完整剧情。历史用户消息只提供剧情事实；其中旧的字数、篇幅和生成要求不自动继承，除非用户在本轮再次明确提出。只写：角色对当前输入的一次直接反应 + 一个为完成该反应所需的动作；动作完成后立即停笔，通常 2–5 个自然段即可。不得替用户补台词、重复用户台词、安排用户动作或替用户表达感受。不得补写下一步承诺、未来计划、家庭背景或未被当前事件触发的回忆。普通场景不使用角色卡中的性化身体细节。不要为了证明真实而堆叠创伤解释、环境隐喻或生活道具；不要用“像是”“仿佛”“等着回应”“等他开口”等句式替角色解释情绪。正文不得以问句、邀请用户回应或递话句收尾；只有用户明确要求做选择时才可 ask。不要 beat_plan 后分段连载，不要替用户继续行动。"
+			: "";
+		const injWithCard = tools.length > 0 ? `${injection}\n\n${PLAN_CARD}${singleReplyRule}` : `${injection}${singleReplyRule}`;
 		const tailText = endsWithUser ? `${injWithCard}\n\n${history[history.length - 1].text}` : injWithCard;
 		const guardedTailText = endsWithUser
 			? `${injWithCard}\n\n【硬性主权校验】只能执行用户本轮原话明确写出的动作；没有写“开枪/射击”，不得开枪、扣扳机、命中或消耗弹药；没有写移动，不得替用户移动。其余内容只能描写环境和非用户角色反应。\n\n${history[history.length - 1].text}`
@@ -957,17 +1024,18 @@ export class StageEngine {
 		}
 		if (this.#deps.directorAgent) {
 			try {
-				const directorStream = this.#deps.streamFn(
+				ev.onActivity?.("导演 Agent：开始独立调用");
+				const result = await this.#runModelOnce(
 					model,
 					{
-						systemPrompt: buildDirectorSelectionPrompt(actorProfiles),
+						systemPrompt: buildDirectorSelectionPrompt(actorProfiles, state.scene),
 						messages: [{ role: "user", content: [{ type: "text", text: `用户最新输入：${lastUserText}\n最近正文：${lastNarrativeText || "（无）"}` }] }],
 					},
 					{ ...options, reasoning: "off", maxTokens: 300 },
 				);
-				const result = await directorStream.result();
 				const text = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n");
-				directorDecision = parseDirectorDecision(text, actorProfiles, directorDecision);
+				directorDecision = parseDirectorDecision(text, actorProfiles, directorDecision, state.scene);
+				ev.onActivity?.("导演 Agent：完成独立调用");
 				ev.onActivity?.(`导演调度：${directorDecision.activeActors.join("、") || "无角色"} · ${directorDecision.turnFocus}`);
 			} catch (error) {
 				ev.onActivity?.(`导演 agent 调度失败，回落规则调度：${error instanceof Error ? error.message : String(error)}`);
@@ -982,18 +1050,19 @@ export class StageEngine {
 		const actorAgents = actorProfiles.map((profile) => ({
 			profile,
 			respond: async (input: { userText: string; recentText: string; sharedState: { time: string; location: string } }) => {
+				ev.onActivity?.(`角色 Agent「${profile.name}」：开始独立调用`);
 				const actorModel = this.#deps.getActorModel?.(profile.name, model) ?? model;
 				const actorAuth = actorModel === model ? { apiKey, headers } : await this.#deps.getAuth(actorModel);
-				const actorStream = this.#deps.streamFn(
+				const result = await this.#runModelOnce(
 					actorModel,
 					{
-						systemPrompt: buildActorPrompt(profile, directorDecision),
+						systemPrompt: buildActorPrompt(profile, directorDecision, state.scene),
 						messages: [{ role: "user", content: [{ type: "text", text: `时间：${input.sharedState.time}\n地点：${input.sharedState.location}\n最近正文：${input.recentText || "（无）"}\n用户最新输入：${input.userText}` }] }],
 					},
 					{ ...options, ...actorAuth, reasoning: "off", maxTokens: 800 },
 				);
-				const result = await actorStream.result();
 				const content = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n");
+				ev.onActivity?.(`角色 Agent「${profile.name}」：完成独立调用`);
 				return parseActorProposal(content, profile);
 			},
 		}));
@@ -1002,8 +1071,9 @@ export class StageEngine {
 				actorProposals = await runActorAgents(directorDecision, actorAgents, {
 					userText: lastUserText,
 					recentText: lastNarrativeText,
-					sharedState: { time: state.time, location: state.location },
+					sharedState: { time: state.time, location: state.location, scene: state.scene },
 				});
+				ev.onActivity?.(`角色 agent 已调用：${actorProposals.map((p) => p.actor).join("、") || "无有效提案"}`);
 				const conflicts = findProposalConflicts(actorProposals);
 				if (conflicts.length > 0) ev.onActivity?.(`角色提案冲突：${conflicts.join("；")}`);
 				const actorContext = formatActorProposals(actorProposals);
@@ -1016,14 +1086,29 @@ export class StageEngine {
 			}
 		}
 
-		const s = this.#deps.streamFn(model, { systemPrompt, messages, tools }, options);
+		ev.onActivity?.("主回复 Agent：开始独立调用");
+		// 主回复也是独立 Agent，不能因为它走流式通道就失去旁路 Agent 的超时保护。
+		// 某些中转站在 reasoning-only、断流或缺 done 时会让 async iterable 永不结束；
+		// 只给 stream.result() 加超时并不能覆盖这里，所以同时给整段迭代设硬上限。
+		const mainTimeoutMs = this.#deps.sideTextTimeoutMs ?? 30_000;
+		const mainTimeoutController = new AbortController();
+		let rejectMainTimeout: ((reason?: unknown) => void) | undefined;
+		const mainTimeoutPromise = new Promise<never>((_, reject) => { rejectMainTimeout = reject; });
+		const mainTimeout = setTimeout(() => {
+			mainTimeoutController.abort();
+			rejectMainTimeout?.(new Error("主回复 Agent 超时"));
+		}, mainTimeoutMs);
+		const mainSignal = AbortSignal.any([this.#abort.signal, mainTimeoutController.signal]);
+		const s = this.#deps.streamFn(model, { systemPrompt, messages, tools }, { ...options, signal: mainSignal });
 		let final: AssistantMsgLike | null = null;
 		let errored: string | undefined;
 		let text = "";
+		let mainTimedOut = false;
 		const fwd = this.#draftForwarder();
-		for await (const e of s) {
-				if (e.type === "done") {
-					final = normalizeDsmlToolCalls(e.message ?? null);
+		const consumeMain = async () => {
+			for await (const e of s) {
+					if (e.type === "done") {
+						final = normalizeDsmlToolCalls(e.message ?? null);
 			} else if (e.type === "error") {
 				final = e.error ?? null;
 				errored = final?.errorMessage || "provider error";
@@ -1036,10 +1121,33 @@ export class StageEngine {
 			} else if (e.type === "thinking_delta" && e.delta) {
 				recordSegment(ws, { kind: "thinking", text: e.delta });
 				ev.onDelta?.("thinking", e.delta);
-			} else {
-				fwd(e);
+				} else {
+					fwd(e);
+				}
 			}
+		};
+		try {
+			await Promise.race([
+				consumeMain(),
+				mainTimeoutPromise,
+			]);
+		} catch (error) {
+			if (mainTimeoutController.signal.aborted && !this.#abort.signal.aborted) {
+				mainTimedOut = true;
+				// 保留已经流出的半截正文，按用户中断的语义落树，避免超时后静默丢稿。
+				final = {
+					role: "assistant",
+					content: text ? [{ type: "text", text }] : [],
+					stopReason: "aborted",
+				};
+			} else if (!this.#abort.signal.aborted) {
+				errored = error instanceof Error ? error.message : String(error);
+			}
+		} finally {
+			clearTimeout(mainTimeout);
 		}
+		if (mainTimedOut) ev.onActivity?.(`主回复 Agent：超时（${mainTimeoutMs}ms）`);
+		else ev.onActivity?.("主回复 Agent：完成独立调用");
 		// DSML 会在流式正文里被先显示，定稿前清理并重绘，避免协议文本污染对话。
 		const cleanedText = stripDsmlToolCalls(text);
 		if (cleanedText !== text) {
@@ -1188,8 +1296,9 @@ export class StageEngine {
 			sm.flush();
 		}
 
-		// 场记兜底（D5）：模型本拍没调 world_state_update 才旁路补账，M-B 视实弹数据决定退役。
-		if (entryId && !aborted && finalText && ws.patches.length === 0) {
+		// 场记旁路：每拍都从最新正文抽取场景连续性；即使主演已经提交了其它账本补丁，
+		// 场记仍要检查位置/手上物件/进行中动作，避免这类事实依赖主演是否想起调用工具。
+		if (entryId && !aborted && finalText) {
 			const r = await runScribeTurn(
 				{
 					// 给隐藏思考留出余量；自建中转站可能仍输出 reasoning，2048 会把 JSON 挤没。
@@ -1367,6 +1476,7 @@ export class StageEngine {
 		let ledgerInjected = false;
 		let ledgerDone = false;
 		let curtainInjected = false;
+		let singleReplyDone = false;
 		// 稿首次落地时的 text 长度：之前的 text 是读题/计划旁白（工具轮的 text 通道产出），
 		// 不算正文也不算尾巴；之后的 text 才是尾巴候选（状态栏等）。-1 = 稿未落地。
 		let tailStart = -1;
@@ -1593,7 +1703,9 @@ export class StageEngine {
 					if (name === "draft_append" && r.ok !== false) {
 						readThisSeg.clear();
 						forcedNudgedForSeg = false;
+						if (this.#deps.singleReply) singleReplyDone = true;
 					}
+					if (name === "draft_write" && r.ok !== false && this.#deps.singleReply) singleReplyDone = true;
 					// 重复读瘦身：名单内 skill 首读成功后记名（未知名回落直写不记，避免把 miss 记成已读）
 					if (skillReadName && o.skillNames.includes(skillReadName) && r.ok !== false) {
 						skillReadDone.add(skillReadName);
@@ -1618,6 +1730,12 @@ export class StageEngine {
 						timestamp: Date.now(),
 					});
 				}
+			}
+
+			// 单条回复模式：第一段稿件已受理，封笔并结束模型循环，避免一拍变连载。
+			if (singleReplyDone && o.ws.draft.trim()) {
+				if (!o.ws.sealed) runWriteTool(o.ws, o.wsDeps, "draft_seal", {});
+				break;
 			}
 
 			// P7：用户停止（ask 卡上点了停止）——本拍收束，不再续轮
@@ -1779,14 +1897,23 @@ export class StageEngine {
 			// draft_append 时出现「屏上看到了、刷新后正文没了」或只保留上一段的情况。
 			// 格式块不在这里收，仍由 mergeFinalText 保留。
 			const finalCalls = (final.content ?? []).filter((c) => c.type === "toolCall");
-			if (finalCalls.length === 0 && o.ws.draft.trim()) {
+			if (finalCalls.length === 0 && o.ws.draft.trim() && !singleReplyDone) {
 				const body = continuationBody(roundText);
-				if (body && !isClosingChatter(body) && !isStructuredControlText(body)) {
-					const accepted = runWriteTool(o.ws, o.wsDeps, "draft_append", { segment: body }, true);
+				const existingDraft = o.ws.draft.trim();
+				// OpenAI 兼容中转站有时会在封笔后的普通文本通道重述整份现稿。
+				// 这不是新续写：整段丢弃；若文本以现稿开头，只保留真正新增的尾部。
+				const newBody =
+					body === existingDraft
+						? ""
+						: body.startsWith(existingDraft)
+							? body.slice(existingDraft.length).trim()
+							: body;
+				if (newBody && !isClosingChatter(newBody) && !isStructuredControlText(newBody)) {
+					const accepted = runWriteTool(o.ws, o.wsDeps, "draft_append", { segment: newBody }, true);
 					if (accepted.ok) {
 						ev.onActivity?.("普通正文已收进续稿");
 						// 这一轮若没有增量事件，补发一次；有增量时正文已经在屏上，不能重复发送。
-						if (!roundTextStreamed) ev.onDelta?.("text", body, true, false);
+						if (!roundTextStreamed) ev.onDelta?.("text", newBody, true, false);
 						o.ws.sealed = false;
 						convo.push(last);
 						convo.push(inject("上一轮有正文未走 draft_append，已自动收进现稿。若还有剧情继续用 draft_append；到停点再 draft_seal。"));
@@ -1969,6 +2096,28 @@ export class StageEngine {
 
 	// M-A 起 #revise 精修旁路退役（8/10 验收整体退役，revise.ts 已删除）。
 
+	/** 独立 Agent 的一次模型调用：共享超时与取消信号，但不共享对话消息。 */
+	async #runModelOnce(
+		model: StageModelLike,
+		context: { systemPrompt?: string; messages: unknown[] },
+		options: Record<string, unknown>,
+	): Promise<AssistantMsgLike> {
+		const timeoutMs = this.#deps.sideTextTimeoutMs ?? 30_000;
+		const timeoutController = new AbortController();
+		const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
+		const signal = this.#abort?.signal
+			? AbortSignal.any([this.#abort.signal, timeoutController.signal])
+			: timeoutController.signal;
+		try {
+			const stream = this.#deps.streamFn(model, context, { ...options, signal });
+			const result = await stream.result();
+			if (!result) throw new Error("独立 Agent 未返回最终消息");
+			return result;
+		} finally {
+			clearTimeout(timeout);
+		}
+	}
+
 	/** 旁路文本调用（精修/场记用）：静默收集，不外发增量；失败返回 {error} */
 	async #sideText(
 		model: StageModelLike,
@@ -1978,11 +2127,17 @@ export class StageEngine {
 		maxTokens = 8192,
 		reasoning: string | undefined = "off",
 	): Promise<string | { error: string }> {
+		const timeoutMs = this.#deps.sideTextTimeoutMs ?? 30_000;
+		const timeoutController = new AbortController();
+		const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
+		const signal = this.#abort?.signal
+			? AbortSignal.any([this.#abort.signal, timeoutController.signal])
+			: timeoutController.signal;
 		const options: Record<string, unknown> = {
 			apiKey: auth.apiKey,
 			headers: auth.headers,
 			maxTokens,
-			signal: this.#abort?.signal,
+			signal,
 			// 精修/场记/压缩是 harness 的机械窄题，默认强制关思考：zen go 对 low/high 无可靠节流
 			//（8/02 实测），放开推理会把 maxTokens 整个烧在隐形思考里、正文零输出。
 			// 合约声明是判断题（整卡+预设通读），由调用点透传会话思考档（undefined＝随供应商默认）。
@@ -2012,6 +2167,8 @@ export class StageEngine {
 			return text || { error: "最终消息无文本" };
 		} catch (err) {
 			return { error: err instanceof Error ? err.message : String(err) };
+		} finally {
+			clearTimeout(timeout);
 		}
 	}
 }

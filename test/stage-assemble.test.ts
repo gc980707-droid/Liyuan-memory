@@ -145,11 +145,24 @@ test("system prompt：字节稳定、宏替换；扮演话语零残留（P1—�
 test("system prompt：默认对话优先，限制小说式一口气交稿", () => {
 	const p = buildStageSystemPrompt({ card, config, constantLore: [] });
 	assert.ok(p.includes("# 对话感（默认优先）"));
-	assert.ok(p.includes("先回应用户刚说的具体内容和情绪"));
-	assert.ok(p.includes("不要替多个角色连续演完整场戏"));
-	assert.ok(p.includes("活人式交流优先于“显得有用”"));
-	assert.ok(p.includes("不要为了讨好用户而无条件赞同"));
-	assert.ok(p.includes("不替用户补台词、动作、想法或决定"));
+	assert.ok(p.includes("全局只管边界、连续性和节奏，不替角色决定性格或经历"));
+	assert.ok(p.includes("先回应用户刚说的内容，再推进一个最小、具体的现场变化"));
+	assert.ok(p.includes("用户没有明确写出的动作、台词、想法和选择，不得补写或推进"));
+	assert.ok(p.includes("角色的具体性格、经历和反应方式由角色 Agent 决定"));
+	assert.ok(p.includes("同一种反应不要连续重复"));
+	assert.ok(p.includes("有明确的进行中动作时，先从该动作接着写"));
+	assert.ok(p.includes("用户进入现场只是互动变化"));
+});
+
+test("system prompt：全局不携带角色专属经历", () => {
+	const p = buildStageSystemPrompt({
+		card: { ...card, description: "长期遭受家暴，习惯先观察对方脸色。" },
+		config,
+		constantLore: [],
+	});
+	assert.ok(p.includes("长期遭受家暴"), "角色卡原文仍应作为角色档案送达");
+	assert.ok(!p.includes("默认从容、熟练照料他人的安全型角色"));
+	assert.ok(p.includes("角色的具体性格、经历和反应方式由角色 Agent 决定"));
 });
 
 test("system prompt：# 工作方式 = 纯协议（§2.1-5 逐字）；tools=false 时不出现", () => {
@@ -241,6 +254,19 @@ test("末端注入：自动召回记忆独立成块，并标注为旧事实", ()
 	assert.match(inj, /不是本轮新发生的事实/);
 });
 
+test("末端注入：场景记录员的明确意图独立注入，不替用户扩展动作", () => {
+	const inj = buildStageInjection({
+		state: defaultState(),
+		activatedLore: [],
+		card,
+		config,
+		sceneIntent: { explicitActions: [], explicitNeeds: ["用户表示饿了"] },
+	});
+	assert.ok(inj.includes("【本轮用户明确意图】"));
+	assert.ok(inj.includes("明确需求/状态：用户表示饿了"));
+	assert.ok(inj.includes("没有写出的用户动作、道具和安排不得补写"));
+});
+
 test("detectsLanguageMismatch：中文目标才判、样本要够长", () => {
 	const en = "The moon hangs over the courtyard while she waits in silence for a long time tonight.";
 	assert.equal(detectsLanguageMismatch(en, "中文"), true);
@@ -307,6 +333,34 @@ test("loadStageMaterials：卡+预设宏求值+postHistory 每拍求值", () => 
 	}
 });
 
+test("loadStageMaterials：卡内嵌 character_book 进入统一世界书素材", () => {
+	const cwd = mkdtempSync(join(tmpdir(), "liyuan-card-book-"));
+	try {
+		writeFileSync(
+			join(cwd, "card.json"),
+			JSON.stringify({
+				data: {
+					name: "沈云熙",
+					character_book: {
+						entries: [
+							{ keys: ["凌菲烟"], content: "大女儿凌菲烟，刚考上大学。", constant: true, enabled: true },
+							{ keys: ["凌菲影"], content: "小女儿凌菲影，沉迷亚文化。", constant: true, enabled: true },
+						],
+					},
+				},
+			}),
+		);
+		writeFileSync(join(cwd, "liyuan.config.json"), JSON.stringify({ card: "card.json" }));
+
+		const m = loadStageMaterials(cwd);
+		const lore = constantLoreOf(m);
+		assert.ok(lore.some((e) => e.content.includes("凌菲烟")));
+		assert.ok(lore.some((e) => e.content.includes("凌菲影")));
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("loadStageMaterials：纪律块撤出写作上下文（R7）——system prompt 不见禁词表，规则/纪律单独可取", () => {
 	const cwd = mkdtempSync(join(tmpdir(), "liyuan-pol-"));
 	try {
@@ -364,9 +418,9 @@ test("默认预设（§4.A）：config.preset 空 → 装 presets/默认.json；
 		assert.ok(resident.includes("斜体"), "视角/排版承接");
 		assert.ok(resident.includes("感官细节"), "感官承接");
 		assert.ok(resident.includes("忌 AI 腔"), "忌AI腔承接");
-		// 篇幅兜底数据化：extractDraftRules 能从默认预设提出 wordRange
+		// 默认预设不再强迫模型凑 800–1500 字；长度随场景，避免把普通对话写成文章。
 		const rules = extractDraftRules(m.presetRuleTexts, m.statusBarFormats);
-		assert.deepEqual(rules.wordRange, { min: 800, max: 1500 }, "篇幅从默认预设提取");
+		assert.equal(rules.wordRange, undefined, "默认预设不应生成硬性篇幅范围");
 
 		// 用户预设在场：默认预设完全不装（不叠加）
 		writeFileSync(

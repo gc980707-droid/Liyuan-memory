@@ -504,7 +504,7 @@ function buildParams(model, context, options, compat = getCompat(model), cacheRe
             params.chat_template_kwargs = chatTemplateKwargs;
         }
     }
-    else if (compat.thinkingFormat === "deepseek" && model.reasoning) {
+    else if (compat.thinkingFormat === "deepseek" && (model.reasoning || /deepseek/i.test(model.id))) {
         if (options?.reasoningEffort) {
             params.thinking = { type: "enabled" };
         }

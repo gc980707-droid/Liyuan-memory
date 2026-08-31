@@ -55,6 +55,37 @@ test("导演提示只列活跃角色，角色提示带盲区且不接管用户",
 	assert.match(buildActorPrompt(profiles[0]!, decision), /严格 JSON/);
 });
 
+test("角色 agent：稳定档案中的长期家暴经历必须进入本轮判断", () => {
+	const traumaCard = { ...card, description: "长期遭受家暴，习惯先观察对方脸色。" };
+	const profile = actorProfilesFromState(traumaCard, state)[0]!;
+	const prompt = buildActorPrompt(profile, selectActiveActors([profile], "我饿了"));
+	assert.match(prompt, /长期家暴\/创伤经历/);
+	assert.match(prompt, /不能因用户一句日常需求就把她改写成从容熟练/);
+	assert.match(prompt, /本轮只提议一个可见反应和一个动作/);
+});
+
+test("角色 agent：收到场景进行中动作，不得脱离连续性另起动作", () => {
+	const profile = actorProfilesFromState(card, state)[0]!;
+	const prompt = buildActorPrompt(profile, selectActiveActors([profile], "客人走到厨房门口"), {
+		positions: { 阿梨: "灶台边" },
+		held_items: {},
+		ongoing: ["阿梨正在准备清粥"],
+		known_facts: ["客人有些晃"],
+	});
+	assert.match(prompt, /进行中=阿梨正在准备清粥/);
+	assert.match(prompt, /不得用临时提案让角色放弃它/);
+	assert.match(prompt, /必须先在该动作上做一个具体的可见推进/);
+});
+
+test("导演提示也必须看到进行中动作，不能把它当背景跳开", () => {
+	const profiles = actorProfilesFromState(card, state);
+	const prompt = buildDirectorSelectionPrompt(profiles, {
+		positions: { 阿梨: "灶台边" }, held_items: {}, ongoing: ["阿梨正在准备清粥"], known_facts: [],
+	});
+	assert.match(prompt, /阿梨正在准备清粥/);
+	assert.match(prompt, /进行中动作存在时，turnFocus 必须包含/);
+});
+
 test("角色提案按 JSON 校验，错误格式只回退为该角色文本", () => {
 	const profile = actorProfilesFromState(card, state)[0]!;
 	assert.deepEqual(parseActorProposal('{"actor":"阿梨","content":"把杯子推过去","intendedAction":"倒水"}', profile), {
@@ -70,6 +101,10 @@ test("导演 agent JSON 只允许选择名录角色，非法结果回退", () =>
 	assert.deepEqual(parseDirectorDecision('{"activeActors":["不存在的人"],"turnFocus":"门口","stopAt":"停下"}', profiles, fallback), fallback);
 	const picked = parseDirectorDecision('{"activeActors":["阿梨"],"turnFocus":"照看客人","stopAt":"交还用户"}', profiles, fallback);
 	assert.deepEqual(picked.activeActors, ["阿梨"]);
+	const ongoing = parseDirectorDecision('{"activeActors":["老周"],"turnFocus":"门口","stopAt":"交还用户"}', profiles, fallback, {
+		positions: { 阿梨: "灶台边" }, held_items: {}, ongoing: ["阿梨正在准备清粥"], known_facts: [],
+	});
+	assert.ok(ongoing.activeActors.includes("阿梨"));
 	const paced = parseDirectorDecision('{"activeActors":["阿梨"],"turnFocus":"照看客人","stopAt":"交还用户","sceneGoal":"让客人先表态","tension":9}', profiles, fallback);
 	assert.equal(paced.sceneGoal, "让客人先表态");
 	assert.equal(paced.tension, 5);
@@ -86,6 +121,7 @@ test("角色提案冲突只提醒、不替正文模型做决定", () => {
 		{ actor: "阿梨", content: "她留下", intendedAction: "留下" },
 		{ actor: "老周", content: "他转身", intendedAction: "离开" },
 	]), /提案冲突提醒/);
+	assert.match(formatActorProposals([{ actor: "阿梨", content: "继续搅粥", intendedAction: "调小火" }]), /连续性约束，不是可选建议/);
 });
 
 test("角色 agent 只按导演顺序调用活跃角色", async () => {
