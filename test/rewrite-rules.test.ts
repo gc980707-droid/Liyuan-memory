@@ -56,3 +56,9 @@ test("rewrite config rejects rule files outside the project rewrite directory", 
 	assert.equal(result.processors.length, 0);
 	assert.match(result.warnings[0], /不安全/);
 });
+
+test("whitelist matches the complete hit, not a substring", () => {
+	const { processors } = compileRewriteProcessors([{ name: "x", subRules: [{ mode: "text", targets: ["他", "他笑了"], replacements: ["自然"] }] }]);
+	for (const p of processors) p.whitelist = ["他"];
+	assert.equal(applyRewrite("他 他笑了", processors), "他 自然");
+});

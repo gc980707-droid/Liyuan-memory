@@ -147,7 +147,9 @@ export function applyRewrite(text: string, processors: RewriteProcessor[], optio
 		out = out.replace(processor.regex, (...args: unknown[]) => {
 			const match = String(args[0]);
 			const captures = args.slice(1, -2);
-			if (processor.whitelist?.some((item) => item && match.includes(item))) return match;
+			// A whitelist entry protects one exact matched phrase. `includes` would
+			// let a short entry such as "他" disable a rule matching "他笑了".
+			if (processor.whitelist?.some((item) => item === match)) return match;
 			const value = replacement(processor.replacements, options.deterministicKey ?? "", index++);
 			if (processor.mode === "regex") return value.replace(/\$(\d+)/g, (_, n) => String(captures[Number(n) - 1] ?? "")).replace(/\$&/g, match);
 			return value;
