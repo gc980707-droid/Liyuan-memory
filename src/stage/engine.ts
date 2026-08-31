@@ -475,7 +475,7 @@ const trimContentBodyRepeat = (body: string, inner: string): string => {
 
 export const mergeFinalText = (draft: string, text: string): string => {
 	const d = draft.trim();
-	const t = stripDsmlToolCalls(text.trim());
+	const t = stripLeakedToolArguments(stripDsmlToolCalls(text.trim()));
 	if (!d) return stripLeakedStagehandText(dedupeLatestStatusBlocks(dedupeIdenticalBlocks(t)));
 	if (!t || d === t) return d;
 	// 有稿时普通 text 通道只可能是格式尾巴；模型的收笔闲聊、旁路 JSON
@@ -618,6 +618,21 @@ const stripDsmlToolCalls = (text: string): string =>
 		// 流被截断时没有闭合标签：从工具块起点到文本末尾都属于协议，不是正文。
 		.replace(/\s*<｜DSML｜tool_calls>[\s\S]*$/gu, "\n\n")
 		.trim();
+
+/**
+ * 某些 OpenAI 兼容中转站会把工具参数协议（`### Arg...`）当普通文本返回。
+ * 这不是正文，也没有稳定的协议标签可解析；只拦截明显的乱码形态，避免误伤
+ * 正常 Markdown 标题或正文里单独出现的「Arg」。
+ */
+export const stripLeakedToolArguments = (text: string): string => {
+	const value = text.trim();
+	if (!value) return "";
+	const args = value.match(/\barg(?:ument|ued)?\b/giu)?.length ?? 0;
+	const hashes = value.match(/#/g)?.length ?? 0;
+	const digits = value.match(/\d/g)?.length ?? 0;
+	if (args >= 2 && hashes >= 6 && digits >= 2 && value.length <= 600) return "";
+	return text;
+};
 
 export class StageEngine {
 	#deps: StageEngineDeps;
@@ -1174,7 +1189,7 @@ export class StageEngine {
 		if (mainTimedOut) ev.onActivity?.(`主回复 Agent：超时（${mainTimeoutMs}ms）`);
 		else ev.onActivity?.("主回复 Agent：完成独立调用");
 		// DSML 会在流式正文里被先显示，定稿前清理并重绘，避免协议文本污染对话。
-		const cleanedText = stripDsmlToolCalls(text);
+		const cleanedText = stripLeakedToolArguments(stripDsmlToolCalls(text));
 		if (cleanedText !== text) {
 			ev.onStreamClear?.();
 			text = cleanedText;
@@ -1890,7 +1905,7 @@ export class StageEngine {
 					final = streamed;
 				}
 			}
-			const cleanedRoundText = stripDsmlToolCalls(roundText);
+			const cleanedRoundText = stripLeakedToolArguments(stripDsmlToolCalls(roundText));
 			if (cleanedRoundText !== roundText) {
 				if (!o.ws.draft.trim()) ev.onStreamClear?.();
 				roundText = cleanedRoundText;

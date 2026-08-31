@@ -8,7 +8,7 @@ import { SessionManager } from "@liyuan/agent-runtime";
 import { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall } from "@liyuan/ai/providers/faux";
 import { registerFauxProvider, streamSimple } from "@liyuan/ai/compat";
 
-import { StageEngine, type StageStreamFn } from "../src/stage/engine.ts";
+import { StageEngine, stripLeakedToolArguments, type StageStreamFn } from "../src/stage/engine.ts";
 import { defaultState } from "../src/state.ts";
 
 /** 临时舞台：配置+卡+独立会话目录 */
@@ -46,6 +46,11 @@ const makeEngine = (
  * 兜底触发率大降，但直出代收+模型不落账的测试路径仍会走到）。
  */
 const fauxScribeEmpty = () => fauxAssistantMessage(JSON.stringify({ patch: {} }));
+
+test("中转站工具参数乱码不进入正文，正常 Markdown 标题保留", () => {
+	assert.equal(stripLeakedToolArguments("### # # Arg### # 1###### Arg##### Argued### 1#####"), "");
+	assert.equal(stripLeakedToolArguments("### 正文\n这是正常内容。"), "### 正文\n这是正常内容。");
+});
 
 /**
  * 直出正文一拍的完整应答序列（M-R1 五注入日程）：
