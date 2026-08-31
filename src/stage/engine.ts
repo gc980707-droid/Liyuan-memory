@@ -44,7 +44,7 @@ import {
 	buildDirectorSelectionPrompt,
 	formatActorProposals,
 	findProposalConflicts,
-	parseActorProposal,
+	parseActorProposalStrict,
 	parseDirectorDecision,
 	runActorAgents,
 	selectActiveActors,
@@ -1086,7 +1086,7 @@ export class StageEngine {
 				);
 				const content = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n");
 				ev.onActivity?.(`角色 Agent「${profile.name}」：完成独立调用`);
-				return parseActorProposal(content, profile);
+				return parseActorProposalStrict(content, profile) ?? { actor: profile.name, content: "", intendedAction: "" };
 			},
 		}));
 		if (this.#deps.actorAgents && actorAgents.length > 0) {
