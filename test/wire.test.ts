@@ -379,7 +379,25 @@ test("toWireHistory：状态栏只保留在当前分支最新角色楼层", () =
 	const out = toWireHistory(history, names, { skin });
 	assert.equal(out.filter((m) => m.text.includes("状态栏")).length, 1);
 	assert.ok(!out[0].text.includes("状态栏"));
+	assert.ok(!out.find((m) => m.channel === "narrative")?.text.includes("StatusPlaceHolderImpl"));
 	assert.ok(out.at(-1)?.text.includes("状态栏"));
+});
+
+test("toWireHistory：删除最新楼层后上一楼状态栏恢复显示", () => {
+	const skin = {
+		rules: [{ name: "status", source: "<inner>[\\s\\S]*?</inner>", flags: "g", replace: "<div>状态栏</div>" }],
+		charName: "卡",
+		userName: "旅人",
+	};
+	const history = [
+		{ role: "assistant", content: [{ type: "text", text: "第一楼\n<inner>旧状态</inner>" }] },
+		{ role: "user", content: "第二楼" },
+		{ role: "assistant", content: [{ type: "text", text: "第二回复\n<inner>新状态</inner>" }] },
+	];
+	const latest = toWireHistory(history, names, { skin });
+	assert.ok(latest.at(-1)?.text.includes("状态栏"));
+	const afterDelete = toWireHistory(history.slice(0, 1), names, { skin });
+	assert.ok(afterDelete[0].text.includes("状态栏"));
 });
 
 test("toWireMsg：带时间线时状态栏挂到最后一个正文段", () => {

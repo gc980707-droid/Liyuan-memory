@@ -92,13 +92,22 @@ export function cardStatusBarFormats(raw: Record<string, unknown> | null | undef
 		// 不能只扫内容——标签名千变万化，scriptName 是唯一可靠的意图信号。
 		const name = typeof r.scriptName === "string" ? r.scriptName : "";
 		const find = typeof r.findRegex === "string" ? r.findRegex : "";
-		if (/状态栏|status/i.test(name) && !found.size) {
+		if (/状态栏|状态|心声|面板|status/i.test(name) && !found.size) {
 			const tagM = find.match(/<([A-Za-z_][\w]*)\s*\/?>/);
 			if (tagM) {
 				const tag = tagM[1];
 				// 自闭合占位 <Tag/> vs 成对 <Tag>…</Tag>
 				const selfClose = find.includes("/>");
 				found.add(selfClose ? `\`<${tag}/>\`` : `\`<${tag}>…</${tag}>\``);
+			}
+		}
+		// 自定义中文命名或无命名规则：若显示向规则把成对标签换成 UI 容器，
+		// 也视为状态栏格式，确保输出合约能要求模型在谢幕产出它。
+		if (!found.size && /<(?:div|section|table|html)\b/i.test(String(r.replaceString ?? ""))) {
+			const tagM = find.match(/<([A-Za-z_][\w]*)\s*\/?>/);
+			if (tagM && !/^(?:content|user|char|assistant|system|p)$/i.test(tagM[1])) {
+				const tag = tagM[1];
+				found.add(find.includes("/>") ? `\`<${tag}/>\`` : `\`<${tag}>…</${tag}>\``);
 			}
 		}
 	}
