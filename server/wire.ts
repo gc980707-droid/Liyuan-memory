@@ -59,8 +59,6 @@ export interface WireMsg {
 	/** 发言者显示名（narrative/greeting 为角色名，user 为用户名） */
 	name?: string;
 	text: string;
-	/** 历史楼层隐藏的状态原文，供回退/诊断，不在旧楼层渲染 UI。 */
-	hiddenStatus?: string[];
 	/** 模型思维链（原始输出，UI 折叠呈现；无则缺省） */
 	thinking?: string;
 	/**
@@ -475,24 +473,20 @@ function projectStatusPlaceholder(text: string, skin: DisplaySkin | null, show: 
 }
 
 /** 旧楼层隐藏卡皮肤 UI，原始状态块通过 hiddenStatus 保留。 */
-function hideHistoricalSkinBlocks(text: string, skin: DisplaySkin | null, show: boolean): { text: string; hidden: string[] } {
-	if (show || !skin?.rules?.length || !text) return { text, hidden: [] };
+function hideHistoricalSkinBlocks(text: string, skin: DisplaySkin | null, show: boolean): string {
+	if (show || !skin?.rules?.length || !text) return text;
 	let out = text;
-	const hidden: string[] = [];
 	for (const rule of skin.rules) {
 		if (!rule.source.includes("<")) continue;
 		try {
 			const flags = rule.flags.includes("g") ? rule.flags : `${rule.flags}g`;
 			const re = new RegExp(rule.source, flags);
-			out = out.replace(re, (match) => {
-				hidden.push(match);
-				return "";
-			});
+			out = out.replace(re, "");
 		} catch {
 			// 非法的单条皮肤规则不应阻断其它规则或正文。
 		}
 	}
-	return { text: out.replace(/\n{3,}/g, "\n\n").trim(), hidden };
+	return out.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): WireMsg | null {
@@ -502,10 +496,7 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 	const showStatusBar = opts?.showStatusBar === true;
 	const historical = opts?.showStatusBar === false;
 	const rawText = textOf(msg.content).trim();
-	const placeholderHidden = historical ? rawText.match(/<StatusPlaceHolderImpl\s*\/?\s*>/gi) ?? [] : [];
-	const projected = hideHistoricalSkinBlocks(projectStatusPlaceholder(rawText, skin, showStatusBar), skin, !historical);
-	projected.hidden.unshift(...placeholderHidden);
-	const text = projected.text.trim();
+	const text = hideHistoricalSkinBlocks(projectStatusPlaceholder(rawText, skin, showStatusBar), skin, !historical).trim();
 
 	if (msg.role === "user") {
 		if (!text) return null;
@@ -570,7 +561,7 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 							if (seg.kind !== "text") return seg;
 							const show = showStatusBar && index === lastText;
 							const p = hideHistoricalSkinBlocks(projectStatusPlaceholder(seg.text, tlSkin, show), tlSkin, show || !historical);
-							return { ...seg, text: prepareDisplayText(p.text, tlSkin, opts?.depth ?? 0) };
+							return { ...seg, text: prepareDisplayText(p, tlSkin, opts?.depth ?? 0) };
 						});
 					})()
 				: undefined;
@@ -579,7 +570,6 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 			channel,
 			name: names.charName,
 			text: body,
-			...(projected.hidden.length ? { hiddenStatus: projected.hidden } : {}),
 			...(thinking ? { thinking } : {}),
 			...(timeline ? { timeline } : {}),
 			...(aborted ? { unfinished: true } : {}),
