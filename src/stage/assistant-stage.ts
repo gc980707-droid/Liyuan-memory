@@ -10,7 +10,7 @@
  * （模型看到「本轮可结束」就会停手），且用户随时可点停止。
  */
 
-import { hasAssistantRunner, runAssistantTask, type AssistantRunResult } from "../assistant-gateway.ts";
+import { hasAssistantRunner, runAssistantTask, runRewriteAgent, type AssistantRunResult } from "../assistant-gateway.ts";
 
 /** StageTool 同形 */
 export interface AssistantStageTool {
@@ -24,6 +24,33 @@ export interface AssistantStageResult {
 	activity?: string;
 	isError?: boolean;
 	details?: Record<string, unknown>;
+}
+
+export function rewriteAgentTool(): AssistantStageTool | null {
+	if (!hasAssistantRunner()) return null;
+	return {
+		name: "rewrite_agent",
+		description: "按需审校普通叙事中的疑似八股句，只返回经过评分和程序校验的局部补丁建议；不处理用户消息、幕后消息、状态栏、思考链、HTML 或代码块。没有明显问题时不要调用。",
+		parameters: {
+			type: "object",
+			properties: { text: { ...STR, description: "待审校的普通叙事文本" }, rules_summary: { ...STR, description: "适用规则摘要" }, protected_ranges: { ...STR, description: "不可触碰范围说明（可省略）" } },
+			required: ["text", "rules_summary"],
+		},
+	};
+}
+
+export async function runRewriteAgentStageTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<AssistantStageResult | null> {
+	if (name !== "rewrite_agent") return null;
+	const text = typeof args.text === "string" ? args.text : "";
+	const rulesSummary = typeof args.rules_summary === "string" ? args.rules_summary : "";
+	if (!text.trim() || !rulesSummary.trim()) return { text: "text 和 rules_summary 不能为空。", isError: true };
+	try {
+		const result = await runRewriteAgent({ text, rulesSummary, protectedRanges: typeof args.protected_ranges === "string" ? args.protected_ranges : undefined, signal });
+		const payload = { ok: result.ok, text: result.text, patches: result.accepted, rejected: result.rejected };
+		return { text: JSON.stringify(payload), isError: !result.ok, activity: result.ok ? "杀八股审校完成" : "杀八股审校回退原文", details: { rewriteAgent: payload } };
+	} catch (error) {
+		return { text: `杀八股审校失败，保留原文：${error instanceof Error ? error.message : String(error)}`, isError: true, activity: "杀八股审校失败" };
+	}
 }
 
 const STR = { type: "string" } as const;

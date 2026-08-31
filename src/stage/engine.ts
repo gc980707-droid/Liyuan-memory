@@ -113,7 +113,7 @@ import {
 	runMediaStageTool,
 	type MediaStageResult,
 } from "./media-stage.ts";
-import { assistantStageTool, runAssistantStageTool } from "./assistant-stage.ts";
+import { assistantStageTool, rewriteAgentTool, runAssistantStageTool, runRewriteAgentStageTool } from "./assistant-stage.ts";
 import type { MemoryChunkLike } from "../tools/memory.ts";
 import { extractDraftBody } from "../draft.ts";
 import {
@@ -882,6 +882,7 @@ export class StageEngine {
 		const mediaTools = this.#deps.media ? mediaStageTools(config.language, mediaOpts) : [];
 		// 助手委托（8/06 重接）：runner 未注册时不上清单
 		const assistantTool = assistantStageTool();
+		const rewriteTool = rewriteAgentTool();
 		// P7：ask 工具依赖宿主注入 askUser（选择卡通道）；未注入则从清单剔除
 		const askEnabled = !!this.#deps.askUser;
 		const tools = [
@@ -890,6 +891,7 @@ export class StageEngine {
 			...writeTools(config.language).filter((t) => t.name !== "ask" || askEnabled),
 			...mediaTools,
 			...(assistantTool ? [assistantTool] : []),
+			...(rewriteTool ? [rewriteTool] : []),
 			...mcpTools,
 		];
 		const ws = createWorkspace();
@@ -1671,10 +1673,12 @@ export class StageEngine {
 					// 三态路由 +MCP：统一层/台上读侧 → tools.ts；MCP 外设 → hub；其余 → 工作区。
 					// MCP 走网络/子进程，可能很慢——把本拍 abort 信号透传下去，用户点停止能立刻中断。
 					r = name === "assistant_run"
-						? ((await runAssistantStageTool(name, call.arguments ?? {}, this.#abort?.signal)) ?? {
-								text: `未知工具「${name}」。`,
-								isError: true,
-							})
+					? ((await runAssistantStageTool(name, call.arguments ?? {}, this.#abort?.signal)) ?? {
+							text: `未知工具「${name}」。`,
+							isError: true,
+						})
+					: name === "rewrite_agent"
+							? ((await runRewriteAgentStageTool(name, call.arguments ?? {}, this.#abort?.signal)) ?? { text: `未知工具「${name}」。`, isError: true })
 						: MCP_TOOLS.has(name)
 							? ((await runMcpStageTool(
 									this.#deps.mcp!,
