@@ -54,7 +54,8 @@ export type ScribeRunOutcome =
 function restrictMvuPatchToUserAction(patch: Record<string, unknown>, userText: string): Record<string, unknown> {
 	const has = (re: RegExp) => re.test(userText);
 	const canFire = has(/开枪|射击|扣动扳机|开火|点射|扫射|击发|扳机/u);
-	const canMove = has(/走|跑|进入|离开|下楼|上楼|移动|靠近|退后|转身|躲|前往|摸向/u);
+	// Avoid substring false positives such as「走神」being interpreted as a move.
+	const canMove = has(/走(?!神)|跑|进入|离开|下楼|上楼|移动|靠近|退后|转身|躲|前往|摸向/u);
 	const canHandleItems = has(/拿|捡|拾取|装入|收起|丢|放下|穿戴|卸下|打包|压缩|搜刮|装备/u);
 	const next: Record<string, unknown> = {};
 	for (const [path, value] of Object.entries(patch)) {
