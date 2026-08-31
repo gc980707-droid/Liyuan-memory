@@ -59,6 +59,14 @@ test("displayRules: 裸模式串(无 /…/ 包裹)按字面正则源处理", () 
 	assert.equal(rules[0].flags, "g"); // 无声明时默认 g,保证全文替换
 });
 
+test("cardStatusBarFormats：自定义命名的 UI 标签也纳入状态栏合约", async () => {
+	 const { cardStatusBarFormats } = await import("../src/cardfront.ts");
+	 const formats = cardStatusBarFormats({
+		 extensions: { regex_scripts: [{ scriptName: "心声", findRegex: "/<inner>[\\s\\S]*?<\\/inner>/g", replaceString: "<div class='voice'>$1</div>", placement: [2], markdownOnly: true }] },
+	 });
+	 assert.deepEqual(formats, ["`<inner>…</inner>`"]);
+});
+
 test("displayRules: 非法正则跳过不抛", () => {
 	const warnings: string[] = [];
 	const oldWarn = console.warn;
