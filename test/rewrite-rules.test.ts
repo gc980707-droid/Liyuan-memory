@@ -3,6 +3,7 @@ import test from "node:test";
 import { applyRewrite, applyRewriteProtected, compileRewriteProcessors, normalizeRewriteRules } from "../src/rewrite-rules.ts";
 import { toWireMsg } from "../server/wire.ts";
 import { rebuildHistory } from "../src/stage/assemble.ts";
+import { rewriteProcessorsForConfig } from "../src/rewrite-rules.ts";
 
 test("rewrite rules normalize array and wrapper, preserving groups and enabled state", () => {
 	const a = normalizeRewriteRules({ rules: [{ name: "常用", enabled: false, subRules: [{ mode: "text", targets: ["旧"], replacements: ["新"] }] }] });
@@ -46,4 +47,12 @@ test("wire visual channel and history opt-in use the same protected rewrite", ()
 	assert.equal(rebuildHistory([...branch], processors).history[1].text, "自然");
 	assert.equal(toWireMsg({ role: "user", content: "八股" }, { charName: "c", userName: "u" }, { rewriteProcessors: processors })?.text, "八股");
 	assert.equal(toWireMsg({ role: "assistant", content: "八股" }, { charName: "c", userName: "u" }, { backstage: true, rewriteProcessors: processors })?.text, "八股");
+	const backstageTimeline = toWireMsg({ role: "assistant", content: "八股", details: { rpTimeline: [{ kind: "text", text: "八股" }] } }, { charName: "c", userName: "u" }, { backstage: true, rewriteProcessors: processors });
+	assert.equal(backstageTimeline?.timeline?.[0]?.text, "八股");
+});
+
+test("rewrite config rejects rule files outside the project rewrite directory", () => {
+	const result = rewriteProcessorsForConfig("/tmp/liyuan", { enabled: true, rulesFile: "../secret.json", scope: "visual" }, "visual");
+	assert.equal(result.processors.length, 0);
+	assert.match(result.warnings[0], /不安全/);
 });

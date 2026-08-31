@@ -4,7 +4,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { resolve, sep } from "node:path";
 
 export type RewriteMode = "text" | "regex" | "simple";
 
@@ -158,8 +158,13 @@ export function rewriteProcessorsForConfig(cwd: string, config: RewriteConfig | 
 	let payload: unknown = config.rules ?? [];
 	if (config.rulesFile) {
 		try {
+			const root = resolve(cwd, ".liyuan-rewrite") + sep;
+			const file = resolve(cwd, config.rulesFile);
+			if (!file.startsWith(root) || !file.endsWith(".json")) {
+				return { processors: [], warnings: ["规则文件路径不安全，必须位于 .liyuan-rewrite/ 下；已回退为关闭"] };
+			}
 			// Kept here so callers do not need to know the on-disk format.
-			payload = JSON.parse(readFileSync(isAbsolute(config.rulesFile) ? config.rulesFile : join(cwd, config.rulesFile), "utf8"));
+			payload = JSON.parse(readFileSync(file, "utf8"));
 		} catch (error) {
 			return { processors: [], warnings: [`规则文件加载失败，已回退为关闭：${error instanceof Error ? error.message : String(error)}`] };
 		}

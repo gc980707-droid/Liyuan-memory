@@ -565,7 +565,9 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 						return source.map((seg, index) => {
 							if (seg.kind !== "text") return seg;
 							const show = showStatusBar && index === lastText;
-							const segmentText = opts?.rewriteProcessors?.length ? applyRewriteProtected(seg.text, opts.rewriteProcessors) : seg.text;
+							const segmentText = channel === "narrative" && opts?.rewriteProcessors?.length
+								? applyRewriteProtected(seg.text, opts.rewriteProcessors)
+								: seg.text;
 							const p = hideHistoricalSkinBlocks(projectStatusPlaceholder(segmentText, tlSkin, show), tlSkin, show || !historical);
 							return { ...seg, text: prepareDisplayText(p, tlSkin, opts?.depth ?? 0) };
 						});
