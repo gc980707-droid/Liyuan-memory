@@ -39,11 +39,12 @@ export function rewriteAgentTool(): AssistantStageTool | null {
 	};
 }
 
-export async function runRewriteAgentStageTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<AssistantStageResult | null> {
+export async function runRewriteAgentStageTool(name: string, args: Record<string, unknown>, signal?: AbortSignal, currentDraft?: string): Promise<AssistantStageResult | null> {
 	if (name !== "rewrite_agent") return null;
 	const text = typeof args.text === "string" ? args.text : "";
 	const rulesSummary = typeof args.rules_summary === "string" ? args.rules_summary : "";
 	if (!text.trim() || !rulesSummary.trim()) return { text: "text 和 rules_summary 不能为空。", isError: true };
+	if (currentDraft !== undefined && text !== currentDraft) return { text: "审校未采用：只能审校当前稿纸，不能传入用户消息或其他文本。", isError: true, activity: "杀八股范围拒绝" };
 	try {
 		const result = await runRewriteAgent({ text, rulesSummary, protectedRanges: typeof args.protected_ranges === "string" ? args.protected_ranges : undefined, signal });
 		const payload = { ok: result.ok, text: result.text, patches: result.accepted, rejected: result.rejected };
