@@ -62,3 +62,12 @@ test("whitelist matches the complete hit, not a substring", () => {
 	for (const p of processors) p.whitelist = ["他"];
 	assert.equal(applyRewrite("他 他笑了", processors), "他 自然");
 });
+
+test("Veridis compatibility: bare regex uses gmu and simple wildcard stops at punctuation", () => {
+	const { processors } = compileRewriteProcessors([{ name: "x", subRules: [
+		{ mode: "regex", targets: ["^甲$"], replacements: ["乙"] },
+		{ mode: "simple", targets: ["模板*句"], replacements: ["替换"] },
+	] }]);
+	assert.equal(processors[0].regex.flags.includes("m"), true);
+	assert.equal(applyRewrite("甲\n模板这是，句 模板这是句", processors), "乙\n模板这是，句 替换");
+});

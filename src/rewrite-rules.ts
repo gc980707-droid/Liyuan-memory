@@ -56,8 +56,8 @@ function simplePattern(value: string): string {
 	let out = "";
 	for (let i = 0; i < value.length; i++) {
 		const c = value[i];
-		if (c === "*") out += "[\\s\\S]*?";
-		else if (c === "?") out += "[\\s\\S]";
+		if (c === "*") out += "[^,，。.!?！？；;\\n]{0,15}?";
+		else if (c === "?") out += "\\?";
 		else if (c === "{") {
 			const end = value.indexOf("}", i + 1);
 			if (end > i) {
@@ -72,7 +72,7 @@ function simplePattern(value: string): string {
 
 function parseRegex(value: string): { source: string; flags: string } | null {
 	const m = /^\/(.*)\/([dgimsuvy]*)$/.exec(value.trim());
-	return m ? { source: m[1], flags: m[2].replace("y", "") } : { source: value, flags: "g" };
+	return m ? { source: m[1], flags: m[2].replace("y", "") } : { source: value, flags: "gmu" };
 }
 
 function canMatchEmpty(re: RegExp): boolean {
