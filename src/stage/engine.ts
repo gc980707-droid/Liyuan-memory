@@ -689,6 +689,9 @@ export class StageEngine {
 	async #turn(userText: string | null): Promise<StageTurnEndInfo> {
 		const { cwd, events: rawEv = {} } = this.#deps;
 		const sm = this.#deps.getSessionManager();
+		// 本拍控制器必须在所有旁路 agent 启动前建立；否则用户在场景/导演/
+		// 角色 agent 阶段点击停止时，abort() 没有任何对象可取消。
+		this.#abort = new AbortController();
 
 		// ---- 全流程文字留档 ----
 		// 前端能看到的每一个字、每一次工具调用/回执、每一次注入，按时序全记。
@@ -1024,7 +1027,6 @@ export class StageEngine {
 		];
 
 		const { apiKey, headers } = await this.#deps.getAuth(model);
-		this.#abort = new AbortController();
 		const options: Record<string, unknown> = {
 			apiKey,
 			headers,
@@ -1500,7 +1502,6 @@ export class StageEngine {
 		let ledgerInjected = false;
 		let ledgerDone = false;
 		let curtainInjected = false;
-		let singleReplyDone = false;
 		// 稿首次落地时的 text 长度：之前的 text 是读题/计划旁白（工具轮的 text 通道产出），
 		// 不算正文也不算尾巴；之后的 text 才是尾巴候选（状态栏等）。-1 = 稿未落地。
 		let tailStart = -1;
@@ -1741,9 +1742,7 @@ export class StageEngine {
 					if (name === "draft_append" && r.ok !== false) {
 						readThisSeg.clear();
 						forcedNudgedForSeg = false;
-						if (this.#deps.singleReply) singleReplyDone = true;
 					}
-					if (name === "draft_write" && r.ok !== false && this.#deps.singleReply) singleReplyDone = true;
 					// 重复读瘦身：名单内 skill 首读成功后记名（未知名回落直写不记，避免把 miss 记成已读）
 					if (skillReadName && o.skillNames.includes(skillReadName) && r.ok !== false) {
 						skillReadDone.add(skillReadName);
@@ -1768,12 +1767,6 @@ export class StageEngine {
 						timestamp: Date.now(),
 					});
 				}
-			}
-
-			// 单条回复模式：第一段稿件已受理，封笔并结束模型循环，避免一拍变连载。
-			if (singleReplyDone && o.ws.draft.trim()) {
-				if (!o.ws.sealed) runWriteTool(o.ws, o.wsDeps, "draft_seal", {});
-				break;
 			}
 
 			// P7：用户停止（ask 卡上点了停止）——本拍收束，不再续轮
@@ -1935,7 +1928,7 @@ export class StageEngine {
 			// draft_append 时出现「屏上看到了、刷新后正文没了」或只保留上一段的情况。
 			// 格式块不在这里收，仍由 mergeFinalText 保留。
 			const finalCalls = (final.content ?? []).filter((c) => c.type === "toolCall");
-			if (finalCalls.length === 0 && o.ws.draft.trim() && !singleReplyDone) {
+			if (finalCalls.length === 0 && o.ws.draft.trim()) {
 				const body = continuationBody(roundText);
 				const existingDraft = o.ws.draft.trim();
 				// OpenAI 兼容中转站有时会在封笔后的普通文本通道重述整份现稿。

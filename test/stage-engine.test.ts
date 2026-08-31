@@ -29,6 +29,7 @@ const makeEngine = (
 	sm: InstanceType<typeof SessionManager>,
 	model: unknown,
 	events: ConstructorParameters<typeof StageEngine>[0]["events"] = {},
+	overrides: Partial<ConstructorParameters<typeof StageEngine>[0]> = {},
 ) =>
 	new StageEngine({
 		cwd,
@@ -37,6 +38,7 @@ const makeEngine = (
 		getAuth: async () => ({}),
 		streamFn: streamSimple as unknown as StageStreamFn,
 		events,
+		...overrides,
 	});
 
 /**
@@ -1407,6 +1409,60 @@ test("谢幕注入（§4.B）：卡定义状态栏 → 记账轮后注入合约�
 		assert.ok(textSegs.length >= 2, "稿段 + 尾巴段");
 		const tail = textSegs[textSegs.length - 1];
 		assert.ok((tail.text ?? "").includes("StatusBlock") && tail.draft !== true, "状态栏收成独立尾巴末段");
+	} finally {
+		reg.unregister();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+test("singleReply：首段封笔后仍必须走记账与谢幕，不能截断状态栏", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "liyuan-eng-"));
+	writeFileSync(
+		join(cwd, "card.json"),
+		JSON.stringify({ data: { name: "云澜", first_mes: "你来了。\n<StatusBlock>\n地点：山门\n</StatusBlock>" } }),
+	);
+	writeFileSync(join(cwd, "liyuan.config.json"), JSON.stringify({ card: "card.json", userName: "沈舟" }));
+	mkdirSync(join(cwd, ".liyuan"), { recursive: true });
+	const sm = SessionManager.create(cwd, join(cwd, "sessions"));
+	const reg = registerFauxProvider({ models: [{ id: "faux-rp" }] });
+	try {
+		let curtainSeen = false;
+		reg.setResponses([
+			fauxAssistantMessage([fauxToolCall("draft_write", { content: "她抬眼看向门外，压低声音说明了刚才发生的事。" })], { stopReason: "toolUse" }),
+			(ctx: { messages?: unknown[] }) => {
+				const messages = JSON.stringify(ctx.messages ?? []);
+				if (messages.includes("【谢幕】")) {
+					curtainSeen = messages.includes("【记账】");
+					return fauxAssistantMessage("<StatusBlock>\n地点：屋内\n</StatusBlock>");
+				}
+				return fauxAssistantMessage("");
+			},
+			(ctx: { messages?: unknown[] }) => {
+				const messages = JSON.stringify(ctx.messages ?? []);
+				if (messages.includes("【谢幕】")) {
+					curtainSeen = messages.includes("【记账】");
+					return fauxAssistantMessage("<StatusBlock>\n地点：屋内\n</StatusBlock>");
+				}
+				return fauxAssistantMessage("");
+			},
+			(ctx: { messages?: unknown[] }) => {
+				const messages = JSON.stringify(ctx.messages ?? []);
+				if (messages.includes("【谢幕】")) {
+					curtainSeen = messages.includes("【记账】");
+					return fauxAssistantMessage("<StatusBlock>\n地点：屋内\n</StatusBlock>");
+				}
+				return fauxAssistantMessage("");
+			},
+			fauxScribeEmpty(),
+		] as never);
+		const engine = makeEngine(cwd, sm, reg.getModel("faux-rp"), {}, { singleReply: true });
+		await engine.performTurn("我推门进来。\n");
+		const branch = sm.getBranch() as Array<{ type: string; message?: { role?: string; content?: Array<{ type?: string; text?: string }> } }>;
+		const assistant = [...branch].reverse().find((e) => e.type === "message" && e.message?.role === "assistant");
+		const text = (assistant?.message?.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("");
+		assert.equal(curtainSeen, true, "singleReply 不能跳过谢幕注入");
+		assert.match(text, /她抬眼看向门外/);
+		assert.match(text, /StatusBlock/);
 	} finally {
 		reg.unregister();
 		rmSync(cwd, { recursive: true, force: true });
