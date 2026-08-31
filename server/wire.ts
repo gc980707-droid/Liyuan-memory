@@ -17,6 +17,7 @@ import { isBackstageText } from "../src/stance.ts";
 import { applyDraftOps, type DraftMsgLike } from "../src/draft.ts";
 import type { RpPanel } from "../src/panels.ts";
 import type { WorldState } from "../src/types.ts";
+import { applyRewriteProtected, type RewriteProcessor } from "../src/rewrite-rules.ts";
 
 export type { DisplaySkin };
 
@@ -457,7 +458,7 @@ function hasToolCall(content: unknown): boolean {
  * opts.backstage：该轮用户以 // 开头（幕后轮），助手回复走 backstage 通道
  * （PLAN-PHASE3 §6.1 显示通道——排版区隔，非上下文切割）。
  */
-export type ToWireOpts = { backstage?: boolean; skin?: DisplaySkin | null; showStatusBar?: boolean; depth?: number };
+export type ToWireOpts = { backstage?: boolean; skin?: DisplaySkin | null; showStatusBar?: boolean; depth?: number; rewriteProcessors?: RewriteProcessor[] };
 
 const STATUS_PLACEHOLDER_RE = /StatusPlaceHolderImpl/i;
 
@@ -496,7 +497,8 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 	const showStatusBar = opts?.showStatusBar === true;
 	const historical = opts?.showStatusBar === false;
 	const rawText = textOf(msg.content).trim();
-	const text = hideHistoricalSkinBlocks(projectStatusPlaceholder(rawText, skin, showStatusBar), skin, !historical).trim();
+	const rewritten = opts?.rewriteProcessors?.length ? applyRewriteProtected(rawText, opts.rewriteProcessors) : rawText;
+	const text = hideHistoricalSkinBlocks(projectStatusPlaceholder(rewritten, skin, showStatusBar), skin, !historical).trim();
 
 	if (msg.role === "user") {
 		if (!text) return null;
@@ -560,7 +562,8 @@ export function toWireMsg(m: unknown, names: WireNames, opts?: ToWireOpts): Wire
 						return source.map((seg, index) => {
 							if (seg.kind !== "text") return seg;
 							const show = showStatusBar && index === lastText;
-							const p = hideHistoricalSkinBlocks(projectStatusPlaceholder(seg.text, tlSkin, show), tlSkin, show || !historical);
+							const segmentText = opts?.rewriteProcessors?.length ? applyRewriteProtected(seg.text, opts.rewriteProcessors) : seg.text;
+							const p = hideHistoricalSkinBlocks(projectStatusPlaceholder(segmentText, tlSkin, show), tlSkin, show || !historical);
 							return { ...seg, text: prepareDisplayText(p, tlSkin, opts?.depth ?? 0) };
 						});
 					})()
@@ -683,7 +686,7 @@ export function foldTurnNarratives(msgs: WireMsg[]): WireMsg[] {
 export function toWireHistory(
 	messages: unknown[],
 	names: WireNames,
-	opts?: { skin?: DisplaySkin | null },
+	opts?: { skin?: DisplaySkin | null; rewriteProcessors?: RewriteProcessor[] },
 ): WireMsg[] {
 	const out: WireMsg[] = [];
 	let backstage = false;
@@ -714,7 +717,7 @@ export function toWireHistory(
 		if (role === "user") {
 			backstage = isBackstageText(textOf((m as MsgLike).content));
 		}
-		const w = toWireMsg(m, names, { backstage, skin, showStatusBar: i === latestStatusIndex, depth: patched.length - 1 - i });
+		const w = toWireMsg(m, names, { backstage, skin, rewriteProcessors: opts?.rewriteProcessors, showStatusBar: i === latestStatusIndex, depth: patched.length - 1 - i });
 		if (w) out.push(w);
 	}
 	return foldTurnNarratives(out);

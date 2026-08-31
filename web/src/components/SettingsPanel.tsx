@@ -789,6 +789,7 @@ function BackupSection({ toast }: { toast: (level: "info" | "warning" | "error",
 
 export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "error", text: string) => void }) {
 	const { data, error, loading, reload } = usePanelData(() => apiGet<{ config: RpConfigView }>("/api/config"), { cacheKey: "/api/config" });
+	const rewriteData = usePanelData(() => apiGet<{ config: { enabled?: boolean; scope?: string; rulesFile?: string }; files: Array<{ path: string; name: string }> }>("/api/rewrite-rules"), { cacheKey: "/api/rewrite-rules" });
 	const actorData = usePanelData(() => apiGet<{ actors: Record<string, unknown> }>("/api/actor-profiles"), { cacheKey: "/api/actor-profiles" });
 	const { busy, run } = useAction(toast);
 
@@ -797,6 +798,9 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 	const [compactEvery, setCompactEvery] = useState(30);
 	const [backendControl, setBackendControl] = useState(true);
 	const [askMode, setAskMode] = useState(false);
+	const [rewriteEnabled, setRewriteEnabled] = useState(false);
+	const [rewriteFile, setRewriteFile] = useState("");
+	const [rewriteScope, setRewriteScope] = useState<"visual" | "visual+history">("visual");
 	const [dirty, setDirty] = useState(false);
 	const [dark, setDark] = useState(() => getTheme() === "dark");
 	const [actorDrafts, setActorDrafts] = useState<Record<string, ActorDraft>>({});
@@ -811,6 +815,13 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 			setDirty(false);
 		}
 	}, [data]);
+	useEffect(() => {
+		if (rewriteData.data) {
+			setRewriteEnabled(rewriteData.data.config.enabled === true);
+			setRewriteFile(rewriteData.data.config.rulesFile ?? rewriteData.data.files[0]?.path ?? "");
+			setRewriteScope(rewriteData.data.config.scope === "visual+history" ? "visual+history" : "visual");
+		}
+	}, [rewriteData.data]);
 	useEffect(() => {
 		if (actorData.data) setActorDrafts(normalizeActorDrafts(actorData.data.actors));
 	}, [actorData.data]);
@@ -847,7 +858,9 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 				backendControl,
 				creationMode: askMode ? "ask" : "silent",
 			});
+			await apiPut("/api/rewrite-rules", { enabled: rewriteEnabled, rulesFile: rewriteFile || undefined, scope: rewriteScope });
 			reload();
+			rewriteData.reload();
 		}, "已保存并重载会话");
 
 	return (
@@ -940,6 +953,19 @@ export function SettingsPanel({ toast }: { toast: (level: "info" | "warning" | "
 						<div className="field-hint">
 							开=询问档：剧情相关（含「我该怎么办」）一律戏内，用选择卡共创；关=静默档自行推进。戏外只办系统事，不处理剧情。
 						</div>
+					</section>
+
+					<section className="sp-section">
+						<h4>杀八股规则</h4>
+						<div className="toggle-row">
+							<span>启用规则替换（默认仅视觉层）</span>
+							<Toggle checked={rewriteEnabled} onChange={(v) => { setRewriteEnabled(v); touch(); }} />
+						</div>
+						{rewriteData.data?.files.length ? <select value={rewriteFile} onChange={(e) => { setRewriteFile(e.target.value); touch(); }}>
+							{rewriteData.data.files.map((f) => <option key={f.path} value={f.path}>{f.name}</option>)}
+						</select> : <div className="field-hint">请通过规则管理接口导入 Veridis 规则集。</div>}
+						<div className="field-hint">视觉层只改显示，不改变历史原文；开启历史通道会影响送模内容，请谨慎使用。</div>
+						<label className="field-hint"><input type="checkbox" checked={rewriteScope === "visual+history"} onChange={(e) => { setRewriteScope(e.target.checked ? "visual+history" : "visual"); touch(); }} /> 同时改写送模历史（显式 opt-in）</label>
 					</section>
 
 					<div className="sticky-save">

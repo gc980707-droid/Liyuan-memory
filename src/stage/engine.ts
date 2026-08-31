@@ -87,6 +87,7 @@ import {
 } from "./compact.ts";
 import { runScribeTurn, STATE_ENTRY_TYPE } from "./scribe-run.ts";
 import { buildSceneAgentPrompt, parseSceneAgentResult } from "./scene-agent.ts";
+import { rewriteProcessorsForConfig } from "../rewrite-rules.ts";
 import { applyWorldPatchToMvu, mvuTimePatchIfMissing, projectMvuToWorldState } from "../mvu.ts";
 import {
 	MAX_ROUNDS,
@@ -732,7 +733,8 @@ export class StageEngine {
 		// 上下文 = f(分支)
 		const branch = sm.getBranch() as BranchEntryLike[];
 		let state = stateFromBranch(branch);
-		const { history, lastUserText, lastNarrativeText, summary } = rebuildHistory(branch);
+		const historyRewrite = rewriteProcessorsForConfig(cwd, config.rewrite, "history");
+		const { history, lastUserText, lastNarrativeText, summary } = rebuildHistory(branch, historyRewrite.processors);
 		if (!history.some((m) => m.role === "user")) {
 			ev.onNotify?.("error", "没有可开演的用户输入。");
 			return { aborted: false, error: "no-user-input" };

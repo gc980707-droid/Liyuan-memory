@@ -94,7 +94,8 @@ import {
 	memoryRecallForTurn,
 	onNarrativeTurnEnd,
 } from "../src/memory/index.ts";
-import { handleApiRequest, loadCardFrontSnapshot, type CurrentModelInfo, type RestHost } from "./rest.ts";
+import { handleApiRequest, loadCardFrontSnapshot, loadConfig, type CurrentModelInfo, type RestHost } from "./rest.ts";
+import { rewriteProcessorsForConfig } from "../src/rewrite-rules.ts";
 
 // 用户级 agent 目录 → ~/.liyuan/agent（须在 getAgentDir / 建会话之前）
 // 并合并 fork 改名后遗留的 ~/.pi/agent（会话/配置，不覆盖更新的新树）
@@ -558,7 +559,7 @@ const helloFrame = (): ServerFrame => {
 		sessionId: session.sessionId,
 		charName: names.charName,
 		userName: names.userName,
-		messages: annotateSwipes(toWireHistory(branchMessages(), names, { skin })),
+		messages: annotateSwipes(toWireHistory(branchMessages(), names, { skin, rewriteProcessors: rewriteProcessorsForConfig(cwd, loadConfig(cwd).rewrite, "visual").processors })),
 		state: currentState(),
 		stats: safeStats(),
 		panels: currentPanels(),
@@ -959,7 +960,7 @@ const bindSession = async () => {
 			}
 			case "message_end": {
 				// 新定稿是当前最新剧情楼层：即时帧也要挂作者状态栏；旧楼层会在后续 resync 中移除。
-				const wire = toWireMsg(event.message, names, { skin: currentDisplaySkin(), showStatusBar: true });
+				const wire = toWireMsg(event.message, names, { skin: currentDisplaySkin(), showStatusBar: true, rewriteProcessors: rewriteProcessorsForConfig(cwd, loadConfig(cwd).rewrite, "visual").processors });
 				// user 消息在 prompt 受理时已回显，这里跳过防重
 				if (wire && wire.channel !== "user") {
 					broadcast({ type: "message", message: wire });

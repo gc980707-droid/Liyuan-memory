@@ -78,7 +78,8 @@ import {
 	updateMemoryConfig,
 	updateStoreConfig,
 } from "../src/memory/index.ts";
-import { resolveConfigPath } from "../src/paths.ts";
+import { DIRS, resolveConfigPath } from "../src/paths.ts";
+import { normalizeRewriteRules, type RewriteConfig } from "../src/rewrite-rules.ts";
 import { loadActorProfileOverrides, saveActorProfileOverrides, type ActorProfileOverrides } from "../src/actor-profiles.ts";
 import { ensurePresetSkills, presetSkillDir, presetSkillSlug } from "../src/preset-skill.ts";
 import { ensureSortResult, loadSortResult, sortFingerprint, type SortDeps } from "../src/preset-sort.ts";
@@ -395,6 +396,7 @@ const CONFIG_EDITABLE = new Set([
 	"backendControl",
 	"creationMode",
 	"assistantModel",
+	"rewrite",
 ]);
 
 export function applyConfigPatch(config: RpConfig, patch: Record<string, unknown>): RpConfig {
@@ -417,6 +419,19 @@ export function applyConfigPatch(config: RpConfig, patch: Record<string, unknown
 	next.greeting = next.greeting === true;
 	// 决策门禁档位：只认 ask / silent；非法值删除（扩展缺省按 silent）
 	if (next.creationMode !== "ask" && next.creationMode !== "silent") delete next.creationMode;
+	if (next.rewrite !== undefined) {
+		const rw = next.rewrite as Partial<RewriteConfig> | null;
+		if (!rw || typeof rw !== "object") delete next.rewrite;
+		else {
+			const rules = rw.rules === undefined ? undefined : normalizeRewriteRules(rw.rules).rules;
+			next.rewrite = {
+				enabled: rw.enabled === true,
+				...(typeof rw.rulesFile === "string" && rw.rulesFile.trim() ? { rulesFile: rw.rulesFile.trim() } : {}),
+				...(rules ? { rules } : {}),
+				scope: rw.scope === "visual+history" ? "visual+history" : "visual",
+			};
+		}
+	}
 	// 助手模型：只认 { provider, id } 形；非法值删除（缺省=跟随剧情模型）
 	if (next.assistantModel !== undefined) {
 		const am = next.assistantModel as { provider?: unknown; id?: unknown } | null;
@@ -867,6 +882,18 @@ function listPresetFiles(cwd: string): Array<{ file: string; name: string }> {
 // ---------- 世界书文件管理（PLAN-PANELS-V2 §2.3：选书/导入/删除） ----------
 
 const LOREBOOKS_DIR = "assets/lorebooks";
+const REWRITE_DIR = DIRS.rewrite;
+
+function listRewriteFiles(cwd: string): Array<{ path: string; name: string; groupCount: number; subRuleCount: number }> {
+	const root = join(cwd, REWRITE_DIR);
+	if (!existsSync(root)) return [];
+	return readdirSync(root, { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith(".json")).flatMap((e) => {
+		try {
+			const n = normalizeRewriteRules(JSON.parse(readFileSync(join(root, e.name), "utf8"))).rules;
+			return [{ path: `${REWRITE_DIR}/${e.name}`, name: e.name.replace(/\.json$/i, ""), groupCount: n.length, subRuleCount: n.reduce((a, g) => a + g.subRules.length, 0) }];
+		} catch { return []; }
+	});
+}
 
 /** 世界书扫描目录：assets/lorebooks + 各挂载书所在目录（用户素材常在项目外） */
 function lorebookDirSpecs(cwd: string, config: RpConfig): Array<{ abs: string; relBase: string }> {
@@ -3070,6 +3097,44 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
 			}
 
 			// ---- 配置（用户角色 / 设置） ----
+			case "GET /api/rewrite-rules": {
+				const config = loadConfig(host.cwd);
+				sendJson(res, 200, { config: config.rewrite ?? { enabled: false, scope: "visual" }, files: listRewriteFiles(host.cwd) });
+				return true;
+			}
+			case "POST /api/rewrite-rules/import": {
+				if (refuseWhileStreaming()) return true;
+				const body = JSON.parse(await readBody(req)) as { name?: string; rules?: unknown };
+				const name = (body.name ?? query.get("name") ?? "").trim().replace(/\.json$/i, "");
+				if (!name) throw new Error("缺少规则集名称");
+				const normalized = normalizeRewriteRules(body.rules ?? body);
+				if (!normalized.rules.length) throw new Error("不是有效规则集");
+				const safe = `${name.replace(/[\\/:*?"<>|]/g, "-")}.json`;
+				mkdirSync(join(host.cwd, REWRITE_DIR), { recursive: true });
+				const rel = `${REWRITE_DIR}/${safe}`;
+				const abs = join(host.cwd, rel);
+				if (existsSync(abs)) throw new Error(`同名规则集已存在：${safe}`);
+				writeJsonWithBackup(abs, normalized.rules);
+				const config = loadConfig(host.cwd);
+				const next = applyConfigPatch(config, { rewrite: { enabled: false, scope: "visual", rulesFile: rel } });
+				writeJsonWithBackup(configPath(host.cwd), next);
+				host.notify("info", `规则集「${name}」已导入（${normalized.rules.length} 组）`);
+				sendJson(res, 200, { ok: true, path: rel, warnings: normalized.warnings, groupCount: normalized.rules.length });
+				return true;
+			}
+			case "PUT /api/rewrite-rules": {
+				if (refuseWhileStreaming()) return true;
+				const body = JSON.parse(await readBody(req)) as { enabled?: boolean; scope?: string; rulesFile?: string };
+				const config = loadConfig(host.cwd);
+				const file = typeof body.rulesFile === "string" ? body.rulesFile.replace(/\\/g, "/") : config.rewrite?.rulesFile;
+				if (file && (!file.startsWith(`${REWRITE_DIR}/`) || file.includes("..") || !file.endsWith(".json"))) throw new Error("规则文件必须位于 .liyuan-rewrite/ 下");
+				const rewrite: RewriteConfig = { enabled: body.enabled === true, scope: body.scope === "visual+history" ? "visual+history" : "visual", ...(file ? { rulesFile: file } : {}) };
+				const next = applyConfigPatch(config, { rewrite });
+				writeJsonWithBackup(configPath(host.cwd), next);
+				await host.softRefreshConfig();
+				sendJson(res, 200, { ok: true, config: next.rewrite });
+				return true;
+			}
 			case "GET /api/config": {
 				sendJson(res, 200, { config: loadConfig(host.cwd) });
 				return true;
